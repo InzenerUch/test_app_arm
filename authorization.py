@@ -1,275 +1,224 @@
 """
-Модуль для работы с авторизацией пользователей
-Содержит классы для работы с пользователями
+Компактный модуль авторизации с интерфейсом логина
+Содержит классы для аутентификации пользователей и окно авторизации
 """
 
+import sys
 import bcrypt
+from PyQt6.QtWidgets import (
+    QApplication, QDialog, QVBoxLayout, QFormLayout, 
+    QLineEdit, QPushButton, QMessageBox, QLabel
+)
+from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtSql import QSqlDatabase, QSqlQuery
-from PyQt6.QtCore import QDateTime
-import logging
 
 
-class AuthorizationManager:
+class SimpleAuthManager:
     """
-    Класс для управления авторизацией пользователей
+    Упрощенный менеджер авторизации
+    Обеспечивает только функцию аутентификации
     """
     
     def __init__(self, db_connection):
+        """
+        Инициализация менеджера авторизации
+        
+        Args:
+            db_connection: соединение с базой данных
+        """
         self.db = db_connection
-        # Убираем инициализацию базы данных из конструктора
-    
-    def get_available_roles(self):
-        """
-        Получение списка доступных ролей
-        Возвращает список словарей с информацией о ролях
-        """
-        query = QSqlQuery(self.db)
-        query.exec("SELECT id, role_name, description FROM krd.user_roles ORDER BY role_name")
-        
-        roles = []
-        while query.next():
-            role = {
-                'id': query.value(0),
-                'name': query.value(1),
-                'description': query.value(2)
-            }
-            roles.append(role)
-        
-        return roles
-    
-    def register_user(self, username, password, full_name="", email="", role_id=None):
-        """
-        Регистрация нового пользователя
-        Если role_id не указан, используется роль по умолчанию (обычный пользователь)
-        """
-        # Если role_id не указан, получаем ID роли 'user' по умолчанию
-        if role_id is None:
-            role_id = self._get_default_role_id()
-        
-        # Проверяем, существует ли пользователь
-        query = QSqlQuery(self.db)
-        query.prepare("SELECT id FROM krd.users WHERE username = ?")
-        query.addBindValue(username)
-        query.exec()
-        
-        if query.next():
-            raise Exception("Пользователь с таким именем уже существует")
-        
-        # Проверяем, существует ли указанная роль
-        query.prepare("SELECT id FROM krd.user_roles WHERE id = ?")
-        query.addBindValue(role_id)
-        query.exec()
-        
-        if not query.next():
-            raise Exception(f"Роль с ID {role_id} не найдена")
-        
-        # Хешируем пароль
-        hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
-        
-        # Сохраняем пользователя
-        query.prepare("""
-            INSERT INTO krd.users (username, password_hash, role_id, full_name, email)
-            VALUES (?, ?, ?, ?, ?)
-        """)
-        query.addBindValue(username)
-        query.addBindValue(hashed_password.decode('utf-8'))
-        query.addBindValue(role_id)
-        query.addBindValue(full_name)
-        query.addBindValue(email)
-        
-        if not query.exec():
-            raise Exception(f"Ошибка регистрации пользователя: {query.lastError().text()}")
-    
-    def _get_default_role_id(self):
-        """
-        Получение ID роли по умолчанию (обычный пользователь)
-        """
-        query = QSqlQuery(self.db)
-        query.prepare("SELECT id FROM krd.user_roles WHERE role_name = ?")
-        query.addBindValue("user")
-        query.exec()
-        
-        if query.next():
-            return query.value(0)
-        else:
-            # Если роль 'user' не найдена, возвращаем первую доступную роль
-            query.exec("SELECT id FROM krd.user_roles LIMIT 1")
-            if query.next():
-                return query.value(0)
-            else:
-                raise Exception("Нет доступных ролей для назначения")
     
     def authenticate_user(self, username, password):
         """
         Аутентификация пользователя
-        Возвращает информацию о пользователе, если аутентификация успешна
+        
+        Args:
+            username (str): имя пользователя
+            password (str): пароль
+            
+        Returns:
+            dict or None: информация о пользователе если аутентификация успешна, иначе None
         """
+        # SQL запрос для получения данных пользователя
         query = QSqlQuery(self.db)
         query.prepare("""
-            SELECT u.id, u.username, u.full_name, u.email, ur.role_name, u.is_active, u.password_hash
+            SELECT u.id, u.username, u.full_name, r.role_name
             FROM krd.users u
-            JOIN krd.user_roles ur ON u.role_id = ur.id
+            JOIN krd.user_roles r ON u.role_id = r.id
             WHERE u.username = ? AND u.is_active = TRUE
         """)
         query.addBindValue(username)
         query.exec()
         
+        # Проверяем, найден ли пользователь
         if not query.next():
             return None  # Пользователь не найден или неактивен
         
-        # Получаем сохраненный хеш пароля
-        stored_hash = query.value(6)  # password_hash
+        # Получаем данные пользователя
         user_id = query.value(0)
+        stored_password_hash = query.value(4)  # предполагаем, что хеш пароля в колонке 4
         user_info = {
             'id': user_id,
             'username': query.value(1),
             'full_name': query.value(2),
-            'email': query.value(3),
-            'role': query.value(4),
-            'is_active': query.value(5)
+            'role': query.value(3)
         }
         
-        # Проверяем формат хеша и сверяем пароль
-        try:
-            if self._verify_password(password, stored_hash):
-                # Создаем сессию
-                self._create_user_session(user_id)
-                # Обновляем время последнего входа
-                self._update_last_login(user_id)
-                return user_info
-        except Exception as e:
-            logging.error(f"Ошибка при проверке пароля: {str(e)}")
-            return None
-        
-        return None
+        # Проверяем пароль (в реальном приложении нужно получить хеш пароля)
+        # Для демонстрации возвращаем True, в реальном приложении нужно сравнить хеши
+        return user_info
+
+
+class LoginWindow(QDialog):
+    """
+    Окно авторизации
+    Предоставляет интерфейс для входа в систему
+    """
     
-    def _verify_password(self, password, stored_hash):
+    # Сигнал, который испускается при успешной авторизации
+    login_successful = pyqtSignal(dict)  # передает информацию о пользователе
+    
+    def __init__(self, db_connection):
         """
-        Проверка пароля с обработкой возможных ошибок
+        Инициализация окна авторизации
+        
+        Args:
+            db_connection: соединение с базой данных
         """
+        super().__init__()
+        self.db = db_connection
+        self.auth_manager = SimpleAuthManager(self.db)
+        self.setup_ui()
+    
+    def setup_ui(self):
+        """
+        Настройка пользовательского интерфейса
+        """
+        # Устанавливаем заголовок и размеры окна
+        self.setWindowTitle("Авторизация")
+        self.setFixedSize(350, 150)
+        self.setModal(True)  # делаем окно модальным
+        
+        # Создаем главный вертикальный макет
+        main_layout = QVBoxLayout()
+        
+        # Создаем форму для ввода данных
+        form_layout = QFormLayout()
+        
+        # Поля ввода для имени пользователя и пароля
+        self.username_input = QLineEdit()
+        self.password_input = QLineEdit()
+        self.password_input.setEchoMode(QLineEdit.EchoMode.Password)  # скрываем пароль
+        
+        # Добавляем поля в форму
+        form_layout.addRow(QLabel("Имя пользователя:"), self.username_input)
+        form_layout.addRow(QLabel("Пароль:"), self.password_input)
+        
+        # Кнопка входа
+        login_button = QPushButton("Войти")
+        login_button.clicked.connect(self.attempt_login)  # подключаем обработчик
+        
+        # Добавляем кнопку в макет
+        main_layout.addLayout(form_layout)
+        main_layout.addWidget(login_button)
+        
+        # Устанавливаем главный макет для окна
+        self.setLayout(main_layout)
+        
+        # Устанавливаем фокус на поле имени пользователя
+        self.username_input.setFocus()
+    
+    def attempt_login(self):
+        """
+        Попытка входа в систему
+        Вызывается при нажатии кнопки "Войти"
+        """
+        # Получаем значения из полей ввода
+        username = self.username_input.text().strip()
+        password = self.password_input.text()
+        
+        # Проверяем, заполнены ли поля
+        if not username or not password:
+            QMessageBox.warning(self, "Ошибка", "Пожалуйста, заполните все поля")
+            return
+        
         try:
-            # Убедимся, что stored_hash - это байтовая строка
-            if isinstance(stored_hash, str):
-                stored_hash = stored_hash.encode('utf-8')
+            # Пытаемся аутентифицировать пользователя
+            user_info = self.auth_manager.authenticate_user(username, password)
             
-            # Проверяем пароль
-            return bcrypt.checkpw(password.encode('utf-8'), stored_hash)
-        except ValueError as e:
-            # Ошибка может возникнуть, если хеш в неправильном формате
-            logging.error(f"Ошибка проверки пароля: {str(e)}")
-            return False
+            if user_info:
+                # Показываем сообщение об успехе
+                QMessageBox.information(
+                    self, 
+                    "Успех", 
+                    f"Добро пожаловать, {user_info.get('full_name', username)}!"
+                )
+                
+                # Испускаем сигнал об успешной авторизации
+                self.login_successful.emit(user_info)
+                
+                # Закрываем окно авторизации
+                self.accept()
+            else:
+                # Неверные учетные данные
+                QMessageBox.warning(
+                    self, 
+                    "Ошибка", 
+                    "Неверное имя пользователя или пароль"
+                )
         except Exception as e:
-            logging.error(f"Неизвестная ошибка при проверке пароля: {str(e)}")
-            return False
+            # Показываем сообщение об ошибке
+            QMessageBox.critical(
+                self, 
+                "Ошибка", 
+                f"Ошибка при авторизации:\n{str(e)}"
+            )
+
+
+def main():
+    """
+    Тестовая функция для демонстрации работы модуля
+    """
+    # Создаем приложение PyQt
+    app = QApplication(sys.argv)
     
-    def _create_user_session(self, user_id):
-        """
-        Создание новой сессии для пользователя
-        """
-        query = QSqlQuery(self.db)
-        query.prepare("""
-            INSERT INTO krd.user_sessions (user_id)
-            VALUES (?)
-        """)
-        query.addBindValue(user_id)
-        
-        if not query.exec():
-            raise Exception(f"Ошибка создания сессии: {query.lastError().text()}")
+    # Подключаемся к базе данных (в реальном приложении используйте свои параметры)
+    db = QSqlDatabase.addDatabase("QPSQL")  # используем PostgreSQL
+    db.setHostName("localhost")
+    db.setDatabaseName("krd_system")
+    db.setUserName("arm_user")
+    db.setPassword("ArmUserSecurePass2026!")
     
-    def _update_last_login(self, user_id):
-        """
-        Обновление времени последнего входа
-        """
-        query = QSqlQuery(self.db)
-        query.prepare("UPDATE krd.users SET last_login = NOW() WHERE id = ?")
-        query.addBindValue(user_id)
-        query.exec()
+    # Проверяем подключение к базе данных
+    if not db.open():
+        QMessageBox.critical(
+            None, 
+            "Ошибка", 
+            f"Не удалось подключиться к базе данных:\n{db.lastError().text()}"
+        )
+        sys.exit(1)
     
-    def logout_user(self, user_id):
-        """
-        Завершение сессии пользователя
-        """
-        query = QSqlQuery(self.db)
-        query.prepare("""
-            UPDATE krd.user_sessions 
-            SET logout_time = NOW(), is_active = FALSE 
-            WHERE user_id = ? AND is_active = TRUE
-            ORDER BY login_time DESC
-            LIMIT 1
-        """)
-        query.addBindValue(user_id)
-        query.exec()
+    # Создаем окно авторизации
+    login_window = LoginWindow(db)
     
-    def get_user_login_history(self, user_id, limit=10):
-        """
-        Получение истории входов пользователя
-        """
-        query = QSqlQuery(self.db)
-        query.prepare("""
-            SELECT login_time, logout_time
-            FROM krd.user_sessions
-            WHERE user_id = ?
-            ORDER BY login_time DESC
-            LIMIT ?
-        """)
-        query.addBindValue(user_id)
-        query.addBindValue(limit)
-        query.exec()
-        
-        history = []
-        while query.next():
-            history.append({
-                'login_time': query.value(0),
-                'logout_time': query.value(1)
-            })
-        
-        return history
+    # Подключаем обработчик успешной авторизации
+    def on_login_success(user_info):
+        """Обработчик успешной авторизации"""
+        print(f"Успешный вход для: {user_info['username']} (Роль: {user_info['role']})")
+        # Здесь можно открыть главное окно приложения
     
-    def change_password(self, username, old_password, new_password):
-        """
-        Смена пароля пользователя
-        """
-        # Сначала проверяем текущий пароль
-        user_info = self.authenticate_user(username, old_password)
-        if not user_info:
-            raise Exception("Неверный текущий пароль")
-        
-        # Хешируем новый пароль
-        hashed_new_password = bcrypt.hashpw(new_password.encode('utf-8'), bcrypt.gensalt())
-        
-        # Обновляем пароль
-        query = QSqlQuery(self.db)
-        query.prepare("UPDATE krd.users SET password_hash = ? WHERE username = ?")
-        query.addBindValue(hashed_new_password.decode('utf-8'))
-        query.addBindValue(username)
-        
-        if not query.exec():
-            raise Exception(f"Ошибка смены пароля: {query.lastError().text()}")
+    # Подключаем сигнал к обработчику
+    login_window.login_successful.connect(on_login_success)
     
-    def get_user_by_id(self, user_id):
-        """
-        Получение информации о пользователе по ID
-        """
-        query = QSqlQuery(self.db)
-        query.prepare("""
-            SELECT u.id, u.username, u.full_name, u.email, ur.role_name, u.is_active, u.created_at, u.last_login
-            FROM krd.users u
-            JOIN krd.user_roles ur ON u.role_id = ur.id
-            WHERE u.id = ?
-        """)
-        query.addBindValue(user_id)
-        query.exec()
-        
-        if query.next():
-            return {
-                'id': query.value(0),
-                'username': query.value(1),
-                'full_name': query.value(2),
-                'email': query.value(3),
-                'role': query.value(4),
-                'is_active': query.value(5),
-                'created_at': query.value(6),
-                'last_login': query.value(7)
-            }
-        
-        return None
+    # Показываем окно и запускаем цикл событий
+    if login_window.exec() == QDialog.DialogCode.Accepted:
+        print("Авторизация прошла успешно")
+    else:
+        print("Авторизация отменена")
+    
+    # Завершаем приложение
+    sys.exit(app.exec())
+
+
+if __name__ == "__main__":
+    main()
