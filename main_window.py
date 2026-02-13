@@ -168,13 +168,13 @@ class MainWindow(QMainWindow):
         layout = QVBoxLayout()
         #   Создаем модель данных для таблицы krd 
         self.table_model_krd = QSqlQueryModel()
-        self.query_table_krd = """SELECT 
+        self.query_table_krd = """SELECT
             k.id AS "ID",
             CONCAT('КРД-', k.id) AS "Номер КРД",  -- Генерируем номер КРД на основе ID
-            s.surname AS "Фамилия",
-            s.name AS "Имя", 
-            s.patronymic AS "Отчество",
-            st.name AS "Статус",
+            COALESCE(s.surname, '') AS "Фамилия",
+            COALESCE(s.name, '') AS "Имя",
+            COALESCE(s.patronymic, '') AS "Отчество",
+            COALESCE(st.name, 'Неизвестен') AS "Статус",
             k.last_service_place_id AS "ID последнего места службы"
         FROM krd.krd k
         LEFT JOIN krd.social_data s ON k.id = s.krd_id
