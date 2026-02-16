@@ -207,6 +207,11 @@ class KrdDetailsWindow(QDialog):
         migration_tab = MigrationRequestTab(self.krd_id, self.db)
         tabs.addTab(migration_tab, "Запрос в миграцию")
         
+        # Вкладка с документами и шаблонами
+        from document_generator_tab import DocumentGeneratorTab
+        documents_tab = DocumentGeneratorTab(self.krd_id,self.db)
+        tabs.addTab(documents_tab, "Формирование запросов")
+        
         # Добавляем вкладки в основной макет
         main_layout.addWidget(tabs)
         
