@@ -12,23 +12,28 @@ from PyQt6.QtCore import Qt, QDate
 from PyQt6.QtSql import QSqlTableModel, QSqlRecord, QSqlQuery
 from PyQt6.QtGui import QIntValidator
 
+# Добавляем импорт логгера аудита
+from audit_logger import AuditLogger
+
 
 class KrdDetailsWindow(QDialog):
     """
     Окно просмотра и редактирования данных КРД
     """
     
-    def __init__(self, krd_id, db_connection):
+    def __init__(self, krd_id, db_connection, audit_logger=None):
         """
         Инициализация окна просмотра КРД
         
         Args:
             krd_id (int): ID КРД для редактирования
             db_connection: соединение с базой данных
+            audit_logger (AuditLogger, optional): логгер аудита
         """
         super().__init__()
         self.krd_id = krd_id
         self.db = db_connection
+        self.audit_logger = audit_logger  # Сохраняем логгер аудита
         
         self.setWindowTitle(f"Данные КРД #{krd_id}")
         self.setModal(True)
@@ -48,6 +53,9 @@ class KrdDetailsWindow(QDialog):
         # Получаем запись
         self.record = self.model.record(0)
         
+        # Сохраняем старые значения для логирования изменений
+        self.old_data = self._get_current_data()
+        
         self.init_ui()
         self.setup_data_mapping()
     
@@ -60,6 +68,64 @@ class KrdDetailsWindow(QDialog):
         record = self.model.record(row)
         record.setValue("krd_id", self.krd_id)
         self.model.setRecord(row, record)
+    
+    def _get_current_data(self):
+        """
+        Получение текущих данных для логирования
+        
+        Returns:
+            dict: словарь с текущими значениями полей
+        """
+        data = {}
+        
+        # Основные данные
+        data['surname'] = self.record.value("surname") if self.record else ""
+        data['name'] = self.record.value("name") if self.record else ""
+        data['patronymic'] = self.record.value("patronymic") if self.record else ""
+        data['birth_date'] = self.record.value("birth_date").toString("yyyy-MM-dd") if self.record and self.record.value("birth_date") else ""
+        data['birth_place_town'] = self.record.value("birth_place_town") if self.record else ""
+        data['birth_place_district'] = self.record.value("birth_place_district") if self.record else ""
+        data['birth_place_region'] = self.record.value("birth_place_region") if self.record else ""
+        data['birth_place_country'] = self.record.value("birth_place_country") if self.record else ""
+        data['tab_number'] = self.record.value("tab_number") if self.record else ""
+        data['personal_number'] = self.record.value("personal_number") if self.record else ""
+        
+        # Категория и звание
+        data['category_id'] = self.record.value("category_id") if self.record else None
+        data['rank_id'] = self.record.value("rank_id") if self.record else None
+        
+        # Призыв
+        data['drafted_by_commissariat'] = self.record.value("drafted_by_commissariat") if self.record else ""
+        data['draft_date'] = self.record.value("draft_date").toString("yyyy-MM-dd") if self.record and self.record.value("draft_date") else ""
+        data['povsk'] = self.record.value("povsk") if self.record else ""
+        data['selection_date'] = self.record.value("selection_date").toString("yyyy-MM-dd") if self.record and self.record.value("selection_date") else ""
+        
+        # Образование и судимость
+        data['education'] = self.record.value("education") if self.record else ""
+        data['criminal_record'] = self.record.value("criminal_record") if self.record else ""
+        data['social_media_account'] = self.record.value("social_media_account") if self.record else ""
+        data['bank_card_number'] = self.record.value("bank_card_number") if self.record else ""
+        
+        # Паспортные данные
+        data['passport_series'] = self.record.value("passport_series") if self.record else ""
+        data['passport_number'] = self.record.value("passport_number") if self.record else ""
+        data['passport_issue_date'] = self.record.value("passport_issue_date").toString("yyyy-MM-dd") if self.record and self.record.value("passport_issue_date") else ""
+        data['passport_issued_by'] = self.record.value("passport_issued_by") if self.record else ""
+        
+        # Военный билет
+        data['military_id_series'] = self.record.value("military_id_series") if self.record else ""
+        data['military_id_number'] = self.record.value("military_id_number") if self.record else ""
+        data['military_id_issue_date'] = self.record.value("military_id_issue_date").toString("yyyy-MM-dd") if self.record and self.record.value("military_id_issue_date") else ""
+        data['military_id_issued_by'] = self.record.value("military_id_issued_by") if self.record else ""
+        
+        # Внешность
+        data['appearance_features'] = self.record.value("appearance_features") if self.record else ""
+        data['personal_marks'] = self.record.value("personal_marks") if self.record else ""
+        data['federal_search_info'] = self.record.value("federal_search_info") if self.record else ""
+        data['military_contacts'] = self.record.value("military_contacts") if self.record else ""
+        data['relatives_info'] = self.record.value("relatives_info") if self.record else ""
+        
+        return data
     
     def init_ui(self):
         """
@@ -186,16 +252,21 @@ class KrdDetailsWindow(QDialog):
         
         main_data_layout.addWidget(scroll_area)
         
-        # Кнопки сохранения
+        # Кнопки сохранения и удаления
         button_layout = QHBoxLayout()
         
         save_button = QPushButton("Сохранить")
         save_button.clicked.connect(self.save_changes)
         
+        delete_button = QPushButton("Удалить КРД")
+        delete_button.setStyleSheet("background-color: #ff6b6b; color: white;")
+        delete_button.clicked.connect(self.delete_krd)
+        
         cancel_button = QPushButton("Отмена")
         cancel_button.clicked.connect(self.reject)
         
         button_layout.addWidget(save_button)
+        button_layout.addWidget(delete_button)
         button_layout.addWidget(cancel_button)
         
         main_data_layout.addLayout(button_layout)
@@ -209,7 +280,7 @@ class KrdDetailsWindow(QDialog):
         
         # Вкладка с документами и шаблонами
         from document_generator_tab import DocumentGeneratorTab
-        documents_tab = DocumentGeneratorTab(self.krd_id,self.db)
+        documents_tab = DocumentGeneratorTab(self.krd_id, self.db, self.audit_logger)
         tabs.addTab(documents_tab, "Формирование запросов")
         
         # Добавляем вкладки в основной макет
@@ -336,20 +407,57 @@ class KrdDetailsWindow(QDialog):
     
     def save_changes(self):
         """
-        Сохранение изменений в базе данных
+        Сохранение изменений в базе данных с аудитом
         """
         try:
+            # Получаем новые значения
+            new_data = {
+                'surname': self.surname_input.text().strip(),
+                'name': self.name_input.text().strip(),
+                'patronymic': self.patronymic_input.text().strip(),
+                'birth_date': self.birth_date_input.date().toString("yyyy-MM-dd"),
+                'birth_place_town': self.birth_place_town_input.text().strip(),
+                'birth_place_district': self.birth_place_district_input.text().strip(),
+                'birth_place_region': self.birth_place_region_input.text().strip(),
+                'birth_place_country': self.birth_place_country_input.text().strip(),
+                'tab_number': self.tab_number_input.text().strip(),
+                'personal_number': self.personal_number_input.text().strip(),
+                'category_id': self.category_combo.currentData(),
+                'rank_id': self.rank_combo.currentData(),
+                'drafted_by_commissariat': self.drafted_by_commissariat_input.text().strip(),
+                'draft_date': self.draft_date_input.date().toString("yyyy-MM-dd"),
+                'povsk': self.povsk_input.text().strip(),
+                'selection_date': self.selection_date_input.date().toString("yyyy-MM-dd"),
+                'education': self.education_input.text().strip(),
+                'criminal_record': self.criminal_record_input.toPlainText(),
+                'social_media_account': self.social_media_account_input.text().strip(),
+                'bank_card_number': self.bank_card_number_input.text().strip(),
+                'passport_series': self.passport_series_input.text().strip(),
+                'passport_number': self.passport_number_input.text().strip(),
+                'passport_issue_date': self.passport_issue_date_input.date().toString("yyyy-MM-dd"),
+                'passport_issued_by': self.passport_issued_by_input.text().strip(),
+                'military_id_series': self.military_id_series_input.text().strip(),
+                'military_id_number': self.military_id_number_input.text().strip(),
+                'military_id_issue_date': self.military_id_issue_date_input.date().toString("yyyy-MM-dd"),
+                'military_id_issued_by': self.military_id_issued_by_input.text().strip(),
+                'appearance_features': self.appearance_features_input.toPlainText(),
+                'personal_marks': self.personal_marks_input.toPlainText(),
+                'federal_search_info': self.federal_search_info_input.toPlainText(),
+                'military_contacts': self.military_contacts_input.text().strip(),
+                'relatives_info': self.relatives_info_input.toPlainText()
+            }
+            
             # Обновляем запись
-            self.record.setValue("surname", self.surname_input.text().strip())
-            self.record.setValue("name", self.name_input.text().strip())
-            self.record.setValue("patronymic", self.patronymic_input.text().strip())
+            self.record.setValue("surname", new_data['surname'])
+            self.record.setValue("name", new_data['name'])
+            self.record.setValue("patronymic", new_data['patronymic'])
             self.record.setValue("birth_date", self.birth_date_input.date())
-            self.record.setValue("birth_place_town", self.birth_place_town_input.text().strip())
-            self.record.setValue("birth_place_district", self.birth_place_district_input.text().strip())
-            self.record.setValue("birth_place_region", self.birth_place_region_input.text().strip())
-            self.record.setValue("birth_place_country", self.birth_place_country_input.text().strip())
-            self.record.setValue("tab_number", self.tab_number_input.text().strip())
-            self.record.setValue("personal_number", self.personal_number_input.text().strip())
+            self.record.setValue("birth_place_town", new_data['birth_place_town'])
+            self.record.setValue("birth_place_district", new_data['birth_place_district'])
+            self.record.setValue("birth_place_region", new_data['birth_place_region'])
+            self.record.setValue("birth_place_country", new_data['birth_place_country'])
+            self.record.setValue("tab_number", new_data['tab_number'])
+            self.record.setValue("personal_number", new_data['personal_number'])
             
             # Получаем ID выбранной категории и звания
             category_id = self.category_combo.currentData()
@@ -358,27 +466,27 @@ class KrdDetailsWindow(QDialog):
             self.record.setValue("category_id", category_id if category_id is not None else None)
             self.record.setValue("rank_id", rank_id if rank_id is not None else None)
             
-            self.record.setValue("drafted_by_commissariat", self.drafted_by_commissariat_input.text().strip())
+            self.record.setValue("drafted_by_commissariat", new_data['drafted_by_commissariat'])
             self.record.setValue("draft_date", self.draft_date_input.date())
-            self.record.setValue("povsk", self.povsk_input.text().strip())
+            self.record.setValue("povsk", new_data['povsk'])
             self.record.setValue("selection_date", self.selection_date_input.date())
-            self.record.setValue("education", self.education_input.text().strip())
-            self.record.setValue("criminal_record", self.criminal_record_input.toPlainText())
-            self.record.setValue("social_media_account", self.social_media_account_input.text().strip())
-            self.record.setValue("bank_card_number", self.bank_card_number_input.text().strip())
-            self.record.setValue("passport_series", self.passport_series_input.text().strip())
-            self.record.setValue("passport_number", self.passport_number_input.text().strip())
+            self.record.setValue("education", new_data['education'])
+            self.record.setValue("criminal_record", new_data['criminal_record'])
+            self.record.setValue("social_media_account", new_data['social_media_account'])
+            self.record.setValue("bank_card_number", new_data['bank_card_number'])
+            self.record.setValue("passport_series", new_data['passport_series'])
+            self.record.setValue("passport_number", new_data['passport_number'])
             self.record.setValue("passport_issue_date", self.passport_issue_date_input.date())
-            self.record.setValue("passport_issued_by", self.passport_issued_by_input.text().strip())
-            self.record.setValue("military_id_series", self.military_id_series_input.text().strip())
-            self.record.setValue("military_id_number", self.military_id_number_input.text().strip())
+            self.record.setValue("passport_issued_by", new_data['passport_issued_by'])
+            self.record.setValue("military_id_series", new_data['military_id_series'])
+            self.record.setValue("military_id_number", new_data['military_id_number'])
             self.record.setValue("military_id_issue_date", self.military_id_issue_date_input.date())
-            self.record.setValue("military_id_issued_by", self.military_id_issued_by_input.text().strip())
-            self.record.setValue("appearance_features", self.appearance_features_input.toPlainText())
-            self.record.setValue("personal_marks", self.personal_marks_input.toPlainText())
-            self.record.setValue("federal_search_info", self.federal_search_info_input.toPlainText())
-            self.record.setValue("military_contacts", self.military_contacts_input.text().strip())
-            self.record.setValue("relatives_info", self.relatives_info_input.toPlainText())
+            self.record.setValue("military_id_issued_by", new_data['military_id_issued_by'])
+            self.record.setValue("appearance_features", new_data['appearance_features'])
+            self.record.setValue("personal_marks", new_data['personal_marks'])
+            self.record.setValue("federal_search_info", new_data['federal_search_info'])
+            self.record.setValue("military_contacts", new_data['military_contacts'])
+            self.record.setValue("relatives_info", new_data['relatives_info'])
             
             # Обновляем запись в модели
             if not self.model.setRecord(0, self.record):
@@ -388,13 +496,82 @@ class KrdDetailsWindow(QDialog):
             if not self.model.submitAll():
                 raise Exception(f"Ошибка при сохранении изменений: {self.model.lastError().text()}")
             
+            # Логирование обновления
+            if self.audit_logger:
+                self.audit_logger.log_krd_update(self.krd_id, self.old_data, new_data)
+            
             QMessageBox.information(self, "Успех", "Данные успешно сохранены")
+            
+            # Обновляем старые данные
+            self.old_data = new_data
             
             # Закрываем окно
             self.accept()
             
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка при сохранении данных:\n{str(e)}")
+    
+    def delete_krd(self):
+        """
+        Удаление КРД с подтверждением и аудитом
+        """
+        try:
+            # Получаем фамилию и имя для информативного сообщения
+            surname = self.surname_input.text().strip() or "Неизвестно"
+            name = self.name_input.text().strip() or ""
+            patronymic = self.patronymic_input.text().strip() or ""
+            
+            full_name = f"{surname} {name} {patronymic}".strip()
+            
+            # Показываем диалог подтверждения
+            reply = QMessageBox.question(
+                self,
+                "Подтверждение удаления",
+                f"Вы действительно хотите удалить КРД №{self.krd_id}?\n\n"
+                f"Военнослужащий: {full_name}\n\n"
+                f"⚠️ Внимание: Запись будет скрыта из списка, но сохранена в базе данных.",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            
+            # Если пользователь подтвердил удаление
+            if reply == QMessageBox.StandardButton.Yes:
+                # Получаем данные для логирования
+                old_data = self._get_current_data()
+                
+                # Обновляем запись, помечая её как удаленную
+                query = QSqlQuery(self.db)
+                query.prepare("""
+                    UPDATE krd.krd 
+                    SET is_deleted = TRUE, 
+                        deleted_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """)
+                query.addBindValue(self.krd_id)
+                
+                if not query.exec():
+                    raise Exception(f"Ошибка при удалении КРД: {query.lastError().text()}")
+                
+                # Логирование удаления
+                if self.audit_logger:
+                    self.audit_logger.log_krd_delete(self.krd_id, old_data)
+                
+                QMessageBox.information(
+                    self,
+                    "Успех",
+                    f"КРД №{self.krd_id} успешно скрыт из списка!\n"
+                    f"Запись сохранена в базе данных для истории."
+                )
+                
+                # Закрываем окно
+                self.accept()
+                
+        except Exception as e:
+            QMessageBox.critical(
+                self,
+                "Ошибка",
+                f"Ошибка при удалении КРД:\n{str(e)}"
+            )
     
     def reject(self):
         """

@@ -84,7 +84,7 @@ class AuditLogger:
         """Логирование обновления КРД"""
         # Находим измененные поля
         changed_fields = {}
-        for key in new_
+        for key in new_:
             if key in old_data and old_data[key] != new_data[key]:
                 changed_fields[key] = {
                     'old': old_data[key],

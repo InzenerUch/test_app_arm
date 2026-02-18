@@ -18,6 +18,9 @@ from PyQt6.QtSql import QSqlQuery
 from PyQt6.QtGui import QFont
 from datetime import datetime
 
+# Добавляем импорт логгера аудита
+from audit_logger import AuditLogger
+
 
 # ГЛОБАЛЬНЫЙ ОБРАБОТЧИК ИСКЛЮЧЕНИЙ ДЛЯ ОТЛАДКИ
 def excepthook(exc_type, exc_value, exc_tb):
@@ -35,10 +38,20 @@ class DocumentGeneratorTab(QWidget):
     Вкладка для генерации документов из Word-шаблонов
     """
     
-    def __init__(self, krd_id, db_connection):
+    def __init__(self, krd_id, db_connection, audit_logger=None):
+        """
+        Инициализация вкладки генерации документов
+        
+        Args:
+            krd_id (int): ID КРД
+            db_connection: соединение с базой данных
+            audit_logger (AuditLogger, optional): логгер аудита
+        """
         super().__init__()
         self.krd_id = krd_id
         self.db = db_connection
+        self.audit_logger = audit_logger  # Сохраняем логгер аудита
+        
         self.template_variables = []
         self.db_columns = {}
         self.generated_doc_path = None  # Инициализируем атрибут
@@ -187,6 +200,14 @@ class DocumentGeneratorTab(QWidget):
             if not query.exec():
                 raise Exception(query.lastError().text())
             
+            # Получаем ID созданного шаблона
+            template_id = query.lastInsertId()
+            
+            # Логирование создания шаблона
+            if self.audit_logger:
+                file_size = len(data)
+                self.audit_logger.log_template_create(template_id, name, desc, file_size)
+            
             QMessageBox.information(self, "Успех", "Шаблон успешно добавлен")
             self.template_name_input.clear()
             self.template_desc_input.clear()
@@ -223,6 +244,11 @@ class DocumentGeneratorTab(QWidget):
     def on_template_changed(self):
         tid = self.template_combo.currentData()
         if tid:
+            # Логирование просмотра шаблона
+            if self.audit_logger:
+                template_name = self.template_combo.currentText()
+                self.audit_logger.log_template_view(tid, template_name)
+            
             self.load_field_mappings(tid)
     
     def load_field_mappings(self, template_id):
@@ -395,6 +421,18 @@ class DocumentGeneratorTab(QWidget):
             
             self.mapping_table.selectRow(row)
             
+            # Логирование добавления сопоставления
+            if self.audit_logger:
+                field_name = var_combo.currentText()
+                db_column = col_combo.currentText()
+                table_name = self.get_table_by_column(db_column)
+                self.audit_logger.log_mapping_create(
+                    template_id=tid,
+                    field_name=field_name,
+                    db_column=db_column,
+                    table_name=table_name
+                )
+            
         except Exception as e:
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Ошибка добавления сопоставления:\n{str(e)}")
@@ -433,6 +471,13 @@ class DocumentGeneratorTab(QWidget):
             
             if reply == QMessageBox.StandardButton.No:
                 return
+            
+            # Логирование удаления сопоставления
+            if self.audit_logger:
+                self.audit_logger.log_mapping_delete(
+                    field_name=var_name.strip('{} '),
+                    db_column=col_name
+                )
         
         # Удаляем выбранную строку
         self.mapping_table.removeRow(row)
@@ -532,6 +577,10 @@ class DocumentGeneratorTab(QWidget):
             
             # Очищаем временный файл шаблона
             os.unlink(template_path)
+            
+            # Логирование генерации документа
+            if self.audit_logger:
+                self.audit_logger.log_document_generate(self.krd_id, template_name)
             
             QMessageBox.information(
                 self,
@@ -703,6 +752,11 @@ class DocumentGeneratorTab(QWidget):
             try:
                 import shutil
                 shutil.copy2(self.generated_doc_path, path)
+                
+                # Логирование сохранения документа
+                if self.audit_logger:
+                    filename = os.path.basename(path)
+                    self.audit_logger.log_document_save(self.krd_id, filename)
                 
                 # Очищаем временный файл
                 try:
