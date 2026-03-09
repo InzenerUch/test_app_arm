@@ -7,18 +7,17 @@ import sys
 import tempfile
 import re
 import traceback
-from docx import Document  # Убрали импорт docxtpl
+from docx import Document
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, 
     QLabel, QGroupBox, QFileDialog, QMessageBox, QComboBox, QTabWidget, QLineEdit,
-    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView
+    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QTableView, QMenu
 )
-from PyQt6.QtCore import Qt, QByteArray
-from PyQt6.QtSql import QSqlQuery
-from PyQt6.QtGui import QFont
+from PyQt6.QtCore import Qt, QByteArray, QPoint
+from PyQt6.QtSql import QSqlQuery, QSqlQueryModel
+from PyQt6.QtGui import QFont, QContextMenuEvent
 from datetime import datetime
 
-# Добавляем импорт логгера аудита
 from audit_logger import AuditLogger
 
 
@@ -35,7 +34,7 @@ sys.excepthook = excepthook
 
 class DocumentGeneratorTab(QWidget):
     """
-    Вкладка для генерации документов из Word-шаблонов
+    Вкладка для генерации документов из шаблонов
     """
     
     def __init__(self, krd_id, db_connection, audit_logger=None):
@@ -50,11 +49,11 @@ class DocumentGeneratorTab(QWidget):
         super().__init__()
         self.krd_id = krd_id
         self.db = db_connection
-        self.audit_logger = audit_logger  # Сохраняем логгер аудита
+        self.audit_logger = audit_logger
         
         self.template_variables = []
         self.db_columns = {}
-        self.generated_doc_path = None  # Инициализируем атрибут
+        self.generated_doc_path = None
         
         self.init_ui()
         self.load_document_templates()
@@ -91,7 +90,7 @@ class DocumentGeneratorTab(QWidget):
         self.mapping_table.setColumnCount(2)
         self.mapping_table.setHorizontalHeaderLabels(["Переменная из шаблона", "Столбец из базы данных"])
         self.mapping_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.mapping_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)  # КРИТИЧНО: блокируем редактирование
+        self.mapping_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         header = self.mapping_table.horizontalHeader()
         header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
@@ -152,16 +151,52 @@ class DocumentGeneratorTab(QWidget):
         add_group.setLayout(add_layout)
         layout.addWidget(add_group)
         
-        # Список шаблонов
-        list_group = QGroupBox("Существующие шаблоны")
-        list_layout = QVBoxLayout()
-        self.templates_list = QTextEdit()
-        self.templates_list.setMaximumHeight(150)
-        self.templates_list.setReadOnly(True)
-        list_layout.addWidget(self.templates_list)
-        list_layout.addWidget(QPushButton("Обновить список", clicked=self.refresh_templates_list))
-        list_group.setLayout(list_layout)
-        layout.addWidget(list_group)
+        # Таблица шаблонов
+        templates_group = QGroupBox("Список шаблонов")
+        templates_layout = QVBoxLayout()
+        
+        # Создаем модель для таблицы шаблонов
+        self.templates_model = QSqlQueryModel()
+        
+        # Создаем таблицу для отображения шаблонов
+        self.templates_table = QTableView()
+        self.templates_table.setModel(self.templates_model)
+        self.templates_table.setAlternatingRowColors(True)
+        self.templates_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.templates_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        
+        # Настройка заголовков
+        header = self.templates_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+        
+        # Установка ширины колонок
+        self.templates_table.setColumnWidth(0, 60)   # ID
+        self.templates_table.setColumnWidth(1, 200)  # Название
+        self.templates_table.setColumnWidth(2, 300)  # Описание
+        self.templates_table.setColumnWidth(3, 150)  # Дата создания
+        
+        # Включаем контекстное меню
+        self.templates_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.templates_table.customContextMenuRequested.connect(self.show_context_menu)
+        
+        templates_layout.addWidget(self.templates_table)
+        
+        # Кнопки управления шаблонами
+        btn_layout = QHBoxLayout()
+        refresh_btn = QPushButton("Обновить список")
+        refresh_btn.clicked.connect(self.load_document_templates)
+        btn_layout.addWidget(refresh_btn)
+        
+        delete_btn = QPushButton("Удалить шаблон")
+        delete_btn.setStyleSheet("background-color: #ff6b6b; color: white;")
+        delete_btn.clicked.connect(self.delete_selected_template)
+        btn_layout.addWidget(delete_btn)
+        
+        templates_layout.addLayout(btn_layout)
+        
+        templates_group.setLayout(templates_layout)
+        layout.addWidget(templates_group)
         
         return widget
     
@@ -190,8 +225,9 @@ class DocumentGeneratorTab(QWidget):
             
             query = QSqlQuery(self.db)
             query.prepare("""
-                INSERT INTO krd.document_templates (name, description, template_data)
-                VALUES (:name, :description, :template_data)
+                INSERT INTO krd.document_templates 
+                (name, description, template_data, is_deleted)
+                VALUES (:name, :description, :template_data, FALSE)
             """)
             query.bindValue(":name", name)
             query.bindValue(":description", desc)
@@ -215,31 +251,111 @@ class DocumentGeneratorTab(QWidget):
             if hasattr(self, 'selected_file_path'):
                 delattr(self, 'selected_file_path')
             self.load_document_templates()
-            self.refresh_templates_list()
             
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка добавления шаблона:\n{str(e)}")
     
-    def refresh_templates_list(self):
-        query = QSqlQuery(self.db)
-        query.exec("""
-            SELECT id, name, description, created_at
-            FROM krd.document_templates
-            ORDER BY created_at DESC
-        """)
-        
-        text = "Список шаблонов:\n"
-        while query.next():
-            text += (f"\nID: {query.value(0)}\nНазвание: {query.value(1)}\n"
-                    f"Описание: {query.value(2)}\nДата: {query.value(3)}\n{'─'*40}\n")
-        self.templates_list.setPlainText(text)
-    
     def load_document_templates(self):
-        self.template_combo.clear()
+        """Загрузка списка шаблонов (только неудаленные)"""
         query = QSqlQuery(self.db)
-        query.exec("SELECT id, name FROM krd.document_templates ORDER BY name")
-        while query.next():
-            self.template_combo.addItem(query.value(1), query.value(0))
+        query.prepare("""
+            SELECT id, name, description, created_at 
+            FROM krd.document_templates 
+            WHERE is_deleted = FALSE
+            ORDER BY name
+        """)
+        query.exec()
+        self.templates_model.setQuery(query)
+        
+        # Обновляем комбобокс для генерации
+        self.template_combo.clear()
+        query2 = QSqlQuery(self.db)
+        query2.prepare("SELECT id, name FROM krd.document_templates WHERE is_deleted = FALSE ORDER BY name")
+        query2.exec()
+        while query2.next():
+            self.template_combo.addItem(query2.value(1), query2.value(0))
+    
+    def show_context_menu(self, position: QPoint):
+        """Показ контекстного меню при правом клике на таблице"""
+        index = self.templates_table.indexAt(position)
+        
+        if not index.isValid():
+            return
+        
+        menu = QMenu(self)
+        
+        delete_action = QAction("Удалить шаблон", self)
+        delete_action.triggered.connect(self.delete_selected_template)
+        menu.addAction(delete_action)
+        
+        menu.exec(self.templates_table.mapToGlobal(position))
+    
+    def delete_selected_template(self):
+        """Удаление выбранного шаблона (мягкое удаление)"""
+        # Получаем выделенную строку
+        selection_model = self.templates_table.selectionModel()
+        if not selection_model.hasSelection():
+            QMessageBox.warning(self, "Внимание", "Выберите шаблон для удаления")
+            return
+        
+        selected_indexes = selection_model.selectedRows()
+        if not selected_indexes:
+            QMessageBox.warning(self, "Внимание", "Выберите шаблон для удаления")
+            return
+        
+        index = selected_indexes[0]
+        
+        # Получаем данные о выбранном шаблоне
+        template_id = self.templates_model.data(self.templates_model.index(index.row(), 0))
+        template_name = self.templates_model.data(self.templates_model.index(index.row(), 1))
+        
+        # Показываем диалог подтверждения
+        reply = QMessageBox.question(
+            self,
+            "Подтверждение удаления",
+            f"Вы действительно хотите удалить шаблон?\n\n"
+            f"Название: {template_name}\n\n"
+            f"⚠️ Внимание: Шаблон будет скрыт из списка, но сохранён в базе данных.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        # Если пользователь подтвердил удаление
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                # Помечаем шаблон как удаленный
+                query = QSqlQuery(self.db)
+                query.prepare("""
+                    UPDATE krd.document_templates 
+                    SET is_deleted = TRUE, 
+                        deleted_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """)
+                query.addBindValue(template_id)
+                
+                if not query.exec():
+                    raise Exception(f"Ошибка при удалении шаблона: {query.lastError().text()}")
+                
+                # Логирование удаления
+                if self.audit_logger:
+                    self.audit_logger.log_template_delete(template_id, template_name)
+                
+                QMessageBox.information(
+                    self,
+                    "Успех",
+                    f"Шаблон \"{template_name}\" успешно скрыт из списка!\n"
+                    f"Шаблон сохранён в базе данных для истории."
+                )
+                
+                # Обновляем список шаблонов
+                self.load_document_templates()
+                
+            except Exception as e:
+                QMessageBox.critical(
+                    self,
+                    "Ошибка",
+                    f"Ошибка при удалении шаблона:\n{str(e)}"
+                )
     
     def on_template_changed(self):
         tid = self.template_combo.currentData()
@@ -252,18 +368,11 @@ class DocumentGeneratorTab(QWidget):
             self.load_field_mappings(tid)
     
     def load_field_mappings(self, template_id):
-        """
-        Загрузка сопоставления полей для выбранного шаблона
-        """
-        # Очищаем таблицу
+        """Загрузка сопоставления полей для выбранного шаблона"""
         self.mapping_table.setRowCount(0)
-        
-        # Загружаем переменные из шаблона и столбцы из базы данных
         self.load_template_variables(template_id)
         self.load_db_columns()
 
-        
-        # Загружаем существующие сопоставления из базы данных
         query = QSqlQuery(self.db)
         query.prepare("""
             SELECT field_name, db_column, table_name
@@ -279,17 +388,14 @@ class DocumentGeneratorTab(QWidget):
             field_name = query.value(0)
             db_column = query.value(1)
             
-            # Добавляем строку в таблицу
             self.mapping_table.insertRow(row)
             
-            # Создаем комбобоксы для ячеек
             var_combo = QComboBox()
             var_combo.addItems(self.template_variables)
             var_combo.setCurrentText(field_name)
             self.mapping_table.setCellWidget(row, 0, var_combo)
             
             col_combo = QComboBox()
-            # Заполняем столбцы из соответствующей таблицы
             table_name = query.value(2)
             if table_name in self.db_columns:
                 col_combo.addItems(self.db_columns[table_name])
@@ -297,7 +403,6 @@ class DocumentGeneratorTab(QWidget):
             self.mapping_table.setCellWidget(row, 1, col_combo)
             
             row += 1
-
     
     def load_template_variables(self, template_id):
         query = QSqlQuery(self.db)
@@ -307,14 +412,13 @@ class DocumentGeneratorTab(QWidget):
             self.template_variables = []
             return
         
-        # Безопасное преобразование данных
         data = query.value(0)
         if isinstance(data, QByteArray):
             template_bytes = bytes(data)
         else:
             template_bytes = bytes(data) if data else b''
         
-        if not template_bytes:
+        if not template_bytes:  # ✅ Исправлено: было template_
             self.template_variables = []
             return
         
@@ -325,10 +429,8 @@ class DocumentGeneratorTab(QWidget):
         try:
             doc = Document(tmp_path)
             vars_set = set()
-            # Поиск в параграфах
             for para in doc.paragraphs:
                 vars_set.update(re.findall(r'\{\{[^{}]+\}\}', para.text))
-            # Поиск в таблицах
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
@@ -382,7 +484,7 @@ class DocumentGeneratorTab(QWidget):
         }
     
     def add_field_mapping(self):
-        """БЕЗОПАСНОЕ ДОБАВЛЕНИЕ СОПОСТАВЛЕНИЯ"""
+        """Добавление сопоставления"""
         try:
             if self.template_combo.count() == 0:
                 QMessageBox.warning(self, "Ошибка", "Сначала добавьте шаблон")
@@ -393,7 +495,6 @@ class DocumentGeneratorTab(QWidget):
                 QMessageBox.warning(self, "Ошибка", "Выберите шаблон")
                 return
             
-            # Гарантируем загрузку данных
             if not self.template_variables:
                 self.load_template_variables(tid)
             if not self.db_columns:
@@ -409,7 +510,6 @@ class DocumentGeneratorTab(QWidget):
             row = self.mapping_table.rowCount()
             self.mapping_table.insertRow(row)
             
-            # Создаём комбобоксы
             var_combo = QComboBox()
             var_combo.addItems(self.template_variables)
             self.mapping_table.setCellWidget(row, 0, var_combo)
@@ -438,20 +538,15 @@ class DocumentGeneratorTab(QWidget):
             QMessageBox.critical(self, "Ошибка", f"Ошибка добавления сопоставления:\n{str(e)}")
     
     def remove_field_mapping(self):
-        """
-        Удаление выбранного сопоставления из таблицы
-        """
-        # Получаем индекс выбранной строки
+        """Удаление сопоставления"""
         selected_rows = self.mapping_table.selectionModel().selectedRows()
         
         if not selected_rows:
             QMessageBox.warning(self, "Внимание", "Выберите сопоставление для удаления")
             return
         
-        # Получаем первую выбранную строку
         row = selected_rows[0].row()
         
-        # Получаем имя переменной для информативного сообщения
         var_widget = self.mapping_table.cellWidget(row, 0)
         col_widget = self.mapping_table.cellWidget(row, 1)
         
@@ -459,7 +554,6 @@ class DocumentGeneratorTab(QWidget):
             var_name = var_widget.currentText()
             col_name = col_widget.currentText()
             
-            # Запрашиваем подтверждение удаления
             reply = QMessageBox.question(
                 self,
                 "Подтверждение удаления",
@@ -479,41 +573,27 @@ class DocumentGeneratorTab(QWidget):
                     db_column=col_name
                 )
         
-        # Удаляем выбранную строку
         self.mapping_table.removeRow(row)
         
-        QMessageBox.information(
-            self,
-            "Успех",
-            f"Сопоставление удалено"
-        )
+        QMessageBox.information(self, "Успех", f"Сопоставление удалено")
     
     def get_table_by_column(self, col):
         for tbl, cols in self.db_columns.items():
             if col in cols:
                 return tbl
         return None
-
-    # ========================================
-    # УПРОЩЁННЫЕ МЕТОДЫ ГЕНЕРАЦИИ ДОКУМЕНТА
-    # ========================================
     
     def generate_document(self):
-        """
-        Генерация документа из шаблона с подстановкой данных
-        Простой способ: прямая замена текста во всех элементах документа
-        """
+        """Генерация документа"""
         template_id = self.template_combo.currentData()
         if not template_id:
             QMessageBox.warning(self, "Ошибка", "Выберите шаблон документа")
             return
         
-        # Сохраняем текущие сопоставления перед генерацией
         if not self.save_field_mappings(template_id):
             return
         
         try:
-            # === ШАГ 1: Получаем шаблон из базы данных ===
             query = QSqlQuery(self.db)
             query.prepare("SELECT template_data, name FROM krd.document_templates WHERE id = ?")
             query.addBindValue(template_id)
@@ -524,27 +604,23 @@ class DocumentGeneratorTab(QWidget):
             template_name = query.value(1)
             template_data = bytes(query.value(0)) if isinstance(query.value(0), QByteArray) else bytes(query.value(0))
             
-            if not template_data:
+            if not template_data:  # ✅ Исправлено: было template_
                 raise Exception("Шаблон пуст")
             
             print(f"\n📄 Генерация документа: {template_name}")
             
-            # === ШАГ 2: Сохраняем шаблон во временный файл ===
             with tempfile.NamedTemporaryFile(delete=False, suffix='.docx') as tmp:
                 tmp.write(template_data)
                 template_path = tmp.name
             
-            # === ШАГ 3: Загружаем документ ===
             doc = Document(template_path)
             
-            # === ШАГ 4: Получаем данные для подстановки ===
             context = self.get_context_data(template_id)
             
             print(f"Контекст ({len(context)} переменных):")
             for key, value in context.items():
                 print(f"  {key}: {value}")
             
-            # === ШАГ 5: Прямая замена переменных во всём документе ===
             replacements = 0
             
             # Замена в параграфах
@@ -567,7 +643,6 @@ class DocumentGeneratorTab(QWidget):
             
             print(f"✅ Заменено переменных: {replacements}")
             
-            # === ШАГ 6: Сохраняем документ ===
             with tempfile.NamedTemporaryFile(delete=False, suffix='.docx') as out_file:
                 doc.save(out_file.name)
                 self.generated_doc_path = out_file.name
@@ -575,7 +650,6 @@ class DocumentGeneratorTab(QWidget):
             file_size = os.path.getsize(self.generated_doc_path)
             print(f"💾 Размер файла: {file_size} байт")
             
-            # Очищаем временный файл шаблона
             os.unlink(template_path)
             
             # Логирование генерации документа
@@ -593,24 +667,16 @@ class DocumentGeneratorTab(QWidget):
         except Exception as e:
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Ошибка генерации:\n{str(e)}")
-
     def _replace_text_in_element(self, element, context):
-        """
-        Прямая замена переменных в элементе документа с сохранением ВСЕХ стилей
-        Работает с параграфами, ячейками таблиц и т.д.
-        
-        Возвращает: количество замен
-        """
+        """Замена переменных в элементе документа"""
         replacements = 0
         
-        # Если элемент - параграф
         if hasattr(element, 'text') and hasattr(element, 'runs'):
             original_text = element.text
             
             if not original_text:
                 return 0
             
-            # Заменяем все переменные из контекста
             new_text = original_text
             for var_name, value in context.items():
                 placeholder = f"{{{{{var_name}}}}}"
@@ -619,19 +685,14 @@ class DocumentGeneratorTab(QWidget):
                     replacements += count
                     new_text = new_text.replace(placeholder, str(value))
             
-            # Если текст изменился, обновляем параграф
             if new_text != original_text:
-                # Если есть раны, обновляем каждый ран
                 if element.runs:
-                    # Сохраняем стили ПЕРВОГО рана
                     first_run = element.runs[0]
                     
-                    # Сохраняем текущие стили перед заменой
                     saved_bold = first_run.bold
                     saved_italic = first_run.italic
                     saved_underline = first_run.underline
                     
-                    # Сохраняем стили шрифта
                     saved_font_name = None
                     saved_font_size = None
                     saved_font_color = None
@@ -642,10 +703,8 @@ class DocumentGeneratorTab(QWidget):
                         if first_run.font.color and first_run.font.color.rgb:
                             saved_font_color = first_run.font.color.rgb
                     
-                    # Устанавливаем новый текст
                     first_run.text = new_text
                     
-                    # Восстанавливаем стили
                     first_run.bold = saved_bold
                     first_run.italic = saved_italic
                     first_run.underline = saved_underline
@@ -658,7 +717,6 @@ class DocumentGeneratorTab(QWidget):
                         if saved_font_color:
                             first_run.font.color.rgb = saved_font_color
                     
-                    # Удаляем остальные раны
                     for i in range(len(element.runs) - 1, 0, -1):
                         run = element.runs[i]
                         if hasattr(run, '_element') and run._element in element._element:
@@ -667,22 +725,16 @@ class DocumentGeneratorTab(QWidget):
                             except:
                                 pass
                 else:
-                    # Если нет ранов, создаём новый с базовыми стилями
                     element.clear()
                     new_run = element.add_run(new_text)
-                    # Устанавливаем базовые стили
                     new_run.font.name = 'Times New Roman'
-                    # Не устанавливаем размер - используем размер по умолчанию из стиля параграфа
         
         return replacements
-
+    
     def get_context_data(self, template_id):
-        """
-        Получение данных для подстановки из базы данных
-        """
+        """Получение данных для подстановки"""
         context = {}
         
-        # Загружаем сопоставления из базы
         query = QSqlQuery(self.db)
         query.prepare("""
             SELECT field_name, db_column, table_name
@@ -697,20 +749,16 @@ class DocumentGeneratorTab(QWidget):
             db_column = query.value(1)
             table_name = query.value(2)
             
-            # Получаем значение из базы
             value = self._get_value_from_database(table_name, db_column, self.krd_id)
             if value is not None:
                 context[field_name] = value
         
         return context
-
+    
     def _get_value_from_database(self, table_name, column_name, krd_id):
-        """
-        Получение значения из базы данных с правильным преобразованием типов
-        """
+        """Получение значения из базы данных"""
         join_col = "krd_id" if table_name != "krd" else "id"
         
-        # Защита от инъекций
         if not re.match(r'^\w+$', table_name) or not re.match(r'^\w+$', column_name):
             return ""
         
@@ -721,20 +769,16 @@ class DocumentGeneratorTab(QWidget):
         if query.exec() and query.next():
             value = query.value(0)
             
-            # Обработка QDate
             if hasattr(value, 'getDate'):
                 year, month, day = value.getDate()
                 return f"{day:02d}.{month:02d}.{year}"
-            # Обработка других типов
             elif value is not None:
                 return str(value)
         
         return ""
-
+    
     def save_document(self):
-        """
-        Сохранение сгенерированного документа
-        """
+        """Сохранение документа"""
         if not self.generated_doc_path or not os.path.exists(self.generated_doc_path):
             QMessageBox.warning(self, "Ошибка", "Сначала сгенерируйте документ")
             return
@@ -758,7 +802,6 @@ class DocumentGeneratorTab(QWidget):
                     filename = os.path.basename(path)
                     self.audit_logger.log_document_save(self.krd_id, filename)
                 
-                # Очищаем временный файл
                 try:
                     os.unlink(self.generated_doc_path)
                     self.generated_doc_path = None
@@ -772,22 +815,17 @@ class DocumentGeneratorTab(QWidget):
                 QMessageBox.critical(self, "Ошибка", f"Ошибка сохранения:\n{str(e)}")
     
     def save_field_mappings(self, template_id):
-        """
-        Сохранение сопоставлений полей в базу данных с транзакцией
-        """
+        """Сохранение сопоставлений полей"""
         try:
-            # Начинаем транзакцию
             if not self.db.transaction():
                 raise Exception(f"Не удалось начать транзакцию: {self.db.lastError().text()}")
             
-            # Удаляем старые сопоставления
             del_query = QSqlQuery(self.db)
             del_query.prepare("DELETE FROM krd.field_mappings WHERE template_id = ?")
             del_query.addBindValue(template_id)
             if not del_query.exec():
                 raise Exception(f"Ошибка удаления старых сопоставлений: {del_query.lastError().text()}")
             
-            # Сохраняем новые сопоставления
             saved_count = 0
             for row in range(self.mapping_table.rowCount()):
                 var_w = self.mapping_table.cellWidget(row, 0)
@@ -818,7 +856,6 @@ class DocumentGeneratorTab(QWidget):
                 
                 saved_count += 1
             
-            # Фиксируем изменения
             if not self.db.commit():
                 raise Exception(f"Ошибка коммита: {self.db.lastError().text()}")
             

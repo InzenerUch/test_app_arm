@@ -142,6 +142,12 @@ class MainWindow(QMainWindow):
         
         # Добавляем разделитель
         toolbar.addSeparator()
+        # Добавляем действие "Удаленные записи" (только для администраторов)
+        if self.user_info.get('role') == 'admin':
+            deleted_records_action = QAction("Удаленные записи", self)
+            deleted_records_action.triggered.connect(self.open_deleted_records_window)
+            toolbar.addAction(deleted_records_action)
+
         
         # Добавляем действие "Аудит пользователей" (только для администраторов)
         if self.user_info.get('role') == 'admin':
@@ -154,7 +160,12 @@ class MainWindow(QMainWindow):
             user_mgmt_action = QAction("Управление пользователями", self)
             user_mgmt_action.triggered.connect(self.open_user_management)
             toolbar.addAction(user_mgmt_action)
-    
+    def open_deleted_records_window(self):
+        """Открытие окна удаленных записей"""
+        from deleted_records_window import DeletedRecordsWindow
+        
+        deleted_window = DeletedRecordsWindow(self.db)
+        deleted_window.exec()
     def create_status_bar(self):
         """
         Создание строки состояния

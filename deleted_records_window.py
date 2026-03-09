@@ -1,0 +1,414 @@
+"""
+Модуль для просмотра удаленных записей (только для администраторов)
+"""
+
+from PyQt6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QGridLayout,
+    QComboBox, QTableView, QPushButton, QLabel, QDateEdit,
+    QMessageBox, QHeaderView, QAbstractItemView, QWidget
+)
+from PyQt6.QtCore import Qt, QDate
+from PyQt6.QtSql import QSqlQueryModel, QSqlQuery
+from PyQt6.QtGui import QFont
+
+
+class DeletedRecordsWindow(QDialog):
+    """
+    Окно для просмотра удаленных записей (только для администраторов)
+    """
+    
+    def __init__(self, db_connection):
+        """
+        Инициализация окна
+        
+        Args:
+            db_connection: соединение с базой данных
+        """
+        super().__init__()
+        self.db = db_connection
+        
+        self.setWindowTitle("Удаленные записи")
+        self.resize(1200, 700)
+        
+        self.init_ui()
+        self.load_deleted_records()
+    
+    def init_ui(self):
+        """Инициализация пользовательского интерфейса"""
+        main_layout = QVBoxLayout()
+        
+        # Верхняя панель с фильтрами
+        filters_group = self.create_filters_section()
+        main_layout.addWidget(filters_group)
+        
+        # Разделитель
+        separator = self.create_separator()
+        main_layout.addWidget(separator)
+        
+        # Основная область с таблицей удаленных записей
+        records_group = self.create_records_section()
+        main_layout.addWidget(records_group, 1)
+        
+        # Кнопки внизу
+        buttons_layout = QHBoxLayout()
+        
+        restore_button = QPushButton("Восстановить выбранную запись")
+        restore_button.setStyleSheet("background-color: #4CAF50; color: white;")
+        restore_button.clicked.connect(self.restore_selected_record)
+        buttons_layout.addWidget(restore_button)
+        
+        refresh_button = QPushButton("Обновить")
+        refresh_button.clicked.connect(self.load_deleted_records)
+        buttons_layout.addWidget(refresh_button)
+        
+        close_button = QPushButton("Закрыть")
+        close_button.clicked.connect(self.accept)
+        buttons_layout.addWidget(close_button)
+        
+        main_layout.addLayout(buttons_layout)
+        
+        self.setLayout(main_layout)
+    
+    def create_filters_section(self):
+        """Создание секции с фильтрами"""
+        group_box = QGroupBox("Фильтры")
+        layout = QGridLayout()
+        
+        # Выбор типа записей
+        layout.addWidget(QLabel("Тип записей:"), 0, 0)
+        self.record_type_combo = QComboBox()
+        self.record_type_combo.addItem("Все удаленные записи", "all")
+        self.record_type_combo.addItem("Удаленные КРД", "krd")
+        self.record_type_combo.addItem("Удаленные шаблоны", "templates")
+        self.record_type_combo.currentIndexChanged.connect(self.on_filter_changed)
+        layout.addWidget(self.record_type_combo, 0, 1)
+        
+        # Дата удаления от
+        layout.addWidget(QLabel("Дата удаления от:"), 1, 0)
+        self.date_from = QDateEdit()
+        self.date_from.setDate(QDate.currentDate().addDays(-90))  # По умолчанию - 90 дней
+        self.date_from.setCalendarPopup(True)
+        self.date_from.dateChanged.connect(self.on_filter_changed)
+        layout.addWidget(self.date_from, 1, 1)
+        
+        # Дата удаления до
+        layout.addWidget(QLabel("Дата удаления до:"), 1, 2)
+        self.date_to = QDateEdit()
+        self.date_to.setDate(QDate.currentDate())
+        self.date_to.setCalendarPopup(True)
+        self.date_to.dateChanged.connect(self.on_filter_changed)
+        layout.addWidget(self.date_to, 1, 3)
+        
+        group_box.setLayout(layout)
+        return group_box
+    
+    def create_separator(self):
+        """Создание разделителя"""
+        separator = QWidget()
+        separator.setFixedHeight(10)
+        return separator
+    
+    def create_records_section(self):
+        """Создание секции с таблицей удаленных записей"""
+        group_box = QGroupBox("Удаленные записи")
+        layout = QVBoxLayout()
+        
+        # Создаем модель для таблицы
+        self.records_model = QSqlQueryModel()
+        
+        # Создаем таблицу
+        self.records_table = QTableView()
+        self.records_table.setModel(self.records_model)
+        self.records_table.setAlternatingRowColors(True)
+        self.records_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.records_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        
+        # Настройка заголовков
+        header = self.records_table.horizontalHeader()
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
+        header.setStretchLastSection(True)
+        
+        layout.addWidget(self.records_table)
+        group_box.setLayout(layout)
+        
+        return group_box
+    
+    def load_deleted_records(self):
+        """Загрузка удаленных записей с применением фильтров"""
+        record_type = self.record_type_combo.currentData()
+        date_from = self.date_from.date().toString("yyyy-MM-dd")
+        date_to = self.date_to.date().toString("yyyy-MM-dd")
+        
+        if record_type == "krd":
+            # Загрузка удаленных КРД
+            query = QSqlQuery(self.db)
+            query.prepare("""
+                SELECT 
+                    k.id as "ID КРД",
+                    CONCAT('КРД-', k.id) as "Номер КРД",
+                    COALESCE(s.surname, '') || ' ' || COALESCE(s.name, '') || ' ' || COALESCE(s.patronymic, '') as "ФИО",
+                    k.deleted_at as "Дата удаления",
+                    COALESCE(u.username, 'Неизвестно') as "Удалил"
+                FROM krd.krd k
+                LEFT JOIN krd.social_data s ON k.id = s.krd_id
+                LEFT JOIN krd.users u ON k.deleted_by = u.id
+                WHERE k.is_deleted = TRUE
+                    AND k.deleted_at >= ?
+                    AND k.deleted_at <= ?
+                ORDER BY k.deleted_at DESC
+            """)
+            query.addBindValue(date_from)
+            query.addBindValue(f"{date_to} 23:59:59")
+            query.exec()
+            self.records_model.setQuery(query)
+            
+            # Установка ширины колонок
+            self.records_table.setColumnWidth(0, 80)   # ID КРД
+            self.records_table.setColumnWidth(1, 100)  # Номер КРД
+            self.records_table.setColumnWidth(2, 250)  # ФИО
+            self.records_table.setColumnWidth(3, 150)  # Дата удаления
+            self.records_table.setColumnWidth(4, 120)  # Удалил
+        
+        elif record_type == "templates":
+            # Загрузка удаленных шаблонов
+            query = QSqlQuery(self.db)
+            query.prepare("""
+                SELECT 
+                    dt.id as "ID шаблона",
+                    dt.name as "Название шаблона",
+                    dt.description as "Описание",
+                    dt.deleted_at as "Дата удаления",
+                    COALESCE(u.username, 'Неизвестно') as "Удалил"
+                FROM krd.document_templates dt
+                LEFT JOIN krd.users u ON dt.deleted_by = u.id
+                WHERE dt.is_deleted = TRUE
+                    AND dt.deleted_at >= ?
+                    AND dt.deleted_at <= ?
+                ORDER BY dt.deleted_at DESC
+            """)
+            query.addBindValue(date_from)
+            query.addBindValue(f"{date_to} 23:59:59")
+            query.exec()
+            self.records_model.setQuery(query)
+            
+            # Установка ширины колонок
+            self.records_table.setColumnWidth(0, 100)  # ID шаблона
+            self.records_table.setColumnWidth(1, 250)  # Название шаблона
+            self.records_table.setColumnWidth(2, 300)  # Описание
+            self.records_table.setColumnWidth(3, 150)  # Дата удаления
+            self.records_table.setColumnWidth(4, 120)  # Удалил
+        
+        else:
+            # Загрузка всех удаленных записей
+            query = QSqlQuery(self.db)
+            query.prepare("""
+                SELECT 
+                    'КРД' as "Тип",
+                    k.id::text as "ID записи",
+                    CONCAT('КРД-', k.id) as "Идентификатор",
+                    COALESCE(s.surname, '') || ' ' || COALESCE(s.name, '') || ' ' || COALESCE(s.patronymic, '') as "Название",
+                    k.deleted_at as "Дата удаления"
+                FROM krd.krd k
+                LEFT JOIN krd.social_data s ON k.id = s.krd_id
+                WHERE k.is_deleted = TRUE
+                    AND k.deleted_at >= ?
+                    AND k.deleted_at <= ?
+                
+                UNION ALL
+                
+                SELECT 
+                    'Шаблон' as "Тип",
+                    dt.id::text as "ID записи",
+                    dt.name as "Идентификатор",
+                    dt.description as "Название",
+                    dt.deleted_at as "Дата удаления"
+                FROM krd.document_templates dt
+                WHERE dt.is_deleted = TRUE
+                    AND dt.deleted_at >= ?
+                    AND dt.deleted_at <= ?
+                
+                ORDER BY "Дата удаления" DESC
+            """)
+            query.addBindValue(date_from)
+            query.addBindValue(f"{date_to} 23:59:59")
+            query.addBindValue(date_from)
+            query.addBindValue(f"{date_to} 23:59:59")
+            query.exec()
+            self.records_model.setQuery(query)
+            
+            # Установка ширины колонок
+            self.records_table.setColumnWidth(0, 80)   # Тип
+            self.records_table.setColumnWidth(1, 80)   # ID записи
+            self.records_table.setColumnWidth(2, 200)  # Идентификатор
+            self.records_table.setColumnWidth(3, 300)  # Название
+            self.records_table.setColumnWidth(4, 150)  # Дата удаления
+        
+        # Обновляем заголовок окна
+        record_count = self.records_model.rowCount()
+        self.setWindowTitle(f"Удаленные записи - {record_count} записей")
+    
+    def on_filter_changed(self):
+        """Обработчик изменения фильтров"""
+        self.load_deleted_records()
+    
+    def restore_selected_record(self):
+        """Восстановление выбранной записи"""
+        selection_model = self.records_table.selectionModel()
+        if not selection_model.hasSelection():
+            QMessageBox.warning(self, "Внимание", "Выберите запись для восстановления")
+            return
+        
+        selected_indexes = selection_model.selectedRows()
+        if not selected_indexes:
+            QMessageBox.warning(self, "Внимание", "Выберите запись для восстановления")
+            return
+        
+        index = selected_indexes[0]
+        
+        # Определяем тип записи
+        record_type = self.record_type_combo.currentData()
+        
+        if record_type == "krd":
+            # Восстановление КРД
+            krd_id = self.records_model.data(self.records_model.index(index.row(), 0))
+            krd_number = self.records_model.data(self.records_model.index(index.row(), 1))
+            
+            reply = QMessageBox.question(
+                self,
+                "Подтверждение восстановления",
+                f"Вы действительно хотите восстановить КРД?\n\n"
+                f"Номер КРД: {krd_number}",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                try:
+                    query = QSqlQuery(self.db)
+                    query.prepare("""
+                        UPDATE krd.krd 
+                        SET is_deleted = FALSE, 
+                            deleted_at = NULL,
+                            deleted_by = NULL
+                        WHERE id = ?
+                    """)
+                    query.addBindValue(krd_id)
+                    
+                    if not query.exec():
+                        raise Exception(f"Ошибка при восстановлении КРД: {query.lastError().text()}")
+                    
+                    QMessageBox.information(
+                        self,
+                        "Успех",
+                        f"КРД №{krd_number} успешно восстановлен!"
+                    )
+                    
+                    self.load_deleted_records()
+                    
+                except Exception as e:
+                    QMessageBox.critical(
+                        self,
+                        "Ошибка",
+                        f"Ошибка при восстановлении КРД:\n{str(e)}"
+                    )
+        
+        elif record_type == "templates":
+            # Восстановление шаблона
+            template_id = self.records_model.data(self.records_model.index(index.row(), 0))
+            template_name = self.records_model.data(self.records_model.index(index.row(), 1))
+            
+            reply = QMessageBox.question(
+                self,
+                "Подтверждение восстановления",
+                f"Вы действительно хотите восстановить шаблон?\n\n"
+                f"Название: {template_name}",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                try:
+                    query = QSqlQuery(self.db)
+                    query.prepare("""
+                        UPDATE krd.document_templates 
+                        SET is_deleted = FALSE, 
+                            deleted_at = NULL,
+                            deleted_by = NULL
+                        WHERE id = ?
+                    """)
+                    query.addBindValue(template_id)
+                    
+                    if not query.exec():
+                        raise Exception(f"Ошибка при восстановлении шаблона: {query.lastError().text()}")
+                    
+                    QMessageBox.information(
+                        self,
+                        "Успех",
+                        f"Шаблон \"{template_name}\" успешно восстановлен!"
+                    )
+                    
+                    self.load_deleted_records()
+                    
+                except Exception as e:
+                    QMessageBox.critical(
+                        self,
+                        "Ошибка",
+                        f"Ошибка при восстановлении шаблона:\n{str(e)}"
+                    )
+        
+        else:
+            # Автоматическое определение типа записи
+            record_type_text = self.records_model.data(self.records_model.index(index.row(), 0))
+            record_id = self.records_model.data(self.records_model.index(index.row(), 1))
+            record_name = self.records_model.data(self.records_model.index(index.row(), 2))
+            
+            reply = QMessageBox.question(
+                self,
+                "Подтверждение восстановления",
+                f"Вы действительно хотите восстановить запись?\n\n"
+                f"Тип: {record_type_text}\n"
+                f"Идентификатор: {record_name}",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No
+            )
+            
+            if reply == QMessageBox.StandardButton.Yes:
+                try:
+                    if record_type_text == "КРД":
+                        query = QSqlQuery(self.db)
+                        query.prepare("""
+                            UPDATE krd.krd 
+                            SET is_deleted = FALSE, 
+                                deleted_at = NULL,
+                                deleted_by = NULL
+                            WHERE id = ?
+                        """)
+                        query.addBindValue(record_id)
+                    else:
+                        query = QSqlQuery(self.db)
+                        query.prepare("""
+                            UPDATE krd.document_templates 
+                            SET is_deleted = FALSE, 
+                                deleted_at = NULL,
+                                deleted_by = NULL
+                            WHERE id = ?
+                        """)
+                        query.addBindValue(record_id)
+                    
+                    if not query.exec():
+                        raise Exception(f"Ошибка при восстановлении записи: {query.lastError().text()}")
+                    
+                    QMessageBox.information(
+                        self,
+                        "Успех",
+                        f"Запись успешно восстановлена!"
+                    )
+                    
+                    self.load_deleted_records()
+                    
+                except Exception as e:
+                    QMessageBox.critical(
+                        self,
+                        "Ошибка",
+                        f"Ошибка при восстановлении записи:\n{str(e)}"
+                    )
