@@ -129,7 +129,10 @@ class OutgoingRequestsTab(QWidget):
         menu.exec(self.requests_table.mapToGlobal(position))
     
     def on_request_double_clicked(self, index):
-        """Обработка двойного клика - открытие документа средствами ОС"""
+        """Обработка двойного клика - выгрузка и открытие документа"""
+        from PyQt6.QtCore import QByteArray
+        from datetime import datetime
+        
         request_id = self.requests_model.data(self.requests_model.index(index.row(), 0))
         
         if not request_id:
@@ -137,80 +140,119 @@ class OutgoingRequestsTab(QWidget):
             return
         
         try:
-            # Получаем байты документа из базы
+            print("\n" + "="*60)
+            print("📂 ВЫГРУЗКА ДОКУМЕНТА ИЗ БАЗЫ ДАННЫХ")
+            print("="*60)
+            print(f"🔍 Request ID: {request_id}")
+            
+            # 1. Получение данных из БД
             query = QSqlQuery(self.db)
             query.prepare("SELECT document_data, issue_number FROM krd.outgoing_requests WHERE id = ?")
             query.addBindValue(request_id)
             
             if not query.exec() or not query.next():
-                QMessageBox.warning(self, "Ошибка", f"Не удалось загрузить документ из базы:\n{query.lastError().text()}")
+                QMessageBox.warning(self, "Ошибка", f"Не удалось загрузить документ:\n{query.lastError().text()}")
                 return
             
             document_bytes = query.value(0)
             issue_number = query.value(1)
             
-            # Обработка разных типов данных из базы
+            print(f"📦 Тип данных из БД: {type(document_bytes)}")
+            
             if document_bytes is None:
-                QMessageBox.information(self, "Информация", f"Документ для запроса №{issue_number} отсутствует в базе данных")
+                QMessageBox.information(self, "Информация", f"Документ для запроса №{issue_number} отсутствует")
                 return
             
-            # Преобразуем в байты, если это QByteArray
-            if hasattr(document_bytes, 'data'):  # QByteArray
+            # 2. Нормализация данных (конвертация в bytes)
+            if isinstance(document_bytes, QByteArray):
                 document_bytes = bytes(document_bytes.data())
-            elif not isinstance(document_bytes, bytes):
+                print("ℹ️ Преобразовано из QByteArray")
+            elif isinstance(document_bytes, memoryview):
+                document_bytes = document_bytes.tobytes()
+                print("ℹ️ Преобразовано из memoryview")
+            elif isinstance(document_bytes, bytes):
+                print("ℹ️ Данные уже в формате bytes")
+                pass
+            else:
                 document_bytes = bytes(document_bytes)
             
             if not document_bytes or len(document_bytes) == 0:
-                QMessageBox.information(self, "Информация", f"Документ для запроса №{issue_number} пустой")
+                QMessageBox.warning(self, "Ошибка", f"Документ №{issue_number} пустой в базе данных")
+                return
+
+            print(f"✅ Размер после конвертации: {len(document_bytes)} байт")
+
+            # 3. Проверка сигнатуры файла (DOCX начинается с PK)
+            if not document_bytes.startswith(b'PK'):
+                QMessageBox.warning(self, "Ошибка", 
+                    f"Документ №{issue_number} поврежден или не является файлом DOCX.\n"
+                    f"(Сигнатура: {document_bytes[:4]})")
                 return
             
-            print(f"📂 Размер документа из базы: {len(document_bytes)} байт")
-            
-            # ✅ ИСПРАВЛЕНО: Заменяем недопустимые символы в номере запроса
-            import re
+            # 4. ✅ ДИАЛОГ СОХРАНЕНИЯ ФАЙЛА
             safe_issue_number = re.sub(r'[<>:"/\\|?*]', '_', str(issue_number))
+            default_filename = f"Запрос_{safe_issue_number}_{request_id}.docx"
             
-            # Сохраняем во временный файл с безопасным именем
-            with tempfile.NamedTemporaryFile(
-                delete=False, 
-                suffix=f'_Запрос_{safe_issue_number}.docx',
-                mode='wb'
-            ) as tmp:
-                tmp.write(document_bytes)
-                temp_path = tmp.name
+            save_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Сохранить документ",
+                default_filename,
+                "Word документы (*.docx);;Все файлы (*)"
+            )
             
-            # Проверяем размер временного файла
-            temp_size = os.path.getsize(temp_path)
-            print(f"💾 Размер временного файла: {temp_size} байт")
+            # Если пользователь отменил сохранение
+            if not save_path:
+                print("⚠️ Пользователь отменил сохранение")
+                return
             
-            if temp_size == 0:
-                os.unlink(temp_path)
-                raise Exception("Временный файл пустой!")
+            # Добавляем расширение .docx если пользователь не указал
+            if not save_path.lower().endswith('.docx'):
+                save_path += '.docx'
             
-            # Открываем документ средствами операционной системы
+            print(f"💾 Путь сохранения: {save_path}")
+            
+            # 5. ✅ СОХРАНЕНИЕ ФАЙЛА НА ДИСК
+            with open(save_path, 'wb') as f:
+                f.write(document_bytes)
+                f.flush()
+                os.fsync(f.fileno())  # Гарантия записи на диск
+            
+            saved_size = os.path.getsize(save_path)
+            print(f"💾 Размер сохранённого файла: {saved_size} байт")
+            
+            if saved_size == 0:
+                raise Exception("Сохранённый файл пустой!")
+            
+            if saved_size != len(document_bytes):
+                print(f"⚠️ Внимание: размер на диске ({saved_size}) != в памяти ({len(document_bytes)})")
+            
+            # 6. ✅ ОТКРЫТИЕ ФАЙЛА СРЕДСТВАМИ ОС
+            print(f"🚀 Открытие файла средствами ОС...")
+            
             if sys.platform == 'win32':
-                os.startfile(temp_path)
-            elif sys.platform == 'darwin':  # macOS
-                subprocess.run(['open', temp_path])
-            else:  # Linux и другие Unix-подобные
-                subprocess.run(['xdg-open', temp_path])
+                os.startfile(save_path)
+            elif sys.platform == 'darwin':
+                subprocess.run(['open', save_path])
+            else:
+                subprocess.run(['xdg-open', save_path])
             
-            # Логирование открытия
+            # 7. Логирование
             if self.audit_logger:
                 self.audit_logger.log_action(
                     action_type='DOCUMENT_OPEN',
                     table_name='outgoing_requests',
                     record_id=request_id,
                     krd_id=self.krd_id,
-                    description=f'Открыт документ запроса №{issue_number} для КРД-{self.krd_id}'
+                    description=f'Выгружен и открыт документ запроса №{issue_number}'
                 )
             
-            print(f"✅ Документ запроса №{issue_number} открыт: {temp_path}")
+            print(f"✅ Документ успешно сохранён и открыт: {save_path}")
+            print("="*60 + "\n")
             
         except Exception as e:
             import traceback
             traceback.print_exc()
-            QMessageBox.critical(self, "Ошибка", f"Ошибка при открытии документа:\n{str(e)}")
+            QMessageBox.critical(self, "Ошибка", f"Ошибка при выгрузке документа:\n{str(e)}")
     def delete_request(self, index):
         """Удаление запроса"""
         request_id = self.requests_model.data(self.requests_model.index(index.row(), 0))

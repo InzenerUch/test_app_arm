@@ -834,119 +834,115 @@ class DocumentGeneratorTab(QWidget):
         return ""
     
     def save_to_database(self):
-        """Сохранение сгенерированного документа в базу данных (таблица outgoing_requests)"""
-        if not self.generated_doc_path or not os.path.exists(self.generated_doc_path):
-            QMessageBox.warning(self, "Ошибка", "Сначала сгенерируйте документ")
-            return
+        """Сохранение сгенерированного документа в базу данных"""
+        print("\n=== НАЧАЛО СОХРАНЕНИЯ В БД ===")
         
-        # Проверяем размер файла
-        file_size = os.path.getsize(self.generated_doc_path)
-        if file_size == 0:
-            QMessageBox.warning(self, "Ошибка", "Сгенерированный документ пустой!")
-            return
+        # 1. Проверка пути к файлу
+        if not self.generated_doc_path:
+            raise Exception("Путь к файлу не указан (generated_doc_path is None)")
+        if not os.path.exists(self.generated_doc_path):
+            raise Exception(f"Файл не найден: {self.generated_doc_path}")
         
-        # Получаем выбранный тип запроса
-        request_type_id = self.request_type_combo.currentData()
-        if not request_type_id:
-            QMessageBox.warning(self, "Ошибка", "Выберите тип запроса")
-            return
-        
-        # Получаем адресата
-        recipient_name = self.recipient_input.text().strip()
-        if not recipient_name:
-            QMessageBox.warning(self, "Ошибка", "Введите адресата")
-            return
-        
+        # 2. Чтение файла
         try:
-            # Читаем содержимое сгенерированного документа как байты
             with open(self.generated_doc_path, 'rb') as f:
                 document_bytes = f.read()
-            
-            if not document_bytes or len(document_bytes) == 0:
-                raise Exception("Документ пустой или не был прочитан")
-            
-            print(f"📄 Размер документа для сохранения: {len(document_bytes)} байт")
-            
-            # Генерируем номер запроса
-            issue_number = self.generate_request_number()
-            
-            # ИСПРАВЛЕНО: Используем QDate вместо datetime.date для совместимости с QSqlQuery
-            from PyQt6.QtCore import QDate, QByteArray
-            issue_date = QDate.currentDate()
-            
-            # Сохранение в базу
-            query = QSqlQuery(self.db)
-            query.prepare("""
-                INSERT INTO krd.outgoing_requests (
-                    krd_id, request_type_id, recipient_name, military_unit_id,
-                    issue_date, issue_number, document_data
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
-            """)
-            
-            # Привязываем значения в правильном порядке с корректными типами
-            query.addBindValue(self.krd_id)                      # INTEGER
-            query.addBindValue(request_type_id)                  # INTEGER
-            query.addBindValue(recipient_name)                   # VARCHAR
-            query.addBindValue(None)                             # NULL для military_unit_id
-            query.addBindValue(issue_date)                       # QDate (не datetime.date!)
-            query.addBindValue(issue_number)                     # VARCHAR
-            query.addBindValue(QByteArray(document_bytes))       # QByteArray для бинарных данных
-            
-            if query.exec():
-                request_id = query.lastInsertId()
-                
-                # Проверяем, что документ действительно сохранился
-                check_query = QSqlQuery(self.db)
-                check_query.prepare("SELECT LENGTH(document_data) FROM krd.outgoing_requests WHERE id = ?")
-                check_query.addBindValue(request_id)
-                check_query.exec()
-                
-                if check_query.next():
-                    saved_size = check_query.value(0)
-                    print(f"✅ Документ сохранен в базу. Размер: {saved_size} байт")
-                    
-                    if saved_size == 0:
-                        raise Exception("Документ сохранен как пустой!")
-                
-                QMessageBox.information(
-                    self, 
-                    "Успех", 
-                    f"Запрос успешно сохранен в базу!\n\nID: {request_id}\nНомер: {issue_number}\nТип: {self.request_type_combo.currentText()}\nАдресат: {recipient_name}\nРазмер документа: {len(document_bytes)} байт"
-                )
-                
-                # Логирование
-                if self.audit_logger:
-                    self.audit_logger.log_action(
-                        action_type='REQUEST_CREATE',
-                        table_name='outgoing_requests',
-                        record_id=request_id,
-                        krd_id=self.krd_id,
-                        description=f'Создан запрос №{issue_number} для КРД-{self.krd_id} (Тип: {self.request_type_combo.currentText()}, Адресат: {recipient_name})'
-                    )
-                
-                # Очищаем временный файл
-                try:
-                    os.unlink(self.generated_doc_path)
-                    self.generated_doc_path = None
-                except Exception as e:
-                    print(f"⚠️ Не удалось удалить временный файл: {e}")
-                
-                # Очищаем поля ввода
-                self.recipient_input.clear()
-                
-                # Обновляем список запросов в родительском окне (если есть)
-                parent = self.parent()
-                if parent and hasattr(parent, 'load_requests'):
-                    parent.load_requests()
-                
-            else:
-                error_text = query.lastError().text()
-                raise Exception(f"Ошибка сохранения запроса: {error_text}")
-            
         except Exception as e:
-            import traceback
-            traceback.print_exc()
-            QMessageBox.critical(self, "Ошибка", f"Ошибка сохранения запроса в базу:\n{str(e)}")   
+            raise Exception(f"Не удалось прочитать файл: {e}")
+        
+        if not document_bytes:
+            raise Exception("Файл пустой (0 байт)")
+        
+        print(f"✅ Файл прочитан: {len(document_bytes)} байт")
+        print(f"✅ Тип данных: {type(document_bytes)}")
+        
+        # 3. Проверка полей формы
+        request_type_id = self.request_type_combo.currentData()
+        if not request_type_id:
+            raise Exception("Не выбран тип запроса")
+        
+        recipient_name = self.recipient_input.text().strip()
+        if not recipient_name:
+            raise Exception("Не указан адресат")
+        
+        # 4. Подготовка данных
+        issue_number = self.generate_request_number()
+        from PyQt6.QtCore import QDate
+        issue_date = QDate.currentDate()
+        
+        print(f"📝 Данные для записи:")
+        print(f"  1. krd_id: {self.krd_id} (type: {type(self.krd_id)})")
+        print(f"  2. request_type_id: {request_type_id} (type: {type(request_type_id)})")
+        print(f"  3. recipient_name: {recipient_name}")
+        print(f"  4. military_unit_id: NULL")
+        print(f"  5. issue_date: {issue_date}")
+        print(f"  6. issue_number: {issue_number}")
+        print(f"  7. document_data: {len(document_bytes)} байт (type: {type(document_bytes)})")
+        
+        # 5. Выполнение запроса
+        query = QSqlQuery(self.db)
+        query.prepare("""
+            INSERT INTO krd.outgoing_requests (
+                krd_id, request_type_id, recipient_name, military_unit_id,
+                issue_date, issue_number, document_data
+            ) VALUES (?, ?, ?, ?, ?, ?, ?)
+        """)
+        
+        # Привязка параметров
+        query.addBindValue(self.krd_id)
+        query.addBindValue(request_type_id)
+        query.addBindValue(recipient_name)
+        query.addBindValue(None)
+        query.addBindValue(issue_date)
+        query.addBindValue(issue_number)
+        
+        # ✅ КРИТИЧЕСКИ ВАЖНО: Привязываем байты напрямую
+        query.addBindValue(QByteArray(document_bytes))
+        
+        print("🚀 Выполнение SQL запроса...")
+        
+        if not query.exec():
+            err = query.lastError()
+            print(f"❌ ОШИБКА SQL: {err.text()}")
+            print(f"❌ Driver: {err.driverText()}")
+            raise Exception(f"Ошибка SQL: {err.text()}")
+        
+        request_id = query.lastInsertId()
+        print(f"✅ УСПЕХ! Запись ID: {request_id}")
+        
+        # 6. Проверка сохранения
+        check = QSqlQuery(self.db)
+        check.prepare("SELECT LENGTH(document_data) FROM krd.outgoing_requests WHERE id = ?")
+        check.addBindValue(request_id)
+        if check.exec() and check.next():
+            size = check.value(0)
+            print(f"💾 Проверка: в базе {size} байт")
+            if size != len(document_bytes):
+                print(f"⚠️ ВНИМАНИЕ: Размер не совпадает!")
+        
+        # 7. Завершение
+        QMessageBox.information(self, "Успех", f"Запрос №{issue_number} сохранен!")
+        
+        if self.audit_logger:
+            self.audit_logger.log_action(
+                action_type='REQUEST_CREATE',
+                table_name='outgoing_requests',
+                record_id=request_id,
+                krd_id=self.krd_id,
+                description=f'Создан запрос №{issue_number}'
+            )
+        
+        # Очистка
+        try:
+            if self.generated_doc_path and os.path.exists(self.generated_doc_path):
+                os.unlink(self.generated_doc_path)
+            self.generated_doc_path = None
+        except: pass
+        
+        self.recipient_input.clear()
+        parent = self.parent()
+        if parent and hasattr(parent, 'load_requests'):
+            parent.load_requests()
     def generate_request_number(self):
         """Генерация номера запроса в формате КРД-{krd_id}/З-{номер}"""
         query = QSqlQuery(self.db)
