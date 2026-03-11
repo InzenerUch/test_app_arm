@@ -5,13 +5,14 @@
 import os
 import sys
 import tempfile
+from docx.shared import Pt
 import re
 import traceback
 from docx import Document
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton, 
     QLabel, QGroupBox, QFileDialog, QMessageBox, QComboBox, QTabWidget, QLineEdit,
-    QTableWidget, QTableWidgetItem, QHeaderView, QAbstractItemView, QTableView, QMenu
+    QTableWidget, QTableWidgetItem, QGridLayout, QHeaderView, QAbstractItemView, QTableView, QMenu
 )
 from PyQt6.QtCore import Qt, QByteArray, QPoint
 from PyQt6.QtSql import QSqlQuery, QSqlQueryModel
@@ -105,10 +106,31 @@ class DocumentGeneratorTab(QWidget):
         mapping_group.setLayout(mapping_layout)
         layout.addWidget(mapping_group)
         
-        # Кнопки генерации
+        # Поля для сохранения в базу данных
+        save_db_group = QGroupBox("Сохранение запроса в базу данных")
+        save_db_layout = QGridLayout()
+        
+        save_db_layout.addWidget(QLabel("Тип запроса *:"), 0, 0)
+        self.request_type_combo = QComboBox()
+        self.load_request_types()
+        save_db_layout.addWidget(self.request_type_combo, 0, 1, 1, 2)
+        
+        save_db_layout.addWidget(QLabel("Адресат *:"), 1, 0)
+        self.recipient_input = QLineEdit()
+        save_db_layout.addWidget(self.recipient_input, 1, 1, 1, 2)
+        
+        save_to_db_btn = QPushButton("Сохранить запрос в базу")
+        save_to_db_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; font-size: 11px;")
+        save_to_db_btn.clicked.connect(self.save_to_database)
+        save_db_layout.addWidget(save_to_db_btn, 2, 0, 1, 3)
+        
+        save_db_group.setLayout(save_db_layout)
+        layout.addWidget(save_db_group)
+        
+        # Кнопки генерации и сохранения на диск
         gen_layout = QHBoxLayout()
         gen_layout.addWidget(QPushButton("Сформировать документ", clicked=self.generate_document))
-        gen_layout.addWidget(QPushButton("Сохранить документ", clicked=self.save_document))
+        gen_layout.addWidget(QPushButton("Сохранить на диск", clicked=self.save_to_disk))
         layout.addLayout(gen_layout)
         
         return widget
@@ -418,7 +440,7 @@ class DocumentGeneratorTab(QWidget):
         else:
             template_bytes = bytes(data) if data else b''
         
-        if not template_bytes:  # ✅ Исправлено: было template_
+        if not template_bytes:
             self.template_variables = []
             return
         
@@ -482,6 +504,16 @@ class DocumentGeneratorTab(QWidget):
             "garrisons": ["name"],
             "positions": ["name"]
         }
+    
+    def load_request_types(self):
+        """Загрузка типов запросов из базы данных"""
+        self.request_type_combo.clear()
+        query = QSqlQuery(self.db)
+        query.exec("SELECT id, name FROM krd.request_types ORDER BY name")
+        while query.next():
+            type_id = query.value(0)
+            type_name = query.value(1)
+            self.request_type_combo.addItem(type_name, type_id)
     
     def add_field_mapping(self):
         """Добавление сопоставления"""
@@ -604,17 +636,24 @@ class DocumentGeneratorTab(QWidget):
             template_name = query.value(1)
             template_data = bytes(query.value(0)) if isinstance(query.value(0), QByteArray) else bytes(query.value(0))
             
-            if not template_data:  # ✅ Исправлено: было template_
+            if not template_data:
                 raise Exception("Шаблон пуст")
             
             print(f"\n📄 Генерация документа: {template_name}")
             
+            # Сохраняем шаблон во временный файл
             with tempfile.NamedTemporaryFile(delete=False, suffix='.docx') as tmp:
                 tmp.write(template_data)
                 template_path = tmp.name
             
+            # Проверяем размер шаблона
+            template_size = os.path.getsize(template_path)
+            print(f"📂 Размер шаблона: {template_size} байт")
+            
+            # Загружаем документ
             doc = Document(template_path)
             
+            # Получаем данные для подстановки
             context = self.get_context_data(template_id)
             
             print(f"Контекст ({len(context)} переменных):")
@@ -643,12 +682,17 @@ class DocumentGeneratorTab(QWidget):
             
             print(f"✅ Заменено переменных: {replacements}")
             
+            # Сохраняем сгенерированный документ
             with tempfile.NamedTemporaryFile(delete=False, suffix='.docx') as out_file:
                 doc.save(out_file.name)
                 self.generated_doc_path = out_file.name
             
+            # Проверяем размер сгенерированного документа
             file_size = os.path.getsize(self.generated_doc_path)
-            print(f"💾 Размер файла: {file_size} байт")
+            print(f"💾 Размер сгенерированного файла: {file_size} байт")
+            
+            if file_size == 0:
+                raise Exception("Сгенерированный документ пустой!")
             
             os.unlink(template_path)
             
@@ -670,14 +714,13 @@ class DocumentGeneratorTab(QWidget):
     def _replace_text_in_element(self, element, context):
         """Замена переменных в элементе документа"""
         replacements = 0
-        
         if hasattr(element, 'text') and hasattr(element, 'runs'):
             original_text = element.text
-            
             if not original_text:
                 return 0
             
             new_text = original_text
+            # 1. Сначала выполняем замену переменных
             for var_name, value in context.items():
                 placeholder = f"{{{{{var_name}}}}}"
                 if placeholder in new_text:
@@ -685,14 +728,14 @@ class DocumentGeneratorTab(QWidget):
                     replacements += count
                     new_text = new_text.replace(placeholder, str(value))
             
-            if new_text != original_text:
-                if element.runs:
+            # 2. ✅ ИСПРАВЛЕНИЕ: Обрабатываем ВСЕ runs, а не только первый
+            if element.runs:
+                if new_text != original_text:
+                    # Была замена - объединяем всё в первый run
                     first_run = element.runs[0]
-                    
                     saved_bold = first_run.bold
                     saved_italic = first_run.italic
                     saved_underline = first_run.underline
-                    
                     saved_font_name = None
                     saved_font_size = None
                     saved_font_color = None
@@ -704,7 +747,6 @@ class DocumentGeneratorTab(QWidget):
                             saved_font_color = first_run.font.color.rgb
                     
                     first_run.text = new_text
-                    
                     first_run.bold = saved_bold
                     first_run.italic = saved_italic
                     first_run.underline = saved_underline
@@ -714,9 +756,12 @@ class DocumentGeneratorTab(QWidget):
                             first_run.font.name = saved_font_name
                         if saved_font_size:
                             first_run.font.size = saved_font_size
+                        else:
+                            first_run.font.size = Pt(14)
                         if saved_font_color:
                             first_run.font.color.rgb = saved_font_color
                     
+                    # Удаляем остальные runs
                     for i in range(len(element.runs) - 1, 0, -1):
                         run = element.runs[i]
                         if hasattr(run, '_element') and run._element in element._element:
@@ -725,11 +770,22 @@ class DocumentGeneratorTab(QWidget):
                             except:
                                 pass
                 else:
-                    element.clear()
-                    new_run = element.add_run(new_text)
-                    new_run.font.name = 'Times New Roman'
-        
-        return replacements
+                    # ✅ НОВОЕ: Замена не проводилась, но исправляем шрифт во ВСЕХ runs
+                    for run in element.runs:
+                        if run.font:
+                            if not run.font.size or run.font.size is None:
+                                run.font.size = Pt(14)
+                            if not run.font.name:
+                                run.font.name = 'Times New Roman'
+            else:
+                # Нет runs - создаём новый
+                element.clear()
+                new_run = element.add_run(new_text)
+                new_run.font.name = 'Times New Roman'
+                new_run.font.size = Pt(14)
+            
+            return replacements
+        return 0
     
     def get_context_data(self, template_id):
         """Получение данных для подстановки"""
@@ -777,10 +833,146 @@ class DocumentGeneratorTab(QWidget):
         
         return ""
     
-    def save_document(self):
-        """Сохранение документа"""
+    def save_to_database(self):
+        """Сохранение сгенерированного документа в базу данных (таблица outgoing_requests)"""
         if not self.generated_doc_path or not os.path.exists(self.generated_doc_path):
             QMessageBox.warning(self, "Ошибка", "Сначала сгенерируйте документ")
+            return
+        
+        # Проверяем размер файла
+        file_size = os.path.getsize(self.generated_doc_path)
+        if file_size == 0:
+            QMessageBox.warning(self, "Ошибка", "Сгенерированный документ пустой!")
+            return
+        
+        # Получаем выбранный тип запроса
+        request_type_id = self.request_type_combo.currentData()
+        if not request_type_id:
+            QMessageBox.warning(self, "Ошибка", "Выберите тип запроса")
+            return
+        
+        # Получаем адресата
+        recipient_name = self.recipient_input.text().strip()
+        if not recipient_name:
+            QMessageBox.warning(self, "Ошибка", "Введите адресата")
+            return
+        
+        try:
+            # Читаем содержимое сгенерированного документа как байты
+            with open(self.generated_doc_path, 'rb') as f:
+                document_bytes = f.read()
+            
+            if not document_bytes or len(document_bytes) == 0:
+                raise Exception("Документ пустой или не был прочитан")
+            
+            print(f"📄 Размер документа для сохранения: {len(document_bytes)} байт")
+            
+            # Генерируем номер запроса
+            issue_number = self.generate_request_number()
+            
+            # ИСПРАВЛЕНО: Используем QDate вместо datetime.date для совместимости с QSqlQuery
+            from PyQt6.QtCore import QDate, QByteArray
+            issue_date = QDate.currentDate()
+            
+            # Сохранение в базу
+            query = QSqlQuery(self.db)
+            query.prepare("""
+                INSERT INTO krd.outgoing_requests (
+                    krd_id, request_type_id, recipient_name, military_unit_id,
+                    issue_date, issue_number, document_data
+                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+            """)
+            
+            # Привязываем значения в правильном порядке с корректными типами
+            query.addBindValue(self.krd_id)                      # INTEGER
+            query.addBindValue(request_type_id)                  # INTEGER
+            query.addBindValue(recipient_name)                   # VARCHAR
+            query.addBindValue(None)                             # NULL для military_unit_id
+            query.addBindValue(issue_date)                       # QDate (не datetime.date!)
+            query.addBindValue(issue_number)                     # VARCHAR
+            query.addBindValue(QByteArray(document_bytes))       # QByteArray для бинарных данных
+            
+            if query.exec():
+                request_id = query.lastInsertId()
+                
+                # Проверяем, что документ действительно сохранился
+                check_query = QSqlQuery(self.db)
+                check_query.prepare("SELECT LENGTH(document_data) FROM krd.outgoing_requests WHERE id = ?")
+                check_query.addBindValue(request_id)
+                check_query.exec()
+                
+                if check_query.next():
+                    saved_size = check_query.value(0)
+                    print(f"✅ Документ сохранен в базу. Размер: {saved_size} байт")
+                    
+                    if saved_size == 0:
+                        raise Exception("Документ сохранен как пустой!")
+                
+                QMessageBox.information(
+                    self, 
+                    "Успех", 
+                    f"Запрос успешно сохранен в базу!\n\nID: {request_id}\nНомер: {issue_number}\nТип: {self.request_type_combo.currentText()}\nАдресат: {recipient_name}\nРазмер документа: {len(document_bytes)} байт"
+                )
+                
+                # Логирование
+                if self.audit_logger:
+                    self.audit_logger.log_action(
+                        action_type='REQUEST_CREATE',
+                        table_name='outgoing_requests',
+                        record_id=request_id,
+                        krd_id=self.krd_id,
+                        description=f'Создан запрос №{issue_number} для КРД-{self.krd_id} (Тип: {self.request_type_combo.currentText()}, Адресат: {recipient_name})'
+                    )
+                
+                # Очищаем временный файл
+                try:
+                    os.unlink(self.generated_doc_path)
+                    self.generated_doc_path = None
+                except Exception as e:
+                    print(f"⚠️ Не удалось удалить временный файл: {e}")
+                
+                # Очищаем поля ввода
+                self.recipient_input.clear()
+                
+                # Обновляем список запросов в родительском окне (если есть)
+                parent = self.parent()
+                if parent and hasattr(parent, 'load_requests'):
+                    parent.load_requests()
+                
+            else:
+                error_text = query.lastError().text()
+                raise Exception(f"Ошибка сохранения запроса: {error_text}")
+            
+        except Exception as e:
+            import traceback
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Ошибка сохранения запроса в базу:\n{str(e)}")   
+    def generate_request_number(self):
+        """Генерация номера запроса в формате КРД-{krd_id}/З-{номер}"""
+        query = QSqlQuery(self.db)
+        query.prepare("""
+            SELECT COUNT(*) FROM krd.outgoing_requests 
+            WHERE krd_id = ? AND issue_date = CURRENT_DATE
+        """)
+        query.addBindValue(self.krd_id)
+        query.exec()
+        
+        count = 1
+        if query.next():
+            count = query.value(0) + 1
+        
+        return f"КРД-{self.krd_id}/З-{count}"
+
+    def save_to_disk(self):
+        """Сохранение документа на диск (без сохранения в базу)"""
+        if not self.generated_doc_path or not os.path.exists(self.generated_doc_path):
+            QMessageBox.warning(self, "Ошибка", "Сначала сгенерируйте документ")
+            return
+        
+        # Проверяем размер файла
+        file_size = os.path.getsize(self.generated_doc_path)
+        if file_size == 0:
+            QMessageBox.warning(self, "Ошибка", "Сгенерированный документ пустой!")
             return
         
         default_name = f"Документ_{self.krd_id}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.docx"
@@ -797,6 +989,14 @@ class DocumentGeneratorTab(QWidget):
                 import shutil
                 shutil.copy2(self.generated_doc_path, path)
                 
+                # Проверяем размер сохраненного файла
+                saved_size = os.path.getsize(path)
+                print(f"✅ Документ сохранен на диск. Размер: {saved_size} байт")
+                
+                if saved_size == 0:
+                    os.unlink(path)
+                    raise Exception("Сохраненный файл пустой!")
+                
                 # Логирование сохранения документа
                 if self.audit_logger:
                     filename = os.path.basename(path)
@@ -808,12 +1008,12 @@ class DocumentGeneratorTab(QWidget):
                 except:
                     pass
                 
-                QMessageBox.information(self, "Успех", f"Документ сохранён:\n{path}")
+                QMessageBox.information(self, "Успех", f"Документ сохранён на диск:\n{path}\nРазмер: {saved_size} байт")
                 
             except Exception as e:
                 traceback.print_exc()
                 QMessageBox.critical(self, "Ошибка", f"Ошибка сохранения:\n{str(e)}")
-    
+
     def save_field_mappings(self, template_id):
         """Сохранение сопоставлений полей"""
         try:
