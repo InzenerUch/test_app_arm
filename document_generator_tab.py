@@ -123,15 +123,17 @@ class DocumentGeneratorTab(QWidget):
         save_to_db_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; font-size: 11px;")
         save_to_db_btn.clicked.connect(self.save_to_database)
         save_db_layout.addWidget(save_to_db_btn, 2, 0, 1, 3)
+        save_db_layout.addWidget(QPushButton("Сформировать документ", clicked=self.generate_document),3,0)
+        save_db_layout.addWidget(QPushButton("Сохранить на диск", clicked=self.save_to_disk),3,1)
         
         save_db_group.setLayout(save_db_layout)
         layout.addWidget(save_db_group)
         
         # Кнопки генерации и сохранения на диск
-        gen_layout = QHBoxLayout()
-        gen_layout.addWidget(QPushButton("Сформировать документ", clicked=self.generate_document))
-        gen_layout.addWidget(QPushButton("Сохранить на диск", clicked=self.save_to_disk))
-        layout.addLayout(gen_layout)
+        # gen_layout = QHBoxLayout()
+        # gen_layout.addWidget(QPushButton("Сформировать документ", clicked=self.generate_document))
+        # gen_layout.addWidget(QPushButton("Сохранить на диск", clicked=self.save_to_disk))
+        # layout.addLayout(gen_layout)
         
         return widget
     
@@ -836,6 +838,14 @@ class DocumentGeneratorTab(QWidget):
     def save_to_database(self):
         """Сохранение сгенерированного документа в базу данных"""
         print("\n=== НАЧАЛО СОХРАНЕНИЯ В БД ===")
+        request_type_id = self.request_type_combo.currentData()
+        if not request_type_id:
+            raise Exception("Не выбран тип запроса")
+        
+        recipient_name = self.recipient_input.text().strip()
+        if not recipient_name:
+            raise Exception("Не указан адресат")
+        self.generate_document()
         
         # 1. Проверка пути к файлу
         if not self.generated_doc_path:
@@ -856,14 +866,6 @@ class DocumentGeneratorTab(QWidget):
         print(f"✅ Файл прочитан: {len(document_bytes)} байт")
         print(f"✅ Тип данных: {type(document_bytes)}")
         
-        # 3. Проверка полей формы
-        request_type_id = self.request_type_combo.currentData()
-        if not request_type_id:
-            raise Exception("Не выбран тип запроса")
-        
-        recipient_name = self.recipient_input.text().strip()
-        if not recipient_name:
-            raise Exception("Не указан адресат")
         
         # 4. Подготовка данных
         issue_number = self.generate_request_number()

@@ -1,6 +1,7 @@
 """
 Вкладка запросов и поручений с генерацией документов из шаблонов
 Хранение документов в базе данных в виде байтов (BYTEA)
+Мягкое удаление запросов (скрытие от пользователя, но сохранение в БД)
 """
 
 from PyQt6.QtWidgets import (
@@ -8,7 +9,7 @@ from PyQt6.QtWidgets import (
     QLineEdit, QTextEdit, QDateEdit, QLabel, QPushButton, QComboBox,
     QTableView, QMessageBox, QFileDialog, QMenu
 )
-from PyQt6.QtCore import Qt, QDate, QPoint
+from PyQt6.QtCore import Qt, QDate, QPoint, QTime
 from PyQt6.QtSql import QSqlQuery, QSqlQueryModel
 from PyQt6.QtGui import QFont, QAction
 import os
@@ -16,6 +17,7 @@ import tempfile
 import re 
 import subprocess
 import sys
+import traceback
 
 from audit_logger import AuditLogger
 from document_generator_tab import DocumentGeneratorTab
@@ -98,8 +100,8 @@ class OutgoingRequestsTab(QWidget):
         refresh_btn.clicked.connect(self.load_requests)
         btn_layout.addWidget(refresh_btn)
         
-        delete_btn = QPushButton("Удалить запрос")
-        delete_btn.setStyleSheet("background-color: #ff6b6b; color: white;")
+        delete_btn = QPushButton("Скрыть запрос (мягкое удаление)")
+        delete_btn.setStyleSheet("background-color: #ff6b6b; color: white; font-weight: bold;")
         delete_btn.clicked.connect(self.delete_selected_request)
         btn_layout.addWidget(delete_btn)
         
@@ -121,8 +123,8 @@ class OutgoingRequestsTab(QWidget):
         open_action.triggered.connect(lambda: self.on_request_double_clicked(index))
         menu.addAction(open_action)
         
-        # Действие "Удалить запрос"
-        delete_action = QAction("Удалить запрос", self)
+        # Действие "Скрыть запрос (мягкое удаление)"
+        delete_action = QAction("Скрыть запрос (мягкое удаление)", self)
         delete_action.triggered.connect(lambda: self.delete_request(index))
         menu.addAction(delete_action)
         
@@ -131,7 +133,6 @@ class OutgoingRequestsTab(QWidget):
     def on_request_double_clicked(self, index):
         """Обработка двойного клика - выгрузка и открытие документа"""
         from PyQt6.QtCore import QByteArray
-        from datetime import datetime
         
         request_id = self.requests_model.data(self.requests_model.index(index.row(), 0))
         
@@ -145,13 +146,17 @@ class OutgoingRequestsTab(QWidget):
             print("="*60)
             print(f"🔍 Request ID: {request_id}")
             
-            # 1. Получение данных из БД
+            # 1. Получение данных из БД (только неудаленные запросы)
             query = QSqlQuery(self.db)
-            query.prepare("SELECT document_data, issue_number FROM krd.outgoing_requests WHERE id = ?")
+            query.prepare("""
+                SELECT document_data, issue_number 
+                FROM krd.outgoing_requests 
+                WHERE id = ? AND is_deleted = FALSE
+            """)
             query.addBindValue(request_id)
             
             if not query.exec() or not query.next():
-                QMessageBox.warning(self, "Ошибка", f"Не удалось загрузить документ:\n{query.lastError().text()}")
+                QMessageBox.warning(self, "Ошибка", f"Документ не найден или был удален из списка")
                 return
             
             document_bytes = query.value(0)
@@ -189,7 +194,7 @@ class OutgoingRequestsTab(QWidget):
                     f"(Сигнатура: {document_bytes[:4]})")
                 return
             
-            # 4. ✅ ДИАЛОГ СОХРАНЕНИЯ ФАЙЛА
+            # 4. ДИАЛОГ СОХРАНЕНИЯ ФАЙЛА
             safe_issue_number = re.sub(r'[<>:"/\\|?*]', '_', str(issue_number))
             default_filename = f"Запрос_{safe_issue_number}_{request_id}.docx"
             
@@ -211,7 +216,7 @@ class OutgoingRequestsTab(QWidget):
             
             print(f"💾 Путь сохранения: {save_path}")
             
-            # 5. ✅ СОХРАНЕНИЕ ФАЙЛА НА ДИСК
+            # 5. СОХРАНЕНИЕ ФАЙЛА НА ДИСК
             with open(save_path, 'wb') as f:
                 f.write(document_bytes)
                 f.flush()
@@ -226,7 +231,7 @@ class OutgoingRequestsTab(QWidget):
             if saved_size != len(document_bytes):
                 print(f"⚠️ Внимание: размер на диске ({saved_size}) != в памяти ({len(document_bytes)})")
             
-            # 6. ✅ ОТКРЫТИЕ ФАЙЛА СРЕДСТВАМИ ОС
+            # 6. ОТКРЫТИЕ ФАЙЛА СРЕДСТВАМИ ОС
             print(f"🚀 Открытие файла средствами ОС...")
             
             if sys.platform == 'win32':
@@ -250,68 +255,92 @@ class OutgoingRequestsTab(QWidget):
             print("="*60 + "\n")
             
         except Exception as e:
-            import traceback
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Ошибка при выгрузке документа:\n{str(e)}")
+    
     def delete_request(self, index):
-        """Удаление запроса"""
+        """Удаление запроса (мягкое удаление)"""
         request_id = self.requests_model.data(self.requests_model.index(index.row(), 0))
         if request_id:
             self.delete_request_by_id(request_id)
     
     def delete_selected_request(self):
-        """Удаление выбранного запроса"""
+        """Удаление выбранного запроса (мягкое удаление)"""
         selection = self.requests_table.selectionModel()
         if not selection.hasSelection():
-            QMessageBox.warning(self, "Внимание", "Выберите запрос для удаления")
+            QMessageBox.warning(self, "Внимание", "Выберите запрос для скрытия")
             return
         
         index = selection.selectedRows()[0]
         self.delete_request(index)
     
     def delete_request_by_id(self, request_id):
-        """Удаление запроса по ID"""
+        """Удаление запроса по ID (мягкое удаление - помечаем как удаленный)"""
         # Получаем номер запроса для сообщения
         query_num = QSqlQuery(self.db)
-        query_num.prepare("SELECT issue_number FROM krd.outgoing_requests WHERE id = ?")
+        query_num.prepare("SELECT issue_number FROM krd.outgoing_requests WHERE id = ? AND is_deleted = FALSE")
         query_num.addBindValue(request_id)
         query_num.exec()
         
         issue_number = "неизвестный"
         if query_num.next():
             issue_number = query_num.value(0)
+        else:
+            QMessageBox.warning(self, "Ошибка", "Запрос не найден или уже скрыт")
+            return
         
         reply = QMessageBox.question(
             self,
-            "Подтверждение удаления",
-            f"Вы действительно хотите удалить запрос №{issue_number}?",
+            "Подтверждение скрытия запроса",
+            f"Вы действительно хотите скрыть запрос №{issue_number}?\n\n"
+            f"⚠️ Внимание: Запрос будет скрыт из списка, но сохранён в базе данных для истории и аудита.\n"
+            f"Администратор сможет восстановить его через окно 'Удаленные записи'.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
         
         if reply == QMessageBox.StandardButton.Yes:
-            query = QSqlQuery(self.db)
-            query.prepare("DELETE FROM krd.outgoing_requests WHERE id = ?")
-            query.addBindValue(request_id)
-            
-            if query.exec():
-                QMessageBox.information(self, "Успех", f"Запрос №{issue_number} успешно удален")
-                self.load_requests()
+            try:
+                # Помечаем запрос как удаленный (мягкое удаление)
+                query = QSqlQuery(self.db)
+                query.prepare("""
+                    UPDATE krd.outgoing_requests 
+                    SET is_deleted = TRUE, 
+                        deleted_at = CURRENT_TIMESTAMP,
+                        deleted_by = ?
+                    WHERE id = ? AND is_deleted = FALSE
+                """)
+                # Передаем ID текущего пользователя из audit_logger
+                user_id = self.audit_logger.user_info.get('id') if self.audit_logger else None
+                query.addBindValue(user_id)
+                query.addBindValue(request_id)
                 
-                # Логирование
-                if self.audit_logger:
-                    self.audit_logger.log_action(
-                        action_type='REQUEST_DELETE',
-                        table_name='outgoing_requests',
-                        record_id=request_id,
-                        krd_id=self.krd_id,
-                        description=f'Удален запрос №{issue_number} для КРД-{self.krd_id}'
+                if query.exec() and query.numRowsAffected() > 0:
+                    QMessageBox.information(
+                        self, 
+                        "Успех", 
+                        f"Запрос №{issue_number} успешно скрыт из списка!\n"
+                        f"Запрос сохранен в базе данных и доступен администратору для восстановления."
                     )
-            else:
-                QMessageBox.critical(self, "Ошибка", f"Ошибка удаления запроса:\n{query.lastError().text()}")
+                    self.load_requests()
+                    
+                    # Логирование
+                    if self.audit_logger:
+                        self.audit_logger.log_action(
+                            action_type='REQUEST_SOFT_DELETE',
+                            table_name='outgoing_requests',
+                            record_id=request_id,
+                            krd_id=self.krd_id,
+                            description=f'Скрыт запрос №{issue_number} для КРД-{self.krd_id} (мягкое удаление)'
+                        )
+                else:
+                    raise Exception(f"Ошибка при скрытии запроса: {query.lastError().text()}")
+                    
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Ошибка при скрытии запроса:\n{str(e)}")
     
     def load_requests(self):
-        """Загрузка списка сформированных запросов"""
+        """Загрузка списка сформированных запросов (только неудаленные)"""
         try:
             query = QSqlQuery(self.db)
             query.prepare("""
@@ -324,6 +353,7 @@ class OutgoingRequestsTab(QWidget):
                 FROM krd.outgoing_requests o
                 LEFT JOIN krd.request_types rt ON o.request_type_id = rt.id
                 WHERE o.krd_id = ?
+                    AND o.is_deleted = FALSE
                 ORDER BY o.issue_date DESC, o.id DESC
             """)
             query.addBindValue(self.krd_id)
@@ -340,7 +370,8 @@ class OutgoingRequestsTab(QWidget):
             if parent and hasattr(parent, 'setWindowTitle'):
                 parent.setWindowTitle(f"Запросы и поручения (КРД-{self.krd_id}) - {count} запросов")
             
+            print(f"✅ Загружено {count} активных запросов для КРД-{self.krd_id}")
+            
         except Exception as e:
-            import traceback
             traceback.print_exc()
             print(f"⚠️ Ошибка в load_requests: {e}")
