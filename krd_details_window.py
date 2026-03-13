@@ -71,19 +71,26 @@ class KrdDetailsWindow(QDialog):
     def save_all_changes(self):
         """Сохранение изменений во всех вкладках"""
         try:
-            # Получаем текущую вкладку
             current_widget = self.findChild(QTabWidget).currentWidget()
             
-            # Вызываем метод сохранения у текущей вкладки
             if hasattr(current_widget, 'save_data'):
+                # Получаем старые и новые данные из вкладки (если поддерживается)
+                old_data = {}
+                new_data = {}
+                
+                if hasattr(current_widget, 'get_old_data'):
+                    old_data = current_widget.get_old_data()
+                if hasattr(current_widget, 'get_new_data'):
+                    new_data = current_widget.get_new_data()
+                
                 current_widget.save_data()
                 
-                # Логирование
+                # Логирование с реальными данными
                 if self.audit_logger:
                     self.audit_logger.log_krd_update(
                         self.krd_id, 
-                        {},  # старые данные можно получить из вкладки
-                        {}   # новые данные
+                        old_data, 
+                        new_data
                     )
                 
                 QMessageBox.information(self, "Успех", "Данные успешно сохранены")
@@ -94,4 +101,5 @@ class KrdDetailsWindow(QDialog):
         except ValueError as e:
             QMessageBox.warning(self, "Ошибка валидации", str(e))
         except Exception as e:
+            traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Ошибка при сохранении данных:\n{str(e)}")

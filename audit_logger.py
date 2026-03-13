@@ -80,11 +80,12 @@ class AuditLogger:
             description=f'Создана новая карточка розыска КРД-{krd_id}'
         )
     
+    # СТАЛО (исправлено):
     def log_krd_update(self, krd_id, old_data, new_data):
         """Логирование обновления КРД"""
         # Находим измененные поля
         changed_fields = {}
-        for key in new_:
+        for key in new_data:  # ✅ ИСПРАВЛЕНО: добавлено 'data' и двоеточие
             if key in old_data and old_data[key] != new_data[key]:
                 changed_fields[key] = {
                     'old': old_data[key],
@@ -100,7 +101,6 @@ class AuditLogger:
             new_values=new_data,
             description=f'Обновлена карточка розыска КРД-{krd_id}. Изменено полей: {len(changed_fields)}'
         )
-    
     def log_krd_delete(self, krd_id, data):
         """Логирование удаления КРД"""
         self.log_action(
