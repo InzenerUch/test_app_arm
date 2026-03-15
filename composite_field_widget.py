@@ -1,7 +1,7 @@
 """
 Виджет для управления составными полями (Composite Fields)
-✅ УБРАНО: Блокировка дубликатов через seen (теперь показываются все таблицы)
-✅ СИНХРОНИЗИРОВАНО: COLUMN_DESCRIPTIONS совпадает с mapping_editor_dialog.py
+✅ ИСПОЛЬЗУЕТ: ЕДИНЫЙ СПРАВОЧНИК из db_mappings.py
+✅ ИСПРАВЛЕНО: Убраны дубликаты и несуществующие колонки (например, recipient_name)
 """
 import json
 import traceback
@@ -13,125 +13,26 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 from searchable_combo import SearchableComboBox
 
-# === ТАБЛИЦА СООТВЕТСТВИЯ: Английское имя таблицы → Русское название ===
-TABLE_NAMES_RU = {
-    'social_data': 'Социально-демографические данные',
-    'addresses': 'Адреса проживания',
-    'service_places': 'Места службы',
-    'soch_episodes': 'Эпизоды СОЧ',
-    'incoming_orders': 'Входящие поручения',
-    'outgoing_requests': 'Исходящие запросы',
-    'recipients': 'Адресаты'
-}
+# ✅ ПОДКЛЮЧЕНИЕ: Импорт словарей из единого источника
+try:
+    from db_mappings import TABLE_NAMES_RU, COLUMN_DESCRIPTIONS
+except ImportError:
+    # Фоллбэк, если файл еще не создан (чтобы интерфейс не падал)
+    TABLE_NAMES_RU = {}
+    COLUMN_DESCRIPTIONS = {}
+    print("⚠️ Не удалось импортировать db_mappings.py. Описания полей будут использоваться по умолчанию.")
 
-# === СПРАВОЧНИК: DB колонка → Русское описание ===
-# Ключи должны совпадать с именами колонок в БД (без префиксов таблиц)
-COLUMN_DESCRIPTIONS = {
-    "id": "ID записи", "krd_id": "ID карточки розыска",
-    "surname": "Фамилия военнослужащего", "name": "Имя военнослужащего",
-    "patronymic": "Отчество военнослужащего", "birth_date": "Дата рождения",
-    "birth_place_town": "Населенный пункт места рождения",
-    "birth_place_district": "Район места рождения",
-    "birth_place_region": "Субъект РФ места рождения",
-    "birth_place_country": "Страна места рождения",
-    "tab_number": "Табельный номер", "personal_number": "Личный номер",
-    "category_id": "ID категории военнослужащего", "rank_id": "ID воинского звания",
-    "drafted_by_commissariat": "Наименование военкомата призыва",
-    "draft_date": "Дата призыва на военную службу", "povsk": "Наименование ПОВСК",
-    "selection_date": "Дата отбора на военную службу",
-    "education": "Образование военнослужащего",
-    "criminal_record": "Сведения о судимости",
-    "social_media_account": "Аккаунты в социальных сетях",
-    "bank_card_number": "Номер банковской карты",
-    "passport_series": "Серия паспорта", "passport_number": "Номер паспорта",
-    "passport_issue_date": "Дата выдачи паспорта",
-    "passport_issued_by": "Кем выдан паспорт",
-    "military_id_series": "Серия военного билета",
-    "military_id_number": "Номер военного билета",
-    "military_id_issue_date": "Дата выдачи военного билета",
-    "military_id_issued_by": "Кем выдан военный билет",
-    "appearance_features": "Особенности внешности",
-    "personal_marks": "Личные приметы (татуировки, шрамы)",
-    "federal_search_info": "Сведения о федеральном розыске",
-    "military_contacts": "Контакты военнослужащего",
-    "relatives_info": "Сведения о близких родственниках",
-    
-    "region": "📍 Субъект РФ (область, край, республика)",
-    "district": "📍 Административный район",
-    "town": "📍 Населенный пункт (город, село)",
-    "street": "📍 Улица", "house": "📍 Номер дома",
-    "building": "📍 Номер корпуса", "letter": "📍 Литера здания",
-    "apartment": "📍 Номер квартиры", "room": "📍 Номер комнаты",
-    "check_date": "📅 Дата адресной проверки", "check_result": "✅ Результат проверки",
-    
-    "place_name": "🎖️ Наименование места службы",
-    "military_unit_id": "🎖️ ID военного управления",
-    "garrison_id": "🎖️ ID гарнизона", "position_id": "🎖️ ID воинской должности",
-    "commanders": "🎖️ Командиры (ФИО, контакты)",
-    "postal_index": "📮 Почтовый индекс", "postal_region": "📮 Субъект РФ почтового адреса",
-    "postal_district": "📮 Район почтового адреса",
-    "postal_town": "📮 Город почтового адреса",
-    "postal_street": "📮 Улица почтового адреса",
-    "postal_house": "📮 Дом почтового адреса",
-    "postal_building": "📮 Корпус почтового адреса",
-    "postal_letter": "📮 Литера почтового адреса",
-    "postal_apartment": "📮 Квартира почтового адреса",
-    "postal_room": "📮 Комната почтового адреса",
-    "place_contacts": "📞 Контакты места службы",
-    
-    "soch_date": "⚠️ Дата СОЧ", "soch_location": "⚠️ Место СОЧ",
-    "order_date_number": "⚠️ Дата и номер приказа о СОЧ",
-    "witnesses": "⚠️ Очевидцы СОЧ", "reasons": "⚠️ Вероятные причины СОЧ",
-    "weapon_info": "⚠️ Сведения о наличии оружия",
-    "clothing": "⚠️ Описание одежды",
-    "movement_options": "⚠️ Возможные направления движения",
-    "other_info": "⚠️ Другая значимая информация",
-    "duty_officer_commissariat": "📞 Дежурный по военкомату",
-    "duty_officer_omvd": "📞 Дежурный по ОМВД",
-    "investigation_info": "📋 Сведения о проверке",
-    "prosecution_info": "📋 Сведения о прокуратуре",
-    "criminal_case_info": "📋 Сведения об уголовном деле",
-    "search_date": "🔍 Дата розыска", "found_by": "✅ Кем разыскан",
-    "search_circumstances": "🔍 Обстоятельства розыска",
-    "notification_recipient": "📬 Адресат уведомления",
-    "notification_date": "📅 Дата уведомления",
-    "notification_number": "📬 Номер уведомления",
-    
-    "initiator_type_id": "📩 ID типа инициатора",
-    "initiator_full_name": "📩 Наименование инициатора",
-    "order_date": "📩 Дата поручения", "order_number": "📩 Номер поручения",
-    "receipt_date": "📩 Дата поступления", "receipt_number": "📩 Входящий номер",
-    "initiator_contacts": "📩 Контакты инициатора",
-    "our_response_date": "📩 Дата ответа",
-    "our_response_number": "📩 Исходящий номер ответа",
-    
-    "request_type_id": "📤 ID типа запроса",
-    "recipient_name": "📤 Наименование адресата",
-    "issue_date": "📤 Дата запроса", "issue_number": "📤 Номер запроса",
-    "request_text": "📤 Текст запроса",
-    "signed_by_position": "📤 Должность подписанта",
-    "document_data": "📄 Данные документа",
-    "recipient_contacts": "📬 Контакты адресата",
-    
-    # Адресаты (recipients)
-    "contacts": "👥 Контакты адресата (телефон, email)",
-    "postal_index": "👥 Почтовый индекс адресата",
-    "postal_region": "👥 Субъект РФ адресата",
-    "postal_district": "👥 Административный район адресата",
-    "postal_town": "👥 Город/населенный пункт адресата",
-    "postal_street": "👥 Улица адресата",
-    "postal_house": "👥 Дом адресата",
-    "postal_building": "👥 Корпус/строение адресата",
-    "postal_letter": "👥 Литера адресата",
-    "postal_apartment": "👥 Квартира адресата",
-    "postal_room": "👥 Комната адресата",
-}
 
 class CompositeFieldWidget:
     def __init__(self, parent):
         self.parent = parent
         if not hasattr(parent, 'db_columns'):
-            parent.db_columns = {}
+            # Если у родителя нет карты колонок, загружаем её из db_mappings
+            try:
+                from db_mappings import DB_COLUMNS_MAP
+                parent.db_columns = DB_COLUMNS_MAP
+            except ImportError:
+                parent.db_columns = {}
 
     def _create_column_combo(self, selected_column=None, table_name=None):
         try:
@@ -152,24 +53,43 @@ class CompositeFieldWidget:
                 completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
 
             all_columns = []
+            # Получаем список таблиц из родителя (обычно это DB_COLUMNS_MAP)
             target_tables = self.parent.db_columns.keys()
             
-            # ✅ УБРАНО: seen = set() -> теперь колонки не фильтруются по имени
             for tbl in target_tables:
                 columns = self.parent.db_columns.get(tbl, [])
                 for col in columns:
+                    # ✅ Берем описание из импортированного словаря
                     desc = COLUMN_DESCRIPTIONS.get(col, col)
                     table_name_ru = TABLE_NAMES_RU.get(tbl, tbl)
                     display_desc = f"[{table_name_ru}] {desc}"
-                    all_columns.append((col, display_desc))
+                    
+                    # ✅ Сохраняем связку "таблица|колонка"
+                    all_columns.append((f"{tbl}|{col}", display_desc))
             
             all_columns.sort(key=lambda x: x[1])
-            for col_name, col_desc in all_columns:
-                combo.addItem(col_desc, col_name)
+            for col_data, col_desc in all_columns:
+                combo.addItem(col_desc, col_data)
             
+            # ✅ УЛУЧШЕННАЯ ЛОГИКА ВЫБОРА (ищет "таблица|колонка" или "*|колонка")
             if selected_column:
-                idx = combo.findData(selected_column.strip())
+                search_val = selected_column.strip()
+                idx = -1
+                
+                # 1. Точный поиск с учетом таблицы (если она передана)
+                if table_name:
+                    idx = combo.findData(f"{table_name}|{search_val}")
+                
+                # 2. Поиск по окончанию (для обратной совместимости)
+                if idx < 0:
+                    for i in range(combo.count()):
+                        item_data = combo.itemData(i)
+                        if item_data and item_data.endswith(f"|{search_val}"):
+                            idx = i
+                            break
+                
                 if idx >= 0: combo.setCurrentIndex(idx)
+                
             return combo
         except Exception as e:
             print(f"❌ Ошибка создания ComboBox: {e}")
@@ -177,7 +97,9 @@ class CompositeFieldWidget:
             combo.addItem("Ошибка загрузки", None)
             return combo
 
-    # Остальные методы без изменений (create_composite_field_row, _create_composite_column_widget и т.д.)
+    # Остальные методы остаются без изменений, так как они работают с данными виджета,
+    # а не со словарями напрямую.
+    
     def create_composite_field_row(self, row, field_name, db_columns_json, table_name, mapping_table):
         try:
             mapping_table.insertRow(row)
@@ -327,23 +249,54 @@ class CompositeFieldWidget:
         return type_label
 
     def get_composite_columns(self, composite_widget):
+        """
+        Извлекает список колонок и разделителей из виджета составного поля.
+        ✅ ИСПРАВЛЕНО: Корректно парсит новый формат данных ComboBox ("table|column")
+        """
         db_columns = []
         layout = composite_widget.layout()
-        if not layout: return db_columns
+        if not layout:
+            return db_columns
+
         for i in range(layout.count()):
             item = layout.itemAt(i)
-            if not item: continue
+            if not item:
+                continue
+                
             col_widget = item.widget()
-            if not col_widget or not col_widget.layout(): continue
+            if not col_widget or not col_widget.layout():
+                continue
+
             col_combo = None
             sep_input = None
+
+            # 🔍 Находим ComboBox и QLineEdit внутри контейнера столбца
             for j in range(col_widget.layout().count()):
                 w = col_widget.layout().itemAt(j).widget()
-                if isinstance(w, QComboBox): col_combo = w
-                elif isinstance(w, QLineEdit): sep_input = w
+                if isinstance(w, QComboBox):
+                    col_combo = w
+                elif isinstance(w, QLineEdit):
+                    sep_input = w
+
             if col_combo and sep_input:
-                col_name = col_combo.currentData()
-                if not col_name and col_combo.count() > 0: col_name = col_combo.currentText()
+                raw_data = col_combo.currentData()
+                col_name = None
+
+                if raw_data:
+                    # ✅ НОВЫЙ ФОРМАТ: "table_name|db_column"
+                    if "|" in str(raw_data):
+                        _, col_name = str(raw_data).split("|", 1)
+                        col_name = col_name.strip()
+                    else:
+                        # 🔙 Фоллбэк для старых сопоставлений (только имя колонки)
+                        col_name = str(raw_data).strip()
+                elif col_combo.count() > 0:
+                    # Крайний случай: если currentData пуст, но элемент выбран
+                    col_name = col_combo.currentText().strip()
+
                 separator = sep_input.text()
-                if col_name: db_columns.append({'column': col_name.strip(), 'separator': separator})
+                
+                if col_name:
+                    db_columns.append({'column': col_name, 'separator': separator})
+
         return db_columns

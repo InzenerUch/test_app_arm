@@ -53,6 +53,7 @@ class FieldMappingManager:
     def save_field_mappings(self, template_id):
         """
         ✅ ИСПРАВЛЕНО: Реальное сохранение сопоставлений из UI в БД
+        Поддерживает новый формат данных ComboBox: "table_name|db_column"
         """
         print(f"💾 FieldMappingManager.save_field_mappings(template_id={template_id})")
         
@@ -98,9 +99,16 @@ class FieldMappingManager:
                 else:
                     # Простое поле: берем currentData из ComboBox
                     if hasattr(val_widget, 'currentData'):
-                        db_column = val_widget.currentData()
-                        if db_column:
-                            table_name = self._get_table_name_for_column(db_column)
+                        raw_data = val_widget.currentData()
+                        if raw_data:
+                            # ✅ НОВЫЙ ФОРМАТ: "table_name|db_column"
+                            if "|" in str(raw_data):
+                                table_name, db_column = str(raw_data).split("|", 1)
+                            else:
+                                # 🔙 Фоллбэк для старых сопоставлений (только имя колонки)
+                                db_column = str(raw_data)
+                                table_name = self._get_table_name_for_column(db_column)
+                            
                             self._save_simple_mapping(template_id, var_name, db_column, table_name)
             
             # 4. Коммит

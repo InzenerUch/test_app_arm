@@ -80,17 +80,16 @@ class ServicePlacesTab(QWidget):
         layout.addLayout(button_layout)
     
     def load_data(self):
-        """Загрузка данных из базы с JOIN справочников"""
         query = QSqlQuery(self.db)
-        # ✅ ИЗМЕНЕНО: Добавлены LEFT JOIN для получения названий вместо ID
         query.prepare("""
-            SELECT 
-                s.id,
-                s.place_name as "Место службы",
-                m.name as "Военное управление",
-                g.name as "Гарнизон",
-                p.name as "Должность",
-                s.place_contacts as "Контакты"
+            SELECT
+            s.id,
+            s.place_name as "Место службы",
+            COALESCE(s.military_unit_number, '—') as "Номер в/ч",  -- ✅ ДОБАВЛЕНО
+            m.name as "Военное управление",
+            g.name as "Гарнизон",
+            p.name as "Должность",
+            s.place_contacts as "Контакты"
             FROM krd.service_places s
             LEFT JOIN krd.military_units m ON s.military_unit_id = m.id
             LEFT JOIN krd.garrisons g ON s.garrison_id = g.id
@@ -101,9 +100,8 @@ class ServicePlacesTab(QWidget):
         query.addBindValue(self.krd_id)
         query.exec()
         self.places_model.setQuery(query)
-        
-        # Скрыть ID колонку (первая колонка с индексом 0)
         self.places_table.setColumnHidden(0, True)
+        # Настройте ширину колонок при необходимости
     
     def on_add_place(self):
         """Обработчик кнопки добавления места службы"""
@@ -212,28 +210,28 @@ class ServicePlacesTab(QWidget):
                 QMessageBox.critical(self, "Ошибка", f"❌ Ошибка удаления места службы:\n{str(e)}")
     
     def load_place_data(self, place_id):
-        """Загрузка полных данных места службы для редактирования (нужны ID, а не названия)"""
+        """Загрузка полных данных места службы для редактирования"""
         query = QSqlQuery(self.db)
-        # Здесь мы выбираем именно ID, чтобы диалог мог правильно выбрать значение в ComboBox
         query.prepare("""
-            SELECT 
-                id,
-                place_name,
-                military_unit_id,
-                garrison_id,
-                position_id,
-                commanders,
-                postal_index,
-                postal_region,
-                postal_district,
-                postal_town,
-                postal_street,
-                postal_house,
-                postal_building,
-                postal_letter,
-                postal_apartment,
-                postal_room,
-                place_contacts
+            SELECT
+            id,
+            place_name,
+            military_unit_number,   -- ✅ ДОБАВЛЕНО: Выбор номера воинской части
+            military_unit_id,
+            garrison_id,
+            position_id,
+            commanders,
+            postal_index,
+            postal_region,
+            postal_district,
+            postal_town,
+            postal_street,
+            postal_house,
+            postal_building,
+            postal_letter,
+            postal_apartment,
+            postal_room,
+            place_contacts
             FROM krd.service_places
             WHERE id = ?
         """)
@@ -244,6 +242,7 @@ class ServicePlacesTab(QWidget):
             return {
                 'id': query.value('id'),
                 'place_name': query.value('place_name') or '',
+                'military_unit_number': query.value('military_unit_number') or '',
                 'military_unit_id': query.value('military_unit_id'),
                 'garrison_id': query.value('garrison_id'),
                 'position_id': query.value('position_id'),
@@ -260,5 +259,4 @@ class ServicePlacesTab(QWidget):
                 'postal_room': query.value('postal_room') or '',
                 'place_contacts': query.value('place_contacts') or ''
             }
-        
         return None

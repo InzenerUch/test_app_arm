@@ -1,7 +1,9 @@
 """
 Диалог для редактирования сопоставлений полей шаблона с данными из БД
-✅ ДОБАВЛЕНО: SearchableComboBox для поиска полей
-✅ ИСПРАВЛЕНО: Русские названия вкладок вместо английских имен таблиц
+✅ ИСПРАВЛЕНО: Полная синхронизация с schema_only.sql через db_mappings.py
+✅ ИСПРАВЛЕНО: Убрано дублирование колонок, используется единый DB_COLUMNS_MAP
+✅ ИСПРАВЛЕНО: Корректная обработка "recipients.name" вместо "recipient_name"
+✅ ДОБАВЛЕНО: SearchableComboBox для быстрого поиска полей
 """
 import os
 import tempfile
@@ -10,7 +12,7 @@ import re
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QTableWidget, QHeaderView, QAbstractItemView, QMessageBox,
-    QComboBox, QDialogButtonBox, QGroupBox, QTableWidgetItem,QCompleter
+    QComboBox, QDialogButtonBox, QGroupBox, QTableWidgetItem, QCompleter
 )
 from PyQt6.QtCore import Qt, QByteArray
 from PyQt6.QtSql import QSqlQuery
@@ -20,136 +22,8 @@ from composite_field_widget import CompositeFieldWidget
 from field_mapping_manager import FieldMappingManager
 from searchable_combo import SearchableComboBox
 
-# === СПРАВОЧНИК: Английское имя таблицы -> Русское название вкладки ===
-TABLE_NAMES_RU = {
-    'social_data': 'Социально-демографические данные',
-    'addresses': 'Адреса проживания',
-    'service_places': 'Места службы',
-    'soch_episodes': 'Эпизоды СОЧ',
-    'incoming_orders': 'Входящие поручения',
-    'outgoing_requests': 'Исходящие запросы',
-    'recipients': 'Адресаты'
-}
-
-# === СПРАВОЧНИК: DB колонка -> Русское описание ===
-COLUMN_DESCRIPTIONS = {
-    # social_data
-    "surname": "Фамилия военнослужащего",
-    "name": "Имя военнослужащего",
-    "patronymic": "Отчество военнослужащего",
-    "birth_date": "Дата рождения",
-    "birth_place_town": "Населенный пункт места рождения",
-    "birth_place_district": "Район места рождения",
-    "birth_place_region": "Субъект РФ места рождения",
-    "birth_place_country": "Страна места рождения",
-    "tab_number": "Табельный номер",
-    "personal_number": "Личный номер",
-    "category_id": "ID категории военнослужащего",
-    "rank_id": "ID воинского звания",
-    "drafted_by_commissariat": "Наименование военкомата призыва",
-    "draft_date": "Дата призыва на военную службу",
-    "povsk": "Наименование ПОВСК",
-    "selection_date": "Дата отбора на военную службу",
-    "education": "Образование военнослужащего",
-    "criminal_record": "Сведения о судимости",
-    "social_media_account": "Аккаунты в социальных сетях",
-    "bank_card_number": "Номер банковской карты",
-    "passport_series": "Серия паспорта",
-    "passport_number": "Номер паспорта",
-    "passport_issue_date": "Дата выдачи паспорта",
-    "passport_issued_by": "Кем выдан паспорт",
-    "military_id_series": "Серия военного билета",
-    "military_id_number": "Номер военного билета",
-    "military_id_issue_date": "Дата выдачи военного билета",
-    "military_id_issued_by": "Кем выдан военный билет",
-    "appearance_features": "Особенности внешности",
-    "personal_marks": "Личные приметы (татуировки, шрамы)",
-    "federal_search_info": "Сведения о федеральном розыске",
-    "military_contacts": "Контакты военнослужащего",
-    "relatives_info": "Сведения о близких родственниках",
-    # addresses
-    "region": "📍 Субъект РФ (область, край, республика)",
-    "district": "📍 Административный район",
-    "town": "📍 Населенный пункт (город, село)",
-    "street": "📍 Улица",
-    "house": "📍 Номер дома",
-    "building": "📍 Номер корпуса",
-    "letter": "📍 Литера здания",
-    "apartment": "📍 Номер квартиры",
-    "room": "📍 Номер комнаты",
-    "check_date": "📅 Дата адресной проверки",
-    "check_result": "✅ Результат проверки",
-    # service_places
-    "place_name": "🎖️ Наименование места службы",
-    "military_unit_id": "🎖️ ID военного управления",
-    "garrison_id": "🎖️ ID гарнизона",
-    "position_id": "🎖️ ID воинской должности",
-    "commanders": "🎖️ Командиры (ФИО, контакты)",
-    "postal_index": "📮 Почтовый индекс",
-    "postal_region": "📮 Субъект РФ почтового адреса",
-    "postal_district": "📮 Район почтового адреса",
-    "postal_town": "📮 Город почтового адреса",
-    "postal_street": "📮 Улица почтового адреса",
-    "postal_house": "📮 Дом почтового адреса",
-    "postal_building": "📮 Корпус почтового адреса",
-    "postal_letter": "📮 Литера почтового адреса",
-    "postal_apartment": "📮 Квартира почтового адреса",
-    "postal_room": "📮 Комната почтового адреса",
-    "place_contacts": "📞 Контакты места службы",
-    # soch_episodes
-    "soch_date": "⚠️ Дата СОЧ",
-    "soch_location": "⚠️ Место СОЧ",
-    "order_date_number": "⚠️ Дата и номер приказа о СОЧ",
-    "witnesses": "⚠️ Очевидцы СОЧ",
-    "reasons": "⚠️ Вероятные причины СОЧ",
-    "weapon_info": "⚠️ Сведения о наличии оружия",
-    "clothing": "⚠️ Описание одежды",
-    "movement_options": "⚠️ Возможные направления движения",
-    "other_info": "⚠️ Другая значимая информация",
-    "duty_officer_commissariat": "📞 Дежурный по военкомату",
-    "duty_officer_omvd": "📞 Дежурный по ОМВД",
-    "investigation_info": "📋 Сведения о проверке",
-    "prosecution_info": "📋 Сведения о прокуратуре",
-    "criminal_case_info": "📋 Сведения об уголовном деле",
-    "search_date": "🔍 Дата розыска",
-    "found_by": "✅ Кем разыскан",
-    "search_circumstances": "🔍 Обстоятельства розыска",
-    "notification_recipient": "📬 Адресат уведомления",
-    "notification_date": "📅 Дата уведомления",
-    "notification_number": "📬 Номер уведомления",
-    # incoming_orders
-    "initiator_type_id": "📩 ID типа инициатора",
-    "initiator_full_name": "📩 Наименование инициатора",
-    "order_date": "📩 Дата поручения",
-    "order_number": "📩 Номер поручения",
-    "receipt_date": "📩 Дата поступления",
-    "receipt_number": "📩 Входящий номер",
-    "initiator_contacts": "📩 Контакты инициатора",
-    "our_response_date": "📩 Дата ответа",
-    "our_response_number": "📩 Исходящий номер ответа",
-    # outgoing_requests
-    "request_type_id": "📤 ID типа запроса",
-    "recipient_name": "📤 Наименование адресата",
-    "issue_date": "📤 Дата запроса",
-    "issue_number": "📤 Номер запроса",
-    "request_text": "📤 Текст запроса",
-    "signed_by_position": "📤 Должность подписанта",
-    "document_data": "📄 Данные документа",
-    "recipient_contacts": "📬 Контакты адресата",
-    # recipients
-    "recipient_name": "👥 Наименование адресата",
-    "contacts": "👥 Контакты адресата (телефон, email)",
-    "postal_index": "👥 Почтовый индекс адресата",
-    "postal_region": "👥 Субъект РФ адресата",
-    "postal_district": "👥 Административный район адресата",
-    "postal_town": "👥 Город/населенный пункт адресата",
-    "postal_street": "👥 Улица адресата",
-    "postal_house": "👥 Дом адресата",
-    "postal_building": "👥 Корпус/строение адресата",
-    "postal_letter": "👥 Литера адресата",
-    "postal_apartment": "👥 Квартира адресата",
-    "postal_room": "👥 Комната адресата",
-}
+# ✅ ЕДИНЫЙ ИСТОЧНИК ДАННЫХ: Импорт строго соответствует schema_only.sql
+from db_mappings import TABLE_NAMES_RU, COLUMN_DESCRIPTIONS, DB_COLUMNS_MAP
 
 class MappingEditorDialog(QDialog):
     """Отдельное окно для редактирования сопоставлений"""
@@ -278,7 +152,6 @@ class MappingEditorDialog(QDialog):
         var_combo.addItems(self.template_variables)
         self.mapping_table.setCellWidget(row, 0, var_combo)
         
-        # ✅ ИСПОЛЬЗУЕМ SearchableComboBox
         col_combo = self._create_db_column_combo()
         self.mapping_table.setCellWidget(row, 1, col_combo)
         
@@ -316,7 +189,6 @@ class MappingEditorDialog(QDialog):
         var_combo.setCurrentText(field_name)
         self.mapping_table.setCellWidget(row, 0, var_combo)
         
-        # ✅ ИСПОЛЬЗУЕМ SearchableComboBox
         col_combo = self._create_db_column_combo(db_column)
         self.mapping_table.setCellWidget(row, 1, col_combo)
         
@@ -341,8 +213,7 @@ class MappingEditorDialog(QDialog):
         """Создание ComboBox с русскими описаниями полей БД и префиксом таблицы"""
         try:
             combo = SearchableComboBox()
-            if combo is None:
-                return None
+            if combo is None: return None
 
             combo.setMaxVisibleItems(50)
             combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
@@ -357,31 +228,29 @@ class MappingEditorDialog(QDialog):
                 completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
 
             all_columns = []
-            # Перебираем таблицы из self.db_columns
             for table_name, columns in self.db_columns.items():
-                # ✅ ПОЛУЧАЕМ РУССКОЕ НАЗВАНИЕ ВКЛАДКИ
                 table_name_ru = TABLE_NAMES_RU.get(table_name, table_name)
-                
                 for col in columns:
-                    if col in COLUMN_DESCRIPTIONS:
-                        desc = COLUMN_DESCRIPTIONS[col]
-                        # ✅ ФОРМИРУЕМ ПОДПИСЬ: [Название вкладки] Описание поля
-                        display_desc = f"[{table_name_ru}] {desc}"
-                        all_columns.append((col, display_desc))
+                    desc = COLUMN_DESCRIPTIONS.get(col, col)
+                    display_desc = f"[{table_name_ru}] {desc}"
+                    all_columns.append((col, display_desc, table_name))
             
-            # Сортируем по описанию
             all_columns.sort(key=lambda x: x[1])
             
-            for col_name, col_description in all_columns:
-                combo.addItem(col_description, col_name)
+            for col_name, col_description, table_name in all_columns:
+                combo.addItem(col_description, f"{table_name}|{col_name}")
             
             if selected_column:
-                index = combo.findData(selected_column)
-                if index >= 0:
-                    combo.setCurrentIndex(index)
+                idx = combo.findData(selected_column)
+                if idx < 0 and selected_column:
+                    for i in range(combo.count()):
+                        item_data = combo.itemData(i)
+                        if item_data and item_data.endswith(f"|{selected_column}"):
+                            idx = i
+                            break
+                if idx >= 0: combo.setCurrentIndex(idx)
             
             return combo
-            
         except Exception as e:
             print(f"❌ Ошибка при создании ComboBox: {e}")
             combo = QComboBox()
@@ -389,9 +258,8 @@ class MappingEditorDialog(QDialog):
             return combo
 
     def load_template_variables(self, template_id):
-        """Загрузка переменных из шаблона"""
-        if not template_id:
-            return
+        """Загрузка переменных из шаблона DOCX"""
+        if not template_id: return
             
         query = QSqlQuery(self.db)
         query.prepare("SELECT template_data FROM krd.document_templates WHERE id = ?")
@@ -402,8 +270,7 @@ class MappingEditorDialog(QDialog):
             return
             
         data = query.value(0)
-        template_bytes = bytes(data) if isinstance(data, QByteArray) else bytes(data) if data else b''
-        
+        template_bytes = bytes(data) if isinstance(data, QByteArray) else (bytes(data) if data else b'')
         if not template_bytes:
             self.template_variables = []
             return
@@ -416,72 +283,24 @@ class MappingEditorDialog(QDialog):
             doc = Document(tmp_path)
             vars_set = set()
             for para in doc.paragraphs:
-                vars_set.update(re.findall(r'\{\{[^{}]+\}\}', para.text))
+                vars_set.update(re.findall(r'\{\{([^{}]+)\}\}', para.text))
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
                         for para in cell.paragraphs:
-                            vars_set.update(re.findall(r'\{\{[^{}]+\}\}', para.text))
+                            vars_set.update(re.findall(r'\{\{([^{}]+)\}\}', para.text))
             self.template_variables = sorted(vars_set)
         except Exception as e:
             print(f"❌ Ошибка загрузки переменных: {e}")
-            self.template_variables = ["{{surname}}", "{{name}}", "{{patronymic}}"]
+            self.template_variables = ["surname", "name", "patronymic"]
         finally:
-            try:
-                os.unlink(tmp_path)
-            except:
-                pass
+            try: os.unlink(tmp_path)
+            except: pass
 
     def load_db_columns(self):
-        """Загрузка структуры столбцов базы данных"""
-        # ✅ ОБНОВЛЕНО: Добавлены таблицы incoming_orders, outgoing_requests, recipients
-        self.db_columns = {
-            "social_data": [
-                "surname", "name", "patronymic", "birth_date", "birth_place_town",
-                "birth_place_district", "birth_place_region", "birth_place_country",
-                "tab_number", "personal_number", "category_id", "rank_id",
-                "drafted_by_commissariat", "draft_date", "povsk", "selection_date",
-                "education", "criminal_record", "social_media_account", "bank_card_number",
-                "passport_series", "passport_number", "passport_issue_date", "passport_issued_by",
-                "military_id_series", "military_id_number", "military_id_issue_date", "military_id_issued_by",
-                "appearance_features", "personal_marks", "federal_search_info", "military_contacts", "relatives_info"
-            ],
-            "addresses": [
-                "region", "district", "town", "street", "house",
-                "building", "letter", "apartment", "room", "check_date", "check_result"
-            ],
-            "service_places": [
-                "place_name", "military_unit_id", "garrison_id", "position_id", "commanders",
-                "postal_index", "postal_region", "postal_district", "postal_town", "postal_street",
-                "postal_house", "postal_building", "postal_letter", "postal_apartment", "postal_room",
-                "place_contacts"
-            ],
-            "soch_episodes": [
-                "soch_date", "soch_location", "order_date_number", "witnesses",
-                "reasons", "weapon_info", "clothing", "movement_options", "other_info",
-                "duty_officer_commissariat", "duty_officer_omvd", "investigation_info",
-                "prosecution_info", "criminal_case_info", "search_date", "found_by",
-                "search_circumstances", "notification_recipient", "notification_date",
-                "notification_number"
-            ],
-            "incoming_orders": [
-                "initiator_type_id", "initiator_full_name", "military_unit_id",
-                "order_date", "order_number", "receipt_date", "receipt_number",
-                "postal_index", "postal_region", "postal_district", "postal_town",
-                "postal_street", "postal_house", "postal_building", "postal_letter",
-                "postal_apartment", "postal_room", "initiator_contacts",
-                "our_response_date", "our_response_number"
-            ],
-            "outgoing_requests": [
-                "request_type_id", "recipient_name", "issue_date", "issue_number",
-                "request_text", "signed_by_position", "document_data", "recipient_contacts"
-            ],
-            "recipients": [
-                "recipient_name", "contacts", "postal_index", "postal_region",
-                "postal_district", "postal_town", "postal_street", "postal_house",
-                "postal_building", "postal_letter", "postal_apartment", "postal_room"
-            ]
-        }
+        """✅ ЗАМЕНА: Используем единый словарь из db_mappings.py"""
+        # Удаляем жестко прописанные дубликаты, подгружаем актуальную схему
+        self.db_columns = DB_COLUMNS_MAP
 
     def save_and_close(self):
         """Сохранение и закрытие"""

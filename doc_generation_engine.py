@@ -2,74 +2,63 @@
 Движок генерации документов из Word-шаблонов
 ✅ С ПОЛНОЙ ДИАГНОСТИКОЙ ТЕКСТА (ДО/ПОСЛЕ)
 ✅ АВТОМАТИЧЕСКАЯ ПОДСТАНОВКА НАЗВАНИЙ ИЗ СПРАВОЧНИКОВ (вместо ID)
+✅ ИСПОЛЬЗУЕТ ЕДИНЫЙ СПРАВОЧНИК ИЗ db_mappings.py
+✅ ПОЛНАЯ СОВМЕСТИМОСТЬ С QPSQL (:param вместо ?)
 """
 import os
 import tempfile
 import json
 import re
-from docx.shared import Pt, Cm
+from docx.shared import Pt
 from docx import Document
 from PyQt6.QtSql import QSqlQuery
 from PyQt6.QtCore import QByteArray, QDate
 import traceback
+
+# ✅ ИМПОРТ ЕДИНОГО СПРАВОЧНИКА
+try:
+    from db_mappings import LOOKUP_TABLES
+except ImportError:
+    LOOKUP_TABLES = {}
 
 class DocGenerationEngine:
     def __init__(self, db, krd_id, audit_logger=None):
         self.db = db
         self.krd_id = krd_id
         self.audit_logger = audit_logger
-        self.tables_with_selection = {"addresses", "service_places", "soch_episodes"}
+        
+        # Таблицы, где важно выбрать конкретную запись по ID
+        self.tables_with_selection = {"addresses", "service_places", "soch_episodes", "recipients", "incoming_orders"}
+        
         self.db_columns_map = {}
         self.placeholder_pattern = re.compile(r'\{\{([^{}]+)\}\}')
-        self.debug_mode = True  # ✅ ВКЛЮЧИТЬ ДИАГНОСТИКУ
+        self.debug_mode = True
 
-        # ️ КАРТА СПРАВОЧНИКОВ: Поле ID -> (Таблица справочника, Колонка с названием)
-        # Это нужно, чтобы вместо цифры (ID) подставлялось название (например, "Майор")
-        self.lookup_tables = {
-            'rank_id': ('krd.ranks', 'name'),
-            'category_id': ('krd.categories', 'name'),
-            # Если есть другие ID, которые нужно превращать в текст, добавьте сюда:
-            # 'military_unit_id': ('krd.military_units', 'name'), 
-        }
+        # ✅ КАРТА СПРАВОЧНИКОВ ЗАГРУЖАЕТСЯ ИЗ db_mappings.py
+        self.lookup_tables = LOOKUP_TABLES
 
     def set_columns_map(self, cols_map):
         self.db_columns_map = cols_map
 
     def _log(self, message, level="INFO"):
-        """Вспомогательный метод для логирования"""
         if self.debug_mode:
-            prefix = {
-                "INFO": "📝", "WARN": "⚠️", "ERROR": "❌",
-                "SUCCESS": "✅", "DATA": "📊", "TEXT": "📄"
-            }.get(level, "•")
+            prefix = {"INFO": "📝", "WARN": "⚠️", "ERROR": "❌", "SUCCESS": "✅", "DATA": "📊", "TEXT": "📄"}.get(level, "•")
             print(f"{prefix} [{level}] {message}")
 
     def _extract_all_text(self, doc):
-        """Извлекает ВЕСЬ текст из документа (абзацы + таблицы + колонтитулы)"""
         all_text = []
-        
-        # Основной текст
         for i, para in enumerate(doc.paragraphs):
-            if para.text.strip():
-                all_text.append(f"[Абзац {i}] {para.text}")
-        
-        # Таблицы
+            if para.text.strip(): all_text.append(f"[Абзац {i}] {para.text}")
         for i, table in enumerate(doc.tables):
             for j, row in enumerate(table.rows):
                 for k, cell in enumerate(row.cells):
                     for para in cell.paragraphs:
-                        if para.text.strip():
-                            all_text.append(f"[Таблица {i}, Ячейка {j},{k}] {para.text}")
-        
-        # Колонтитулы
+                        if para.text.strip(): all_text.append(f"[Таблица {i}, Ячейка {j},{k}] {para.text}")
         for i, section in enumerate(doc.sections):
             for para in section.header.paragraphs:
-                if para.text.strip():
-                    all_text.append(f"[Шапка {i}] {para.text}")
+                if para.text.strip(): all_text.append(f"[Шапка {i}] {para.text}")
             for para in section.footer.paragraphs:
-                if para.text.strip():
-                    all_text.append(f"[Подвал {i}] {para.text}")
-        
+                if para.text.strip(): all_text.append(f"[Подвал {i}] {para.text}")
         return all_text
 
     def build_context(self, template_id, selections):
@@ -79,12 +68,9 @@ class DocGenerationEngine:
         
         context = {}
         query = QSqlQuery(self.db)
-        query.prepare("""
-            SELECT field_name, db_column, table_name, db_columns, is_composite
-            FROM krd.field_mappings
-            WHERE template_id = ?
-        """)
-        query.addBindValue(template_id)
+        # ✅ ИСПОЛЬЗУЕМ ИМЕНОВАННЫЙ ПАРАМЕТР
+        query.prepare("SELECT field_name, db_column, table_name, db_columns, is_composite FROM krd.field_mappings WHERE template_id = :tid")
+        query.bindValue(":tid", template_id)
         if not query.exec():
             self._log(f"Ошибка загрузки маппингов: {query.lastError().text()}", "ERROR")
             return context
@@ -103,8 +89,6 @@ class DocGenerationEngine:
                     source = f"COMPOSITE({table_name})"
                 else:
                     selected_id = selections.get(table_name)
-                    
-                    # Обработка значений из таблиц с выбором (адреса, места службы и т.д.)
                     if selected_id and table_name in self.tables_with_selection:
                         value = self._get_value_from_record(table_name, db_column, selected_id)
                         source = f"{table_name}.id={selected_id}"
@@ -112,7 +96,6 @@ class DocGenerationEngine:
                         value = ""
                         source = f"{table_name} (не выбрано)"
                     else:
-                        # Для social_data (основные данные)
                         value = self._get_value_from_social_data(db_column)
                         source = "social_data"
                         
@@ -121,9 +104,8 @@ class DocGenerationEngine:
                     self._log(f"{{{field_name}}} = '{value}' (источник: {source})", "DATA")
                     mappings_count += 1
                 else:
-                    context[field_name] = "" # Гарантируем пустую строку вместо None
+                    context[field_name] = ""
                     self._log(f"{{{field_name}}} = ПУСТО (источник: {source})", "WARN")
-                    
             except Exception as e:
                 self._log(f"Ошибка получения {{{field_name}}}: {e}", "ERROR")
                 
@@ -143,21 +125,14 @@ class DocGenerationEngine:
                 if not col: continue
                 t = self._get_table_by_column(col) or table_hint
                 sid = selections.get(t)
-                
-                # Выбираем метод получения значения в зависимости от таблицы
                 if sid and t in self.tables_with_selection:
                     val = self._get_value_from_record(t, col, sid)
                 else:
                     val = self._get_value_from_social_data(col)
-                    
                 if val:
                     parts.append(str(val))
                     if sep: parts.append(sep)
-            
-            # Убираем лишний разделитель в конце
-            if parts and parts[-1] in [', ', ' ', '; ', ': ', ' - ']: 
-                parts.pop()
-                
+            if parts and parts[-1] in [', ', ' ', '; ', ': ', ' - ']: parts.pop()
             return ''.join(parts) if parts else None
         except Exception as e:
             self._log(f"Ошибка составного поля: {e}", "ERROR")
@@ -168,75 +143,53 @@ class DocGenerationEngine:
             if col in cols: return t
         return None
 
-    # ========================================================================
-    # ✅ УЛУЧШЕННЫЙ МЕТОД: Подставляет названия из справочников вместо ID
-    # ========================================================================
     def _get_value_from_social_data(self, col):
-        # Защита от SQL-инъекций (разрешаем только буквы, цифры и _)
         if not re.match(r'^\w+$', col): return ""
-        
         q = QSqlQuery(self.db)
-        
-        # Проверяем, является ли колонка ссылкой на справочник (ID)
+        # ✅ ИСПОЛЬЗУЕМ :krd_id ВМЕСТО ?
         if col in self.lookup_tables:
             ref_table, ref_col = self.lookup_tables[col]
-            # Делаем LEFT JOIN, чтобы получить название из справочника
-            sql = f"""
-                SELECT t.{ref_col} 
-                FROM krd.social_data s
-                LEFT JOIN {ref_table} t ON s.{col} = t.id
-                WHERE s.krd_id = ? 
-                ORDER BY s.id DESC 
-                LIMIT 1
-            """
+            sql = f"""SELECT t.{ref_col} FROM krd.social_data s
+                      LEFT JOIN {ref_table} t ON s.{col} = t.id
+                      WHERE s.krd_id = :krd_id ORDER BY s.id DESC LIMIT 1"""
             q.prepare(sql)
+            q.bindValue(":krd_id", self.krd_id)
         else:
-            # Обычное поле (текст, дата и т.д.)
-            sql = f"SELECT {col} FROM krd.social_data WHERE krd_id = ? ORDER BY id DESC LIMIT 1"
-            q.prepare(sql)
+            q.prepare(f"SELECT {col} FROM krd.social_data WHERE krd_id = :krd_id ORDER BY id DESC LIMIT 1")
+            q.bindValue(":krd_id", self.krd_id)
 
-        q.addBindValue(self.krd_id)
-        
-        if q.exec() and q.next(): 
-            return self._format_value(q.value(0))
+        if q.exec() and q.next(): return self._format_value(q.value(0))
         return ""
 
-    # ========================================================================
-    # ✅ УЛУЧШЕННЫЙ МЕТОД: Для связанных таблиц (места службы и т.д.)
-    # ========================================================================
     def _get_value_from_record(self, table, col, rid):
         if not re.match(r'^\w+$', table) or not re.match(r'^\w+$', col): return ""
-        
         q = QSqlQuery(self.db)
-        
-        # Проверяем, нужно ли делать JOIN для справочника
+        # ✅ ИСПОЛЬЗУЕМ :rid ВМЕСТО ?
         if col in self.lookup_tables:
             ref_table, ref_col = self.lookup_tables[col]
-            sql = f"""
-                SELECT t.{ref_col} 
-                FROM krd.{table} s
-                LEFT JOIN {ref_table} t ON s.{col} = t.id
-                WHERE s.id = ?
-            """
+            sql = f"""SELECT t.{ref_col} FROM krd.{table} s
+                      LEFT JOIN {ref_table} t ON s.{col} = t.id
+                      WHERE s.id = :rid"""
             q.prepare(sql)
+            q.bindValue(":rid", rid)
         else:
-            sql = f"SELECT {col} FROM krd.{table} WHERE id = ?"
-            q.prepare(sql)
+            q.prepare(f"SELECT {col} FROM krd.{table} WHERE id = :rid")
+            q.bindValue(":rid", rid)
             
-        q.addBindValue(rid)
-        if q.exec() and q.next(): 
-            return self._format_value(q.value(0))
+        if q.exec() and q.next(): return self._format_value(q.value(0))
         return ""
 
     def _format_value(self, val):
         if val is None: return ""
+        # Поддержка QDate, QDateTime и стандартных строк
         if hasattr(val, 'getDate'):
             y, m, d = val.getDate()
             return f"{d:02d}.{m:02d}.{y}"
+        if hasattr(val, 'toString'): # QDate/QDateTime
+            return val.toString("dd.MM.yyyy")
         return str(val)
 
     def apply_to_docx(self, template_bytes, context):
-        """Применение контекста к шаблону DOCX с ПОЛНОЙ диагностикой текста"""
         self._log("=" * 80, "INFO")
         self._log("НАЧАЛО ГЕНЕРАЦИИ ДОКУМЕНТА", "INFO")
         self._log("=" * 80, "INFO")
@@ -249,100 +202,58 @@ class DocGenerationEngine:
             self._log(f"Загрузка шаблона: {len(template_bytes)} байт", "DATA")
             doc = Document(template_path)
             
-            # ═══════════════════════════════════════════════════════════════
-            # ✅ 1. ВЫВОД ПОЛНОГО ТЕКСТА ШАБЛОНА (ДО ГЕНЕРАЦИИ)
-            # ═══════════════════════════════════════════════════════════════
             self._log("\n" + "=" * 80, "TEXT")
             self._log("📄 ТЕКСТ ШАБЛОНА (ДО ГЕНЕРАЦИИ)", "TEXT")
             self._log("=" * 80, "TEXT")
-            
             template_text_lines = self._extract_all_text(doc)
-            for line in template_text_lines:
-                self._log(line, "TEXT")
-            
-            if not template_text_lines:
-                self._log("⚠️ ШАБЛОН ПУСТОЙ ИЛИ НЕ СОДЕРЖИТ ТЕКСТА!", "ERROR")
-            
+            for line in template_text_lines: self._log(line, "TEXT")
+            if not template_text_lines: self._log("⚠️ ШАБЛОН ПУСТОЙ!", "ERROR")
             self._log(f"\nВСЕГО строк текста в шаблоне: {len(template_text_lines)}", "DATA")
             self._log("=" * 80, "TEXT")
             
-            # 🔍 Поиск переменных в шаблоне
             template_vars = set()
             self._log("\n🔍 ПОИСК ПЕРЕМЕННЫХ В ШАБЛОНЕ:", "INFO")
-            
-            for paragraph in doc.paragraphs:
-                found = self.placeholder_pattern.findall(paragraph.text)
-                if found:
-                    template_vars.update(found)
-            
+            for paragraph in doc.paragraphs: template_vars.update(self.placeholder_pattern.findall(paragraph.text))
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
-                        for paragraph in cell.paragraphs:
-                            found = self.placeholder_pattern.findall(paragraph.text)
-                            if found:
-                                template_vars.update(found)
-            
+                        for paragraph in cell.paragraphs: template_vars.update(self.placeholder_pattern.findall(paragraph.text))
             for section in doc.sections:
-                for paragraph in section.header.paragraphs:
-                    found = self.placeholder_pattern.findall(paragraph.text)
-                    if found:
-                        template_vars.update(found)
-                for paragraph in section.footer.paragraphs:
-                    found = self.placeholder_pattern.findall(paragraph.text)
-                    if found:
-                        template_vars.update(found)
+                for paragraph in section.header.paragraphs: template_vars.update(self.placeholder_pattern.findall(paragraph.text))
+                for paragraph in section.footer.paragraphs: template_vars.update(self.placeholder_pattern.findall(paragraph.text))
             
             self._log(f"ВСЕГО найдено переменных в шаблоне: {len(template_vars)}", "SUCCESS")
-            self._log(f"Список: {', '.join(sorted(template_vars))}", "DATA")
             
-            # 🔍 Проверка соответствия
             context_vars = set(context.keys())
             missing_in_context = template_vars - context_vars
             unused_in_template = context_vars - template_vars
             
             if missing_in_context:
                 self._log(f"\n⚠️ ПЕРЕМЕННЫЕ В ШАБЛОНЕ, НО НЕТ В КОНТЕКСТЕ ({len(missing_in_context)}):", "WARN")
-                for var in sorted(missing_in_context):
-                    self._log(f"   {{{var}}}", "WARN")
-            
+                for var in sorted(missing_in_context): self._log(f"   {{{var}}}", "WARN")
             if unused_in_template:
                 self._log(f"\n⚠️ ПЕРЕМЕННЫЕ В КОНТЕКСТЕ, НО НЕТ В ШАБЛОНЕ ({len(unused_in_template)}):", "WARN")
-                for var in sorted(unused_in_template):
-                    self._log(f"   {{{var}}}", "WARN")
+                for var in sorted(unused_in_template): self._log(f"   {{{var}}}", "WARN")
             
-            # 🔄 Замена переменных
             self._log("\n🔄 ЗАМЕНА ПЕРЕМЕННЫХ:", "INFO")
             replacements = 0
             replacement_stats = {}
             
-            for paragraph in doc.paragraphs:
-                count = self._replace_in_paragraph(paragraph, context, replacement_stats)
-                replacements += count
-                
+            for paragraph in doc.paragraphs: replacements += self._replace_in_paragraph(paragraph, context, replacement_stats)
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
-                        for paragraph in cell.paragraphs:
-                            count = self._replace_in_paragraph(paragraph, context, replacement_stats)
-                            replacements += count
-                            
+                        for paragraph in cell.paragraphs: replacements += self._replace_in_paragraph(paragraph, context, replacement_stats)
             for section in doc.sections:
-                for paragraph in section.header.paragraphs:
-                    count = self._replace_in_paragraph(paragraph, context, replacement_stats)
-                    replacements += count
-                for paragraph in section.footer.paragraphs:
-                    count = self._replace_in_paragraph(paragraph, context, replacement_stats)
-                    replacements += count
+                for paragraph in section.header.paragraphs: replacements += self._replace_in_paragraph(paragraph, context, replacement_stats)
+                for paragraph in section.footer.paragraphs: replacements += self._replace_in_paragraph(paragraph, context, replacement_stats)
             
             self._log(f"\nВСЕГО заменено: {replacements}", "SUCCESS")
-            
             if replacement_stats:
                 self._log("\n📊 СТАТИСТИКА ЗАМЕН ПО ПЕРЕМЕННЫМ:", "DATA")
                 for var, count in sorted(replacement_stats.items(), key=lambda x: x[1], reverse=True):
                     self._log(f"   {{{var}}}: {count} раз(а)", "DATA")
             
-            # 💾 Сохранение
             with tempfile.NamedTemporaryFile(delete=False, suffix='.docx') as out_file:
                 doc.save(out_file.name)
                 output_path = out_file.name
@@ -352,49 +263,27 @@ class DocGenerationEngine:
             self._log(f"  Путь: {output_path}", "DATA")
             self._log(f"  Размер: {output_size} байт", "DATA")
             
-            # ═══════════════════════════════════════════════════════════════
-            # ✅ 2. ВЫВОД ПОЛНОГО ТЕКСТА ГОТОВОГО ДОКУМЕНТА (ПОСЛЕ ГЕНЕРАЦИИ)
-            # ═══════════════════════════════════════════════════════════════
             self._log("\n" + "=" * 80, "TEXT")
             self._log("📄 ТЕКСТ ГОТОВОГО ДОКУМЕНТА (ПОСЛЕ ГЕНЕРАЦИИ)", "TEXT")
             self._log("=" * 80, "TEXT")
-            
             result_doc = Document(output_path)
             result_text_lines = self._extract_all_text(result_doc)
-            for line in result_text_lines:
-                self._log(line, "TEXT")
-            
-            if not result_text_lines:
-                self._log("⚠️ ГОТОВЫЙ ДОКУМЕНТ ПУСТОЙ!", "ERROR")
-            
+            for line in result_text_lines: self._log(line, "TEXT")
             self._log(f"\nВСЕГО строк текста в готовом документе: {len(result_text_lines)}", "DATA")
             self._log("=" * 80, "TEXT")
             
-            # 🔍 Проверка оставшихся переменных
             remaining_vars = set()
-            for paragraph in result_doc.paragraphs:
-                found = self.placeholder_pattern.findall(paragraph.text)
-                if found:
-                    remaining_vars.update(found)
-            
+            for paragraph in result_doc.paragraphs: remaining_vars.update(self.placeholder_pattern.findall(paragraph.text))
             for table in result_doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
-                        for paragraph in cell.paragraphs:
-                            found = self.placeholder_pattern.findall(paragraph.text)
-                            if found:
-                                remaining_vars.update(found)
-            
+                        for paragraph in cell.paragraphs: remaining_vars.update(self.placeholder_pattern.findall(paragraph.text))
             if remaining_vars:
                 self._log(f"\n⚠️ В ИТОГОВОМ ДОКУМЕНТЕ ОСТАЛИСЬ ПЕРЕМЕННЫЕ ({len(remaining_vars)}):", "WARN")
-                for var in sorted(remaining_vars):
-                    self._log(f"   {{{var}}}", "WARN")
+                for var in sorted(remaining_vars): self._log(f"   {{{var}}}", "WARN")
             else:
                 self._log("\n✅ Все переменные заменены успешно", "SUCCESS")
             
-            # ═══════════════════════════════════════════════════════════════
-            # ✅ 3. СРАВНЕНИЕ ДО/ПОСЛЕ
-            # ═══════════════════════════════════════════════════════════════
             self._log("\n" + "=" * 80, "INFO")
             self._log("📊 СРАВНЕНИЕ ДО/ПОСЛЕ", "INFO")
             self._log("=" * 80, "INFO")
@@ -405,50 +294,36 @@ class DocGenerationEngine:
             self._log("=" * 80, "INFO")
             self._log("ГЕНЕРАЦИЯ ЗАВЕРШЕНА", "SUCCESS")
             self._log("=" * 80, "INFO")
-            
             return output_path, replacements
-            
         finally:
-            if os.path.exists(template_path):
-                os.unlink(template_path)
+            if os.path.exists(template_path): os.unlink(template_path)
 
     def _replace_in_paragraph(self, paragraph, context, stats_dict=None):
-        """Замена с диагностикой"""
         original_text = paragraph.text
-        if not original_text:
-            return 0
+        if not original_text: return 0
         
         new_text = original_text
         replacements = 0
-        
         for var_name, value in context.items():
             placeholder = f"{{{{{var_name}}}}}"
             if placeholder in new_text:
                 count = new_text.count(placeholder)
                 replacements += count
                 new_text = new_text.replace(placeholder, str(value))
-                
-                if stats_dict is not None:
-                    stats_dict[var_name] = stats_dict.get(var_name, 0) + count
+                if stats_dict is not None: stats_dict[var_name] = stats_dict.get(var_name, 0) + count
         
         if replacements > 0:
             self._log(f"  Замена в абзаце: {replacements} переменных", "DATA")
             self._log(f"    ДО:  '{original_text[:200]}{'...' if len(original_text) > 200 else ''}'", "DATA")
             self._log(f"    ПОСЛЕ: '{new_text[:200]}{'...' if len(new_text) > 200 else ''}'", "DATA")
             
-            if new_text == original_text:
-                self._log(f"    ⚠️ ВНИМАНИЕ: Текст НЕ изменился!", "ERROR")
-            
             if paragraph.runs:
                 first_run = paragraph.runs[0]
                 saved_style = {
-                    'bold': first_run.bold,
-                    'italic': first_run.italic,
-                    'underline': first_run.underline,
+                    'bold': first_run.bold, 'italic': first_run.italic, 'underline': first_run.underline,
                     'font_name': first_run.font.name if first_run.font else None,
                     'font_size': first_run.font.size.pt if first_run.font and first_run.font.size else None,
                 }
-                
                 first_run.text = new_text
                 first_run.bold = saved_style['bold']
                 first_run.italic = saved_style['italic']
@@ -457,48 +332,45 @@ class DocGenerationEngine:
                     if saved_style['font_name']: first_run.font.name = saved_style['font_name']
                     if saved_style['font_size']: first_run.font.size = Pt(saved_style['font_size'])
                 
+                # Безопасное удаление дублирующихся runs
                 for i in range(len(paragraph.runs) - 1, 0, -1):
                     run = paragraph.runs[i]
                     r_elem = run._element
-                    if r_elem in paragraph._element:
-                        try:
-                            paragraph._element.remove(r_elem)
-                        except Exception:
-                            pass
+                    if r_elem.getparent() is not None:
+                        try: r_elem.getparent().remove(r_elem)
+                        except Exception: pass
             else:
                 paragraph.clear()
                 run = paragraph.add_run(new_text)
                 run.font.size = Pt(14)
                 run.font.name = 'Times New Roman'
-        
         return replacements
 
     def save_to_database(self, request_type_id, recipient_id, issue_number, document_bytes):
         q = QSqlQuery(self.db)
         q.prepare("""
-            INSERT INTO krd.outgoing_requests 
+            INSERT INTO krd.outgoing_requests
             (krd_id, request_type_id, recipient_id, issue_date, issue_number, document_data)
-            VALUES (?, ?, ?, CURRENT_DATE, ?, ?)
+            VALUES (:krd_id, :request_type_id, :recipient_id, CURRENT_DATE, :issue_number, :document_data)
+            RETURNING id
         """)
-        q.addBindValue(self.krd_id)
-        q.addBindValue(request_type_id)
-        q.addBindValue(recipient_id)
-        q.addBindValue(issue_number)
-        q.addBindValue(QByteArray(document_bytes))
+        q.bindValue(":krd_id", self.krd_id)
+        q.bindValue(":request_type_id", request_type_id)
+        q.bindValue(":recipient_id", recipient_id)
+        q.bindValue(":issue_number", issue_number)
+        q.bindValue(":document_data", QByteArray(document_bytes))
         
-        if not q.exec():
-            raise Exception(f"Ошибка БД: {q.lastError().text()}")
+        if not q.exec(): raise Exception(f"Ошибка БД: {q.lastError().text()}")
             
-        req_id = q.lastInsertId()
+        req_id = q.value(0) if q.next() else None
         if self.audit_logger:
             self.audit_logger.log_action('REQUEST_CREATE', 'outgoing_requests', req_id, self.krd_id, f'Создан запрос №{issue_number}')
         return req_id
 
     def generate_issue_number(self):
         q = QSqlQuery(self.db)
-        q.prepare("SELECT COUNT(*) FROM krd.outgoing_requests WHERE krd_id = ? AND issue_date = CURRENT_DATE")
-        q.addBindValue(self.krd_id)
+        q.prepare("SELECT COUNT(*) FROM krd.outgoing_requests WHERE krd_id = :krd_id AND issue_date = CURRENT_DATE")
+        q.bindValue(":krd_id", self.krd_id)
         cnt = 1
-        if q.exec() and q.next():
-            cnt = (q.value(0) or 0) + 1
+        if q.exec() and q.next(): cnt = (q.value(0) or 0) + 1
         return f"КРД-{self.krd_id}/З-{cnt}"

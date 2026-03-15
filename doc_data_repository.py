@@ -1,8 +1,18 @@
 """
 Репозиторий данных для генератора документов
 Загрузка шаблонов, типов запросов, связанных записей
+✅ ИСПРАВЛЕНО: Все SQL-запросы переведены на именованные параметры (:name) для QPSQL
+✅ ИНТЕГРИРОВАНО: Использование DB_COLUMNS_MAP из db_mappings.py (единый источник истины)
+✅ ОПТИМИЗИРОВАНО: Разделены экземпляры QSqlQuery для связанных таблиц во избежание конфликтов драйвера
 """
 from PyQt6.QtSql import QSqlQuery
+
+# ✅ БЕЗОПАСНЫЙ ИМПОРТ ЕДИНОГО СПРАВОЧНИКА
+try:
+    from db_mappings import DB_COLUMNS_MAP
+except ImportError:
+    # Fallback на случай, если файл еще не создан или не импортирован
+    DB_COLUMNS_MAP = {}
 
 class DocDataRepository:
     """Репозиторий для работы с данными генерации документов"""
@@ -13,10 +23,11 @@ class DocDataRepository:
     def load_request_types(self):
         """Загрузка типов запросов"""
         q = QSqlQuery(self.db)
-        q.exec("SELECT id, name FROM krd.request_types ORDER BY name")
+        q.prepare("SELECT id, name FROM krd.request_types ORDER BY name")
         result = []
-        while q.next():
-            result.append((q.value(0), q.value(1)))
+        if q.exec():
+            while q.next():
+                result.append((q.value(0), q.value(1)))
         return result
         
     def load_templates(self):
@@ -28,14 +39,14 @@ class DocDataRepository:
             WHERE is_deleted = FALSE 
             ORDER BY name
         """)
-        q.exec()
         result = []
-        while q.next():
-            result.append({
-                'id': q.value(0),
-                'name': q.value(1),
-                'description': q.value(2) or ''
-            })
+        if q.exec():
+            while q.next():
+                result.append({
+                    'id': q.value(0),
+                    'name': q.value(1),
+                    'description': q.value(2) or ''
+                })
         return result
         
     def get_template_data(self, template_id):
@@ -44,9 +55,9 @@ class DocDataRepository:
         q.prepare("""
             SELECT template_data, name 
             FROM krd.document_templates 
-            WHERE id = ?
+            WHERE id = :id
         """)
-        q.addBindValue(template_id)
+        q.bindValue(":id", template_id)
         
         if q.exec() and q.next():
             return q.value(0), q.value(1)
@@ -58,9 +69,9 @@ class DocDataRepository:
         q.prepare("""
             SELECT description 
             FROM krd.document_templates 
-            WHERE id = ?
+            WHERE id = :id
         """)
-        q.addBindValue(template_id)
+        q.bindValue(":id", template_id)
         
         if q.exec() and q.next():
             return q.value(0) or ''
@@ -74,9 +85,9 @@ class DocDataRepository:
             'soch_episodes': []
         }
         
-        # Адреса
-        q = QSqlQuery(self.db)
-        q.prepare("""
+        # ✅ Адреса (отдельный экземпляр запроса)
+        q_addr = QSqlQuery(self.db)
+        q_addr.prepare("""
             SELECT id, 
                 COALESCE(region, '') || ', ' || 
                 COALESCE(district, '') || ', ' || 
@@ -84,83 +95,49 @@ class DocDataRepository:
                 COALESCE(street, '') || ', ' || 
                 COALESCE(house, '') as address_string
             FROM krd.addresses
-            WHERE krd_id = ?
+            WHERE krd_id = :krd_id
             ORDER BY id DESC
         """)
-        q.addBindValue(krd_id)
-        if q.exec():
-            while q.next():
-                result['addresses'].append((q.value(0), f"🏠 {q.value(1)}"))
+        q_addr.bindValue(":krd_id", krd_id)
+        if q_addr.exec():
+            while q_addr.next():
+                result['addresses'].append((q_addr.value(0), f"🏠 {q_addr.value(1)}"))
                 
-        # Места службы
-        q.prepare("""
+        # ✅ Места службы (отдельный экземпляр запроса)
+        q_svc = QSqlQuery(self.db)
+        q_svc.prepare("""
             SELECT id, 
                 COALESCE(place_name, 'Без названия') || 
                 ' (' || COALESCE(postal_town, '') || ')'
             FROM krd.service_places
-            WHERE krd_id = ?
+            WHERE krd_id = :krd_id
             ORDER BY id DESC
         """)
-        q.addBindValue(krd_id)
-        if q.exec():
-            while q.next():
-                result['service_places'].append((q.value(0), f"🎖️ {q.value(1)}"))
+        q_svc.bindValue(":krd_id", krd_id)
+        if q_svc.exec():
+            while q_svc.next():
+                result['service_places'].append((q_svc.value(0), f"🎖️ {q_svc.value(1)}"))
                 
-        # Эпизоды СОЧ
-        q.prepare("""
+        # ✅ Эпизоды СОЧ (отдельный экземпляр запроса)
+        q_soch = QSqlQuery(self.db)
+        q_soch.prepare("""
             SELECT id, 
                 COALESCE(soch_date::text, '') || ' - ' || 
                 COALESCE(soch_location, '')
             FROM krd.soch_episodes
-            WHERE krd_id = ?
+            WHERE krd_id = :krd_id
             ORDER BY soch_date DESC
         """)
-        q.addBindValue(krd_id)
-        if q.exec():
-            while q.next():
-                result['soch_episodes'].append((q.value(0), f"⚠️ {q.value(1)}"))
+        q_soch.bindValue(":krd_id", krd_id)
+        if q_soch.exec():
+            while q_soch.next():
+                result['soch_episodes'].append((q_soch.value(0), f"⚠️ {q_soch.value(1)}"))
                 
         return result
         
     def get_db_columns(self):
-        """Структура колонок БД"""
-        return {
-            "social_data": [
-                "surname", "name", "patronymic", "birth_date", 
-                "birth_place_town", "birth_place_district", "birth_place_region", 
-                "birth_place_country", "tab_number", "personal_number", 
-                "category_id", "rank_id", "drafted_by_commissariat", 
-                "draft_date", "povsk", "selection_date", "education", 
-                "criminal_record", "social_media_account", "bank_card_number", 
-                "passport_series", "passport_number", "passport_issue_date", 
-                "passport_issued_by", "military_id_series", "military_id_number", 
-                "military_id_issue_date", "military_id_issued_by", 
-                "appearance_features", "personal_marks", "federal_search_info", 
-                "military_contacts", "relatives_info"
-            ],
-            "addresses": [
-                "region", "district", "town", "street", "house", 
-                "building", "letter", "apartment", "room", 
-                "check_date", "check_result"
-            ],
-            "service_places": [
-                "place_name", "military_unit_id", "garrison_id", 
-                "position_id", "commanders", "postal_index", 
-                "postal_region", "postal_district", "postal_town", 
-                "postal_street", "postal_house", "postal_building", 
-                "postal_letter", "postal_apartment", "postal_room", 
-                "place_contacts"
-            ],
-            "soch_episodes": [
-                "soch_date", "soch_location", "order_date_number", 
-                "witnesses", "reasons", "weapon_info", "clothing", 
-                "movement_options", "other_info", "duty_officer_commissariat", 
-                "duty_officer_omvd", "investigation_info", "prosecution_info", 
-                "criminal_case_info", "search_date", "found_by", 
-                "search_circumstances", "notification_recipient", 
-                "notification_date", "notification_number"
-            ]
-        }
+        """Структура колонок БД (загружается из единого источника)"""
+        return DB_COLUMNS_MAP
         
     def get_used_tables(self, template_id):
         """Получение списка таблиц, используемых в шаблоне"""
@@ -168,9 +145,9 @@ class DocDataRepository:
         q.prepare("""
             SELECT table_name 
             FROM krd.field_mappings 
-            WHERE template_id = ?
+            WHERE template_id = :tid
         """)
-        q.addBindValue(template_id)
+        q.bindValue(":tid", template_id)
         
         tables = set()
         if q.exec():

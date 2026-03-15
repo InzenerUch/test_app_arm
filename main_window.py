@@ -91,8 +91,10 @@ class MainWindow(QMainWindow):
         self.load_krd_data()
         self.audit_logger.log_user_login()
         
+         # 🔥 НОВОЕ: Очистка зависших блокировок при старте
+        self.cleanup_stale_locks_on_startup()
+        
         # Запускаем мониторинг блокировок
-        print("🟢 [DIAGNOSTIC] Запуск таймера проверки блокировок (интервал: 1000 мс)")
         self.lock_timer.start(1000) # 1000 мс = 1 секунда
     
     def init_ui(self):
@@ -176,11 +178,73 @@ class MainWindow(QMainWindow):
         self.delete_krd_action.setEnabled(False)
         toolbar.addAction(self.delete_krd_action)
         
-        toolbar.addSeparator()
-        # Оставляем только быстрый доступ к справочникам
-        toolbar.addAction("📚 Справочники", self.open_reference_editor)
-        
-        # Кнопки администрирования удалены отсюда и перенесены в меню
+        # 🔥 НОВОЕ: Кнопка очистки блокировок (только для админов)
+        if self.user_info.get('role') == 'admin':
+            toolbar.addSeparator()
+            cleanup_btn = QAction("🔓 Очистить блокировки", self)
+            cleanup_btn.setToolTip("Снять все зависшие advisory locks")
+            cleanup_btn.triggered.connect(self.show_cleanup_dialog)
+            toolbar.addAction(cleanup_btn)
+    def show_cleanup_dialog(self):
+        """Диалог очистки зависших блокировок"""
+        try:
+            query = QSqlQuery(self.db)
+            query.prepare("""
+                SELECT 
+                    pl.objid as krd_id,
+                    lk.usename,
+                    lk.state,
+                    lk.application_name
+                FROM pg_locks pl
+                LEFT JOIN pg_stat_activity lk ON lk.pid = pl.pid
+                WHERE pl.locktype = 'advisory' 
+                AND pl.granted = true
+            """)
+            
+            if query.exec():
+                locks = []
+                while query.next():
+                    locks.append({
+                        'krd_id': query.value(0),
+                        'username': query.value(1) or 'unknown',
+                        'state': query.value(2) or 'unknown',
+                        'app_name': query.value(3) or 'unknown'
+                    })
+                
+                if not locks:
+                    QMessageBox.information(self, "Блокировки", 
+                        "✅ Зависших блокировок не найдено. Все записи свободны!")
+                    return
+                
+                # Формируем сообщение
+                msg = f"Найдено активных блокировок: {len(locks)}\n\n"
+                for lock in locks:
+                    msg += f"🔒 КРД-{lock['krd_id']} | User: {lock['username']} | App: {lock['app_name']}\n"
+                
+                msg += "\n⚠️ Снять все блокировки?"
+                
+                reply = QMessageBox.question(
+                    self, "Очистка блокировок",
+                    msg,
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No
+                )
+                
+                if reply == QMessageBox.StandardButton.Yes:
+                    cleanup = QSqlQuery(self.db)
+                    if cleanup.exec("SELECT pg_advisory_unlock_all()"):
+                        QMessageBox.information(self, "Успех", 
+                            f"✅ Снято {len(locks)} блокировок!")
+                        self.load_krd_data()  # Обновить таблицу
+                    else:
+                        QMessageBox.critical(self, "Ошибка",
+                            f"Не удалось снять блокировки:\n{cleanup.lastError().text()}")
+            else:
+                QMessageBox.critical(self, "Ошибка",
+                    f"Ошибка проверки блокировок:\n{query.lastError().text()}")
+                    
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Ошибка: {str(e)}")
     
     def create_status_bar(self):
         self.statusBar().showMessage(f"Пользователь: {self.user_info['username']} | Роль: {self.user_info['role']}")
@@ -305,7 +369,6 @@ class MainWindow(QMainWindow):
 
     def load_krd_data(self):
         """Загрузка данных КРД в таблицу"""
-        print("\n🔄 [DIAGNOSTIC] ===== ЗАГРУЗКА ДАННЫХ КРД =====")
         query = QSqlQuery(self.db)
         sort_field = self.sort_column_names.get(self.sort_column, "k.id")
         sort_order = "ASC" if self.sort_order == Qt.SortOrder.AscendingOrder else "DESC"
@@ -336,15 +399,12 @@ class MainWindow(QMainWindow):
                 self.found_count_label.setText(f"🔍 Найдено: {count} записей по запросу \"{self.search_query}\"")
             else:
                 self.found_count_label.setText(f"📊 Всего записей: {count}")
-            print(f"✅ [DIAGNOSTIC] Загружено {count} записей")
         else:
-            print(f"⚠️ [DIAGNOSTIC] Ошибка загрузки данных: {query.lastError().text()}")
             self.found_count_label.setText("⚠️ Ошибка загрузки данных")
 
     def update_lock_status(self):
         """Слот для обновления только статуса занятости (вызывается таймером)"""
         # ✅ ИСПРАВЛЕНО: Используем QTime вместо QDate
-        print(f"\n⏰ [{QTime.currentTime().toString('HH:mm:ss')}] [DIAGNOSTIC] Проверка блокировок...")
         
         # 1. Проверяем глобальные advisory блокировки в базе
         global_locks_query = QSqlQuery(self.db)
@@ -362,14 +422,7 @@ class MainWindow(QMainWindow):
                 username = global_locks_query.value(1)
                 active_locks.append(f"ID={objid} (User: {username})")
             
-            if active_locks:
-                print(f"🔒 [DIAGNOSTIC] Глобально активных advisory блокировок в БД: {len(active_locks)}")
-                for lock in active_locks:
-                    print(f"   - {lock}")
-            else:
-                print(f"🟢 [DIAGNOSTIC] Глобально активных advisory блокировок нет.")
-        else:
-            print(f"⚠️ [DIAGNOSTIC] Ошибка проверки глобальных блокировок: {global_locks_query.lastError().text()}")
+            
 
         # 2. Обновляем таблицу (стандартная процедура)
         current_count = self.table_model_krd.rowCount()
@@ -556,7 +609,6 @@ class MainWindow(QMainWindow):
     
     def closeEvent(self, event):
         self.audit_logger.log_user_logout()
-        print("⏹️ [DIAGNOSTIC] Остановка таймера проверки блокировок")
         self.lock_timer.stop()
         super().closeEvent(event)
     
@@ -575,7 +627,73 @@ class MainWindow(QMainWindow):
         self.activateWindow()
         self.setFocus()
         self.load_krd_data()
-
+    def cleanup_stale_locks_on_startup(self):
+        """
+        Автоматическая очистка зависших блокировок при запуске
+        Проверяет pg_locks и снимает блокировки, у которых нет активной сессии
+        """
+        try:
+            print(f"\n{'='*70}")
+            print(f"🧹 [CLEANUP] Проверка зависших блокировок при запуске")
+            print(f"{'='*70}")
+            
+            query = QSqlQuery(self.db)
+            query.prepare("""
+                SELECT 
+                    pl.objid as krd_id,
+                    lk.usename,
+                    lk.state,
+                    lk.application_name,
+                    lk.query_start,
+                    age(now(), lk.query_start) as duration
+                FROM pg_locks pl
+                LEFT JOIN pg_stat_activity lk ON lk.pid = pl.pid
+                WHERE pl.locktype = 'advisory'
+                AND pl.granted = true
+                AND (
+                    lk.state IS NULL 
+                    OR lk.state != 'active' 
+                    OR lk.state = 'idle'
+                    OR age(now(), lk.query_start) > interval '5 minutes'
+                )
+            """)
+            
+            if query.exec():
+                stale_locks = []
+                while query.next():
+                    stale_locks.append({
+                        'krd_id': query.value(0),
+                        'username': query.value(1) or 'unknown',
+                        'state': query.value(2) or 'unknown',
+                        'app_name': query.value(3) or 'unknown',
+                        'duration': query.value(5) or 'unknown'
+                    })
+                
+                if stale_locks:
+                    print(f"⚠️ [CLEANUP] Найдено {len(stale_locks)} потенциально зависших блокировок:")
+                    for lock in stale_locks:
+                        print(f"   - КРД-{lock['krd_id']} | User: {lock['username']} | "
+                            f"State: {lock['state']} | Duration: {lock['duration']}")
+                    
+                    # Автоматически снимаем ВСЕ блокировки текущей сессии
+                    print(f"🔓 [CLEANUP] Снимаю все блокировки текущей сессии...")
+                    cleanup = QSqlQuery(self.db)
+                    if cleanup.exec("SELECT pg_advisory_unlock_all()"):
+                        print(f"✅ [CLEANUP] Успешно снято {len(stale_locks)} блокировок")
+                    else:
+                        print(f"❌ [CLEANUP] Ошибка очистки: {cleanup.lastError().text()}")
+                else:
+                    print(f"✅ [CLEANUP] Зависших блокировок не найдено")
+            else:
+                print(f"⚠️ [CLEANUP] Ошибка проверки блокировок: {query.lastError().text()}")
+                
+            print(f"{'='*70}\n")
+            
+        except Exception as e:
+            print(f"❌ [CLEANUP] Ошибка в cleanup_stale_locks_on_startup: {e}")
+            import traceback
+            traceback.print_exc()
+            print(f"{'='*70}\n")
 def main():
     app = QApplication(sys.argv)
     db = QSqlDatabase.addDatabase("QPSQL")

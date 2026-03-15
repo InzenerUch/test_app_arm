@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict aQL0eFlXb6wOofvd3a4AtiYKmhkd4QTkWrFW8H8IIPx8QXU3BxdDYYA6hbK01xE
+\restrict Pg7qygBrxkdyQzRtZNmNxoKHdB4QVMmBimCTiUMVA6wHjajcYZgITez0oDQUfTS
 
 -- Dumped from database version 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)
 -- Dumped by pg_dump version 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)
@@ -1104,7 +1104,8 @@ CREATE TABLE krd.service_places (
     postal_room character varying(50),
     place_contacts character varying(255),
     is_deleted boolean DEFAULT false,
-    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    military_unit_number character varying(50)
 );
 
 
@@ -1134,6 +1135,13 @@ COMMENT ON COLUMN krd.service_places.krd_id IS 'Ссылка на КРД';
 --
 
 COMMENT ON COLUMN krd.service_places.place_name IS 'Наименование места службы';
+
+
+--
+-- Name: COLUMN service_places.military_unit_number; Type: COMMENT; Schema: krd; Owner: -
+--
+
+COMMENT ON COLUMN krd.service_places.military_unit_number IS 'Номер воинской части (например, в/ч 12345)';
 
 
 --
@@ -2512,5 +2520,5 @@ ALTER TABLE ONLY krd.users
 -- PostgreSQL database dump complete
 --
 
-\unrestrict aQL0eFlXb6wOofvd3a4AtiYKmhkd4QTkWrFW8H8IIPx8QXU3BxdDYYA6hbK01xE
+\unrestrict Pg7qygBrxkdyQzRtZNmNxoKHdB4QVMmBimCTiUMVA6wHjajcYZgITez0oDQUfTS
 
