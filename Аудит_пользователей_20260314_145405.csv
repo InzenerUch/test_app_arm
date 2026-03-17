@@ -1,0 +1,4 @@
+﻿Дата и время;Пользователь;Тип действия;Таблица;ID записи;ID КРД;Описание
+PyQt6.QtCore.QDateTime(2026, 3, 12, 12, 27, 39, 401);admin;LOGOUT;users;2;0;Пользователь admin вышел из системы
+PyQt6.QtCore.QDateTime(2026, 3, 12, 10, 24, 0, 302);admin;LOGOUT;users;2;0;Пользователь admin вышел из системы
+PyQt6.QtCore.QDateTime(2026, 2, 19, 16, 2, 19, 401);admin;LOGOUT;users;2;0;Пользователь admin вышел из системы

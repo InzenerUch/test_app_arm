@@ -290,7 +290,7 @@ class SocialDataTab(QWidget):
         photos_grid = QGridLayout()
         photos_grid.setSpacing(15)
         
-        # Фото 1: Гражданская одежда
+          # Фото 1: Гражданская одежда
         photo1_layout = QVBoxLayout()
         photo1_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         photo1_label = QLabel("Фото в гражданской одежде:")
@@ -314,6 +314,14 @@ class SocialDataTab(QWidget):
         civilian_btn.setMinimumWidth(150)
         civilian_btn.clicked.connect(lambda: self.load_photo('civilian'))
         photo1_layout.addWidget(civilian_btn)
+        
+        # === Кнопка выгрузки фото ===
+        civilian_export_btn = QPushButton("Выгрузить фото")
+        civilian_export_btn.setMinimumWidth(150)
+        civilian_export_btn.clicked.connect(lambda: self.export_photo('civilian'))
+        photo1_layout.addWidget(civilian_export_btn)
+        # ===========================
+        
         photos_grid.addLayout(photo1_layout, 0, 0)
         
         # Фото 2: Военная форма с головным убором
@@ -340,6 +348,14 @@ class SocialDataTab(QWidget):
         military_headgear_btn.setMinimumWidth(150)
         military_headgear_btn.clicked.connect(lambda: self.load_photo('military_headgear'))
         photo2_layout.addWidget(military_headgear_btn)
+        
+        # === Кнопка выгрузки фото ===
+        military_headgear_export_btn = QPushButton("Выгрузить фото")
+        military_headgear_export_btn.setMinimumWidth(150)
+        military_headgear_export_btn.clicked.connect(lambda: self.export_photo('military_headgear'))
+        photo2_layout.addWidget(military_headgear_export_btn)
+        # ===========================
+        
         photos_grid.addLayout(photo2_layout, 0, 1)
         
         # Фото 3: Военная форма без головного убора
@@ -366,6 +382,14 @@ class SocialDataTab(QWidget):
         military_no_headgear_btn.setMinimumWidth(150)
         military_no_headgear_btn.clicked.connect(lambda: self.load_photo('military_no_headgear'))
         photo3_layout.addWidget(military_no_headgear_btn)
+        
+        # === Кнопка выгрузки фото ===
+        military_no_headgear_export_btn = QPushButton("Выгрузить фото")
+        military_no_headgear_export_btn.setMinimumWidth(150)
+        military_no_headgear_export_btn.clicked.connect(lambda: self.export_photo('military_no_headgear'))
+        photo3_layout.addWidget(military_no_headgear_export_btn)
+        # ===========================
+        
         photos_grid.addLayout(photo3_layout, 0, 2)
         
         # Фото 4: Отличительные приметы
@@ -392,6 +416,14 @@ class SocialDataTab(QWidget):
         distinctive_marks_btn.setMinimumWidth(150)
         distinctive_marks_btn.clicked.connect(lambda: self.load_photo('distinctive_marks'))
         photo4_layout.addWidget(distinctive_marks_btn)
+        
+        # === Кнопка выгрузки фото ===
+        distinctive_marks_export_btn = QPushButton("Выгрузить фото")
+        distinctive_marks_export_btn.setMinimumWidth(150)
+        distinctive_marks_export_btn.clicked.connect(lambda: self.export_photo('distinctive_marks'))
+        photo4_layout.addWidget(distinctive_marks_export_btn)
+        # ===========================
+        
         photos_grid.addLayout(photo4_layout, 0, 3)
         
         group7_layout.addLayout(photos_grid)
@@ -759,4 +791,66 @@ class SocialDataTab(QWidget):
         if not self.patronymic_input.text().strip():
             return "Поле 'Отчество' обязательно для заполнения"
         return None
-   
+    def export_photo(self, photo_type):
+        """Выгрузка фотографии в файл"""
+        # Определяем, откуда брать фото: новое загруженное или из базы
+        photo_bytes = None
+        
+        # Сначала проверяем новый загруженный файл
+        new_path = self.photo_paths.get(photo_type)
+        if new_path and os.path.exists(new_path):
+            try:
+                with open(new_path, 'rb') as f:
+                    photo_bytes = f.read()
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Невозможно прочитать файл:\n{str(e)}")
+                return
+        
+        # Если нового нет, берем из оригинальных (из базы)
+        elif self.original_photos.get(photo_type):
+            photo_bytes = self.original_photos[photo_type]
+        
+        # Если фото нет вообще
+        if not photo_bytes:
+            QMessageBox.information(self, "Информация", f"Фото '{photo_type}' отсутствует. Сначала загрузите фото.")
+            return
+        
+        # Диалог сохранения файла
+        photo_names = {
+            'civilian': 'Гражданская одежда',
+            'military_headgear': 'Военная форма с головным убором',
+            'military_no_headgear': 'Военная форма без головного убора',
+            'distinctive_marks': 'Отличительные приметы'
+        }
+        
+        default_name = f"КРД-{self.krd_id}_{photo_type}.jpg"
+        
+        file_path, _ = QFileDialog.getSaveFileName(
+            self,
+            f"Сохранить фото ({photo_names.get(photo_type, photo_type)})",
+            default_name,
+            "Изображения (*.jpg *.png *.bmp);;Все файлы (*)"
+        )
+        
+        if file_path:
+            try:
+                # Сохраняем файл
+                with open(file_path, 'wb') as f:
+                    f.write(photo_bytes)
+                
+                # Логирование
+                if self.audit_logger:
+                    self.audit_logger.log_action(
+                        action_type='PHOTO_EXPORT',
+                        table_name='social_data',
+                        record_id=self.krd_id,
+                        krd_id=self.krd_id,
+                        description=f'Выгружено фото "{photo_type}" для КРД-{self.krd_id}'
+                    )
+                
+                QMessageBox.information(self, "Успешно", f"Фото успешно сохранено:\n{file_path}")
+                print(f"✅ Фото '{photo_type}' выгружено: {file_path} ({len(photo_bytes)} байт)")
+                
+            except Exception as e:
+                traceback.print_exc()
+                QMessageBox.critical(self, "Ошибка", f"Ошибка сохранения файла:\n{str(e)}")
