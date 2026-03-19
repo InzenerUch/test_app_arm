@@ -2,17 +2,19 @@
 Вкладка социально-демографических данных с поддержкой изображений
 Соответствует структуре из шаблона "Шаблон проги.xlsx"
 """
-
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QScrollArea, QGroupBox, QGridLayout, QHBoxLayout,
     QLineEdit, QTextEdit, QDateEdit, QComboBox, QLabel, QPushButton, QFileDialog, 
     QMessageBox, QFrame
 )
-from PyQt6.QtCore import Qt, QDate, QByteArray, QSize
-from PyQt6.QtGui import QPixmap, QImage, QFont
+from PyQt6.QtCore import Qt, QDate, QByteArray
+from PyQt6.QtGui import QPixmap, QFont
 from PyQt6.QtSql import QSqlQuery
 import os
 import traceback
+
+# === ИМПОРТ ПОМОЩНИКА АВТОДОПОЛНЕНИЯ ===
+from autocomplete_helper import AutocompleteHelper
 
 
 class SocialDataTab(QWidget):
@@ -25,6 +27,9 @@ class SocialDataTab(QWidget):
         self.audit_logger = audit_logger
         self.record = None
         
+        # === ИНИЦИАЛИЗАЦИЯ ПОМОЩНИКА АВТОДОПОЛНЕНИЯ ===
+        self.autocomplete_helper = AutocompleteHelper(db_connection)
+        
         # Хранилище путей к временным файлам изображений
         self.photo_paths = {
             'civilian': None,
@@ -32,7 +37,6 @@ class SocialDataTab(QWidget):
             'military_no_headgear': None,
             'distinctive_marks': None
         }
-        
         # Хранилище оригинальных фото из базы (для сравнения при сохранении)
         self.original_photos = {
             'civilian': None,
@@ -43,12 +47,16 @@ class SocialDataTab(QWidget):
         
         self.init_ui()
         self.load_data()
+        
+        # === НАСТРОЙКА АВТОДОПОЛНЕНИЯ ПОСЛЕ ЗАГРУЗКИ ДАННЫХ ===
+        self.setup_autocomplete_fields()
     
     def init_ui(self):
         """Инициализация интерфейса"""
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
+        
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setSpacing(15)
@@ -290,7 +298,7 @@ class SocialDataTab(QWidget):
         photos_grid = QGridLayout()
         photos_grid.setSpacing(15)
         
-          # Фото 1: Гражданская одежда
+        # Фото 1: Гражданская одежда
         photo1_layout = QVBoxLayout()
         photo1_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
         photo1_label = QLabel("Фото в гражданской одежде:")
@@ -315,12 +323,10 @@ class SocialDataTab(QWidget):
         civilian_btn.clicked.connect(lambda: self.load_photo('civilian'))
         photo1_layout.addWidget(civilian_btn)
         
-        # === Кнопка выгрузки фото ===
         civilian_export_btn = QPushButton("Выгрузить фото")
         civilian_export_btn.setMinimumWidth(150)
         civilian_export_btn.clicked.connect(lambda: self.export_photo('civilian'))
         photo1_layout.addWidget(civilian_export_btn)
-        # ===========================
         
         photos_grid.addLayout(photo1_layout, 0, 0)
         
@@ -349,12 +355,10 @@ class SocialDataTab(QWidget):
         military_headgear_btn.clicked.connect(lambda: self.load_photo('military_headgear'))
         photo2_layout.addWidget(military_headgear_btn)
         
-        # === Кнопка выгрузки фото ===
         military_headgear_export_btn = QPushButton("Выгрузить фото")
         military_headgear_export_btn.setMinimumWidth(150)
         military_headgear_export_btn.clicked.connect(lambda: self.export_photo('military_headgear'))
         photo2_layout.addWidget(military_headgear_export_btn)
-        # ===========================
         
         photos_grid.addLayout(photo2_layout, 0, 1)
         
@@ -383,12 +387,10 @@ class SocialDataTab(QWidget):
         military_no_headgear_btn.clicked.connect(lambda: self.load_photo('military_no_headgear'))
         photo3_layout.addWidget(military_no_headgear_btn)
         
-        # === Кнопка выгрузки фото ===
         military_no_headgear_export_btn = QPushButton("Выгрузить фото")
         military_no_headgear_export_btn.setMinimumWidth(150)
         military_no_headgear_export_btn.clicked.connect(lambda: self.export_photo('military_no_headgear'))
         photo3_layout.addWidget(military_no_headgear_export_btn)
-        # ===========================
         
         photos_grid.addLayout(photo3_layout, 0, 2)
         
@@ -417,12 +419,10 @@ class SocialDataTab(QWidget):
         distinctive_marks_btn.clicked.connect(lambda: self.load_photo('distinctive_marks'))
         photo4_layout.addWidget(distinctive_marks_btn)
         
-        # === Кнопка выгрузки фото ===
         distinctive_marks_export_btn = QPushButton("Выгрузить фото")
         distinctive_marks_export_btn.setMinimumWidth(150)
         distinctive_marks_export_btn.clicked.connect(lambda: self.export_photo('distinctive_marks'))
         photo4_layout.addWidget(distinctive_marks_export_btn)
-        # ===========================
         
         photos_grid.addLayout(photo4_layout, 0, 3)
         
@@ -431,18 +431,70 @@ class SocialDataTab(QWidget):
         layout.addWidget(group7)
         
         layout.addStretch()
+        
         scroll.setWidget(container)
+        
         main_layout = QVBoxLayout(self)
         main_layout.addWidget(scroll)
+    
+    def setup_autocomplete_fields(self):
+        """
+        🎯 НАСТРОЙКА АВТОДОПОЛНЕНИЯ ДЛЯ ВСЕХ ТЕКСТОВЫХ ПОЛЕЙ
+        show_on_focus=True - показывать все варианты при клике на поле
+        """
+        
+        fields_config = [
+            # === ОСНОВНЫЕ ДАННЫЕ (Раздел 1) ===
+            (self.surname_input, 'surname', 50),
+            (self.name_input, 'name', 50),
+            (self.patronymic_input, 'patronymic', 50),
+            (self.tab_number_input, 'tab_number', 30),
+            (self.personal_number_input, 'personal_number', 30),
+            
+            # === МЕСТО РОЖДЕНИЯ (Раздел 2) ===
+            (self.birth_place_town_input, 'birth_place_town', 20),
+            (self.birth_place_district_input, 'birth_place_district', 20),
+            (self.birth_place_region_input, 'birth_place_region', 20),
+            (self.birth_place_country_input, 'birth_place_country', 20),
+            
+            # === ПРИЗЫВ (Раздел 3) ===
+            (self.drafted_by_commissariat_input, 'drafted_by_commissariat', 20),
+            (self.povsk_input, 'povsk', 20),
+            
+            # === ОБРАЗОВАНИЕ (Раздел 4) ===
+            (self.education_input, 'education', 15),
+            
+            # === ПАСПОРТНЫЕ ДАННЫЕ (Раздел 5) ===
+            (self.passport_series_input, 'passport_series', 20),
+            (self.passport_number_input, 'passport_number', 20),
+            (self.passport_issued_by_input, 'passport_issued_by', 20),
+            
+            # === ВОЕННЫЙ БИЛЕТ (Раздел 6) ===
+            (self.military_id_series_input, 'military_id_series', 20),
+            (self.military_id_number_input, 'military_id_number', 20),
+            (self.military_id_issued_by_input, 'military_id_issued_by', 20),
+            
+            # === КОНТАКТЫ (Раздел 7) ===
+            (self.military_contacts_input, 'military_contacts', 20),
+        ]
+        
+        for field_widget, column_name, max_items in fields_config:
+            self.autocomplete_helper.setup_autocomplete(
+                field_widget, 
+                'social_data', 
+                column_name,
+                max_items=max_items,
+                show_on_focus=True  # ← КЛЮЧЕВОЙ ПАРАМЕТР: показ при фокусе
+            )
+        
+        print("✅ Автодополнение настроено для всех текстовых полей")
     
     def load_categories(self):
         """Загрузка категорий из базы данных"""
         self.category_combo.clear()
         self.category_combo.addItem("", None)
-        
         query = QSqlQuery(self.db)
         query.exec("SELECT id, name FROM krd.categories ORDER BY name")
-        
         while query.next():
             category_id = query.value(0)
             category_name = query.value(1)
@@ -452,10 +504,8 @@ class SocialDataTab(QWidget):
         """Загрузка воинских званий из базы данных"""
         self.rank_combo.clear()
         self.rank_combo.addItem("", None)
-        
         query = QSqlQuery(self.db)
         query.exec("SELECT id, name FROM krd.ranks ORDER BY name")
-        
         while query.next():
             rank_id = query.value(0)
             rank_name = query.value(1)
@@ -469,36 +519,30 @@ class SocialDataTab(QWidget):
             "",
             "Изображения (*.png *.jpg *.jpeg *.bmp);;Все файлы (*)"
         )
-        
         if file_path:
             try:
-                # Проверяем размер файла (максимум 5 МБ)
                 file_size = os.path.getsize(file_path)
                 if file_size > 5 * 1024 * 1024:
                     QMessageBox.warning(self, "Ошибка", "Размер файла не должен превышать 5 МБ")
                     return
                 
-                # Загружаем изображение
                 pixmap = QPixmap(file_path)
                 if pixmap.isNull():
                     QMessageBox.warning(self, "Ошибка", "Невозможно загрузить изображение. Проверьте формат файла.")
                     return
                 
-                # Масштабируем до размера 180x240 с сохранением пропорций
                 scaled_pixmap = pixmap.scaled(
                     180, 240, 
                     Qt.AspectRatioMode.KeepAspectRatio, 
                     Qt.TransformationMode.SmoothTransformation
                 )
                 
-                # Отображаем миниатюру
                 label_map = {
                     'civilian': self.photo_civilian_label,
                     'military_headgear': self.photo_military_headgear_label,
                     'military_no_headgear': self.photo_military_no_headgear_label,
                     'distinctive_marks': self.photo_distinctive_marks_label
                 }
-                
                 label_map[photo_type].setPixmap(scaled_pixmap)
                 label_map[photo_type].setAlignment(Qt.AlignmentFlag.AlignCenter)
                 label_map[photo_type].setStyleSheet("""
@@ -508,10 +552,8 @@ class SocialDataTab(QWidget):
                     }
                 """)
                 
-                # Сохраняем путь для последующего сохранения в БД
                 self.photo_paths[photo_type] = file_path
                 
-                # Логирование
                 if self.audit_logger:
                     self.audit_logger.log_action(
                         action_type='PHOTO_UPLOAD',
@@ -522,10 +564,11 @@ class SocialDataTab(QWidget):
                     )
                 
                 print(f"✅ Фото '{photo_type}' загружено: {file_path} ({file_size} байт)")
-                
+            
             except Exception as e:
                 traceback.print_exc()
                 QMessageBox.critical(self, "Ошибка", f"Ошибка загрузки изображения:\n{str(e)}")
+    
     def load_data(self):
         """Загрузка данных из базы, включая фотографии"""
         query = QSqlQuery(self.db)
@@ -541,7 +584,6 @@ class SocialDataTab(QWidget):
         if query.next():
             self.record = query.record()
             
-            # --- Загрузка текстовых полей (без изменений) ---
             self.surname_input.setText(query.value("surname") or "")
             self.name_input.setText(query.value("name") or "")
             self.patronymic_input.setText(query.value("patronymic") or "")
@@ -551,12 +593,14 @@ class SocialDataTab(QWidget):
             category_id = query.value("category_id")
             if category_id:
                 index = self.category_combo.findData(category_id)
-                if index >= 0: self.category_combo.setCurrentIndex(index)
+                if index >= 0:
+                    self.category_combo.setCurrentIndex(index)
             
             rank_id = query.value("rank_id")
             if rank_id:
                 index = self.rank_combo.findData(rank_id)
-                if index >= 0: self.rank_combo.setCurrentIndex(index)
+                if index >= 0:
+                    self.rank_combo.setCurrentIndex(index)
             
             self.birth_place_town_input.setText(query.value("birth_place_town") or "")
             self.birth_place_district_input.setText(query.value("birth_place_district") or "")
@@ -564,15 +608,20 @@ class SocialDataTab(QWidget):
             self.birth_place_country_input.setText(query.value("birth_place_country") or "")
             
             birth_date = query.value("birth_date")
-            if birth_date: self.birth_date_input.setDate(birth_date)
+            if birth_date:
+                self.birth_date_input.setDate(birth_date)
             
             self.drafted_by_commissariat_input.setText(query.value("drafted_by_commissariat") or "")
+            
             draft_date = query.value("draft_date")
-            if draft_date: self.draft_date_input.setDate(draft_date)
+            if draft_date:
+                self.draft_date_input.setDate(draft_date)
             
             self.povsk_input.setText(query.value("povsk") or "")
+            
             selection_date = query.value("selection_date")
-            if selection_date: self.selection_date_input.setDate(selection_date)
+            if selection_date:
+                self.selection_date_input.setDate(selection_date)
             
             self.education_input.setText(query.value("education") or "")
             self.criminal_record_input.setPlainText(query.value("criminal_record") or "")
@@ -581,14 +630,20 @@ class SocialDataTab(QWidget):
             
             self.passport_series_input.setText(query.value("passport_series") or "")
             self.passport_number_input.setText(query.value("passport_number") or "")
+            
             passport_issue_date = query.value("passport_issue_date")
-            if passport_issue_date: self.passport_issue_date_input.setDate(passport_issue_date)
+            if passport_issue_date:
+                self.passport_issue_date_input.setDate(passport_issue_date)
+            
             self.passport_issued_by_input.setText(query.value("passport_issued_by") or "")
             
             self.military_id_series_input.setText(query.value("military_id_series") or "")
             self.military_id_number_input.setText(query.value("military_id_number") or "")
+            
             military_id_issue_date = query.value("military_id_issue_date")
-            if military_id_issue_date: self.military_id_issue_date_input.setDate(military_id_issue_date)
+            if military_id_issue_date:
+                self.military_id_issue_date_input.setDate(military_id_issue_date)
+            
             self.military_id_issued_by_input.setText(query.value("military_id_issued_by") or "")
             
             self.appearance_features_input.setPlainText(query.value("appearance_features") or "")
@@ -597,56 +652,54 @@ class SocialDataTab(QWidget):
             self.military_contacts_input.setText(query.value("military_contacts") or "")
             self.relatives_info_input.setPlainText(query.value("relatives_info") or "")
             
-            # --- Загрузка фотографий ---
-            # Важно: load_photo_from_db теперь заполняет self.original_photos байтами
             self.load_photo_from_db(query, 'photo_civilian', self.photo_civilian_label, 'civilian')
             self.load_photo_from_db(query, 'photo_military_headgear', self.photo_military_headgear_label, 'military_headgear')
             self.load_photo_from_db(query, 'photo_military_no_headgear', self.photo_military_no_headgear_label, 'military_no_headgear')
             self.load_photo_from_db(query, 'photo_distinctive_marks', self.photo_distinctive_marks_label, 'distinctive_marks')
-
+    
     def load_photo_from_db(self, query, field_name, label_widget, photo_type):
         """Загрузка фотографии из базы данных и отображение в QLabel"""
         photo_data = query.value(field_name)
         
-        # Сбрасываем состояние перед загрузкой
         self.original_photos[photo_type] = None
         
         if photo_data and (isinstance(photo_data, bytes) or hasattr(photo_data, 'data')):
             try:
-                # Преобразуем в байты
-                if hasattr(photo_data, 'data'):  # QByteArray
+                if hasattr(photo_data, 'data'):
                     photo_bytes = bytes(photo_data.data())
                 else:
                     photo_bytes = bytes(photo_data)
                 
-                # !!! КЛЮЧЕВОЙ МОМЕНТ: Сохраняем оригинальные байты для будущего сохранения
                 self.original_photos[photo_type] = photo_bytes
                 
-                # Загружаем изображение
                 pixmap = QPixmap()
                 pixmap.loadFromData(photo_bytes)
                 
                 if not pixmap.isNull():
-                    scaled_pixmap = pixmap.scaled(180, 240, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                    scaled_pixmap = pixmap.scaled(
+                        180, 240, 
+                        Qt.AspectRatioMode.KeepAspectRatio, 
+                        Qt.TransformationMode.SmoothTransformation
+                    )
                     label_widget.setPixmap(scaled_pixmap)
                     label_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
                     label_widget.setStyleSheet("QLabel { border: 2px solid #4CAF50; background-color: white; }")
                 else:
                     label_widget.setText("Ошибка загрузки")
+            
             except Exception as e:
                 traceback.print_exc()
                 label_widget.setText("Ошибка")
         else:
             label_widget.setText("Нет фото")
             label_widget.setStyleSheet("QLabel { border: 2px dashed #999; background-color: #f8f9fa; color: #6c757d; font-size: 12px; }")
-
+    
     def save_data(self):
         """Сохранение данных в базу, включая фотографии"""
         validation_error = self.validate_required_fields()
         if validation_error:
             raise ValueError(validation_error)
         
-        # Подготовка данных для сохранения
         data = {
             "krd_id": self.krd_id,
             "surname": self.surname_input.text().strip(),
@@ -684,14 +737,11 @@ class SocialDataTab(QWidget):
             "relatives_info": self.relatives_info_input.toPlainText()
         }
         
-        # === ИСПРАВЛЕННАЯ ЛОГИКА ОБРАБОТКИ ФОТО ===
         photo_types = ['civilian', 'military_headgear', 'military_no_headgear', 'distinctive_marks']
-        
         for photo_type in photo_types:
             field_name = f"photo_{photo_type}"
             final_photo_bytes = None
             
-            # 1. Приоритет: новое загруженное фото (из self.photo_paths)
             new_path = self.photo_paths.get(photo_type)
             if new_path and os.path.exists(new_path):
                 try:
@@ -701,26 +751,17 @@ class SocialDataTab(QWidget):
                         raise ValueError(f"Фото '{photo_type}' превышает 5 МБ")
                 except Exception as e:
                     raise Exception(f"Ошибка обработки фото '{photo_type}': {str(e)}")
-            
-            # 2. Если нового нет, берем оригинал из БД (из self.original_photos)
-            # Это предотвращает обнуление, так как мы берем байты, загруженные ранее
             elif self.original_photos.get(photo_type):
                 final_photo_bytes = self.original_photos[photo_type]
             
-            # 3. Добавляем в данные для привязки к SQL-запросу
-            # Мы ДОЛЖНЫ добавить ключ в словарь, даже если фото нет (пустой QByteArray),
-            # иначе SQL-параметр останется не привязанным и станет NULL
             if final_photo_bytes:
                 data[field_name] = QByteArray(final_photo_bytes)
             else:
-                data[field_name] = QByteArray() # Явно передаем пустоту, если фото нет вообще
-        # === КОНЕЦ ИСПРАВЛЕНИЯ ===
+                data[field_name] = QByteArray()
         
-        # Сохранение в базу
         query = QSqlQuery(self.db)
         
         if self.record:
-            # Обновление существующей записи
             query.prepare("""
                 UPDATE krd.social_data SET
                     surname = :surname, name = :name, patronymic = :patronymic,
@@ -747,7 +788,6 @@ class SocialDataTab(QWidget):
             """)
             query.bindValue(":id", self.record.value("id"))
         else:
-            # Создание новой записи
             query.prepare("""
                 INSERT INTO krd.social_data (
                     krd_id, surname, name, patronymic, birth_date, birth_place_town,
@@ -774,14 +814,17 @@ class SocialDataTab(QWidget):
                 )
             """)
         
-        # Привязка всех значений
         for key, value in data.items():
             query.bindValue(f":{key}", value)
         
         if not query.exec():
             raise Exception(f"Ошибка сохранения данных: {query.lastError().text()}")
         
+        # === ОЧИСТКА КЭША АВТОДОПОЛНЕНИЯ ПОСЛЕ СОХРАНЕНИЯ ===
+        self.autocomplete_helper.clear_cache()
+        
         print(f"✅ Данные успешно сохранены для КРД-{self.krd_id}")
+    
     def validate_required_fields(self):
         """Валидация обязательных полей"""
         if not self.surname_input.text().strip():
@@ -791,12 +834,11 @@ class SocialDataTab(QWidget):
         if not self.patronymic_input.text().strip():
             return "Поле 'Отчество' обязательно для заполнения"
         return None
+    
     def export_photo(self, photo_type):
         """Выгрузка фотографии в файл"""
-        # Определяем, откуда брать фото: новое загруженное или из базы
         photo_bytes = None
         
-        # Сначала проверяем новый загруженный файл
         new_path = self.photo_paths.get(photo_type)
         if new_path and os.path.exists(new_path):
             try:
@@ -805,17 +847,13 @@ class SocialDataTab(QWidget):
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"Невозможно прочитать файл:\n{str(e)}")
                 return
-        
-        # Если нового нет, берем из оригинальных (из базы)
         elif self.original_photos.get(photo_type):
             photo_bytes = self.original_photos[photo_type]
         
-        # Если фото нет вообще
         if not photo_bytes:
             QMessageBox.information(self, "Информация", f"Фото '{photo_type}' отсутствует. Сначала загрузите фото.")
             return
         
-        # Диалог сохранения файла
         photo_names = {
             'civilian': 'Гражданская одежда',
             'military_headgear': 'Военная форма с головным убором',
@@ -824,7 +862,6 @@ class SocialDataTab(QWidget):
         }
         
         default_name = f"КРД-{self.krd_id}_{photo_type}.jpg"
-        
         file_path, _ = QFileDialog.getSaveFileName(
             self,
             f"Сохранить фото ({photo_names.get(photo_type, photo_type)})",
@@ -834,11 +871,9 @@ class SocialDataTab(QWidget):
         
         if file_path:
             try:
-                # Сохраняем файл
                 with open(file_path, 'wb') as f:
                     f.write(photo_bytes)
                 
-                # Логирование
                 if self.audit_logger:
                     self.audit_logger.log_action(
                         action_type='PHOTO_EXPORT',
@@ -850,7 +885,7 @@ class SocialDataTab(QWidget):
                 
                 QMessageBox.information(self, "Успешно", f"Фото успешно сохранено:\n{file_path}")
                 print(f"✅ Фото '{photo_type}' выгружено: {file_path} ({len(photo_bytes)} байт)")
-                
+            
             except Exception as e:
                 traceback.print_exc()
                 QMessageBox.critical(self, "Ошибка", f"Ошибка сохранения файла:\n{str(e)}")
