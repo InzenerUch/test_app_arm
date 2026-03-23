@@ -56,7 +56,7 @@ class KrdDetailsWindow(QDialog):
         tabs.addTab(ServicePlacesTab(self.krd_id, self.db, self.audit_logger), "Места службы")
         tabs.addTab(SochEpisodesTab(self.krd_id, self.db, self.audit_logger), "Сведения о СОЧ")
         tabs.addTab(OutgoingRequestsTab(self.krd_id, self.db, self.audit_logger), "Запросы и поручения")
-        tabs.addTab(DocumentGeneratorTab(self.krd_id, self.db, self.audit_logger), "Генератор документов")
+        
         
         # Сохраняем ссылку на вкладки для доступа из save_all_changes
         self.tabs = tabs

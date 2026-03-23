@@ -1,17 +1,17 @@
 """
-Вкладка адресов проживания с автодополнением текстовых полей
+Вкладка адресов проживания
+Только таблица с кнопками добавления/удаления
 """
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QScrollArea, QGroupBox, QGridLayout,
-    QLineEdit, QDateEdit, QTextEdit, QLabel, QPushButton, QTableView,
-    QMessageBox
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QTableView, QMessageBox, QHeaderView, QAbstractItemView
 )
-from PyQt6.QtCore import QDate
 from PyQt6.QtSql import QSqlQuery, QSqlQueryModel
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
-from autocomplete_helper import AutocompleteHelper
+from address_dialog import AddressDialog
 
 
 class AddressesTab(QWidget):
@@ -23,120 +23,83 @@ class AddressesTab(QWidget):
         self.db = db_connection
         self.audit_logger = audit_logger
         
-        self.autocomplete_helper = AutocompleteHelper(db_connection)
-        
         self.init_ui()
         self.load_data()
-        self.setup_autocomplete_fields()
     
     def init_ui(self):
         """Инициализация интерфейса"""
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        container = QWidget()
-        layout = QVBoxLayout(container)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Заголовок
+        title_label = QLabel("📍 Адреса проживания")
+        title_font = QFont("Arial", 14, QFont.Weight.Bold)
+        title_label.setFont(title_font)
+        layout.addWidget(title_label)
         
         # Таблица адресов
         self.addresses_model = QSqlQueryModel()
         self.addresses_table = QTableView()
         self.addresses_table.setModel(self.addresses_model)
         self.addresses_table.setAlternatingRowColors(True)
+        self.addresses_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.addresses_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.addresses_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.addresses_table.setSortingEnabled(True)
         
+        # Настройка заголовков
         header = self.addresses_table.horizontalHeader()
         header.setStretchLastSection(True)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         
-        layout.addWidget(QLabel("Список адресов проживания:"))
+        # Настройка высоты строк
+        self.addresses_table.verticalHeader().setDefaultSectionSize(35)
+        
+        # Подключение двойного клика для редактирования
+        self.addresses_table.doubleClicked.connect(self.on_address_double_clicked)
+        
         layout.addWidget(self.addresses_table)
         
-        # Форма добавления адреса
-        form_group = QGroupBox("Добавить новый адрес")
-        form_layout = QGridLayout()
+        # Кнопки внизу
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
         
-        form_layout.addWidget(QLabel("Субъект РФ:"), 0, 0)
-        self.region_input = QLineEdit()
-        form_layout.addWidget(self.region_input, 0, 1)
+        add_btn = QPushButton("➕ Добавить адрес")
+        add_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                font-weight: bold;
+                padding: 10px 20px;
+                border-radius: 5px;
+                min-width: 150px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        add_btn.clicked.connect(self.on_add_address)
+        button_layout.addWidget(add_btn)
         
-        form_layout.addWidget(QLabel("Административный район:"), 0, 2)
-        self.district_input = QLineEdit()
-        form_layout.addWidget(self.district_input, 0, 3)
+        delete_btn = QPushButton("🗑️ Удалить адрес")
+        delete_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f44336;
+                color: white;
+                font-weight: bold;
+                padding: 10px 20px;
+                border-radius: 5px;
+                min-width: 150px;
+            }
+            QPushButton:hover {
+                background-color: #da190b;
+            }
+        """)
+        delete_btn.clicked.connect(self.on_delete_address)
+        button_layout.addWidget(delete_btn)
         
-        form_layout.addWidget(QLabel("Населенный пункт:"), 1, 0)
-        self.town_input = QLineEdit()
-        form_layout.addWidget(self.town_input, 1, 1)
-        
-        form_layout.addWidget(QLabel("Улица:"), 1, 2)
-        self.street_input = QLineEdit()
-        form_layout.addWidget(self.street_input, 1, 3)
-        
-        form_layout.addWidget(QLabel("Дом:"), 2, 0)
-        self.house_input = QLineEdit()
-        form_layout.addWidget(self.house_input, 2, 1)
-        
-        form_layout.addWidget(QLabel("Корпус:"), 2, 2)
-        self.building_input = QLineEdit()
-        form_layout.addWidget(self.building_input, 2, 3)
-        
-        form_layout.addWidget(QLabel("Литер:"), 3, 0)
-        self.letter_input = QLineEdit()
-        form_layout.addWidget(self.letter_input, 3, 1)
-        
-        form_layout.addWidget(QLabel("Квартира:"), 3, 2)
-        self.apartment_input = QLineEdit()
-        form_layout.addWidget(self.apartment_input, 3, 3)
-        
-        form_layout.addWidget(QLabel("Комната:"), 4, 0)
-        self.room_input = QLineEdit()
-        form_layout.addWidget(self.room_input, 4, 1)
-        
-        form_layout.addWidget(QLabel("Дата проверки:"), 5, 0)
-        self.check_date_input = QDateEdit()
-        self.check_date_input.setCalendarPopup(True)
-        self.check_date_input.setDate(QDate.currentDate())
-        form_layout.addWidget(self.check_date_input, 5, 1)
-        
-        form_layout.addWidget(QLabel("Результат проверки:"), 6, 0)
-        self.check_result_input = QTextEdit()
-        self.check_result_input.setMaximumHeight(60)
-        form_layout.addWidget(self.check_result_input, 6, 1, 1, 3)
-        
-        add_btn = QPushButton("Добавить адрес")
-        add_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
-        add_btn.clicked.connect(self.add_address)
-        form_layout.addWidget(add_btn, 7, 0, 1, 4)
-        
-        form_group.setLayout(form_layout)
-        layout.addWidget(form_group)
-        
-        layout.addStretch()
-        scroll.setWidget(container)
-        main_layout = QVBoxLayout(self)
-        main_layout.addWidget(scroll)
-    
-    def setup_autocomplete_fields(self):
-        """Настройка автодополнения для всех текстовых полей"""
-        
-        fields_config = [
-            (self.region_input, 'region', 20),
-            (self.district_input, 'district', 20),
-            (self.town_input, 'town', 20),
-            (self.street_input, 'street', 30),
-            (self.house_input, 'house', 15),
-            (self.building_input, 'building', 15),
-            (self.letter_input, 'letter', 10),
-            (self.apartment_input, 'apartment', 15),
-            (self.room_input, 'room', 15),
-        ]
-        
-        for field_widget, column_name, max_items in fields_config:
-            self.autocomplete_helper.setup_autocomplete(
-                field_widget, 
-                'addresses', 
-                column_name,
-                max_items=max_items,
-                show_on_focus=True
-            )
-        
-        print("✅ Автодополнение настроено для всех полей адресов")
+        layout.addLayout(button_layout)
     
     def load_data(self):
         """Загрузка данных из базы"""
@@ -162,61 +125,148 @@ class AddressesTab(QWidget):
         query.addBindValue(self.krd_id)
         query.exec()
         self.addresses_model.setQuery(query)
+        
+        # Скрыть ID колонку
+        self.addresses_table.setColumnHidden(0, True)
     
-    def add_address(self):
-        """Добавление нового адреса"""
-        if not self.town_input.text().strip():
-            QMessageBox.warning(self, "Ошибка", "Поле 'Населенный пункт' обязательно для заполнения")
-            return
+    def on_add_address(self):
+        """Обработчик кнопки добавления адреса"""
+        dialog = AddressDialog(self.db, self.krd_id, parent=self)
         
-        data = {
-            "krd_id": self.krd_id,
-            "region": self.region_input.text().strip(),
-            "district": self.district_input.text().strip(),
-            "town": self.town_input.text().strip(),
-            "street": self.street_input.text().strip(),
-            "house": self.house_input.text().strip(),
-            "building": self.building_input.text().strip(),
-            "letter": self.letter_input.text().strip(),
-            "apartment": self.apartment_input.text().strip(),
-            "room": self.room_input.text().strip(),
-            "check_date": self.check_date_input.date(),
-            "check_result": self.check_result_input.toPlainText()
-        }
-        
-        query = QSqlQuery(self.db)
-        query.prepare("""
-            INSERT INTO krd.addresses (
-                krd_id, region, district, town, street, house, building,
-                letter, apartment, room, check_date, check_result
-            ) VALUES (
-                :krd_id, :region, :district, :town, :street, :house, :building,
-                :letter, :apartment, :room, :check_date, :check_result
-            )
-        """)
-        
-        for key, value in data.items():
-            query.bindValue(f":{key}", value)
-        
-        if query.exec():
-            # Очистка формы
-            self.region_input.clear()
-            self.district_input.clear()
-            self.town_input.clear()
-            self.street_input.clear()
-            self.house_input.clear()
-            self.building_input.clear()
-            self.letter_input.clear()
-            self.apartment_input.clear()
-            self.room_input.clear()
-            self.check_result_input.clear()
-            
-            # Обновление таблицы
+        if dialog.exec() == 1:  # QDialog.Accepted
+            # Обновить таблицу после добавления
             self.load_data()
             
-            # === НОВОЕ: Обновляем автодополнение после добавления ===
-            self.autocomplete_helper.refresh_all_fields()
+            if self.audit_logger:
+                self.audit_logger.log_action(
+                    action_type='ADDRESS_ADDED',
+                    table_name='addresses',
+                    krd_id=self.krd_id,
+                    description='Добавлен новый адрес проживания'
+                )
+    
+    def on_address_double_clicked(self, index):
+        """Обработчик двойного клика по записи"""
+        row = index.row()
+        
+        # Получить ID адреса из скрытой колонки
+        id_index = self.addresses_model.index(row, 0)
+        address_id = self.addresses_model.data(id_index)
+        
+        if not address_id:
+            return
+        
+        # Загрузить полные данные адреса
+        address_data = self.load_address_data(address_id)
+        
+        if address_data:
+            # Открыть диалог редактирования
+            dialog = AddressDialog(self.db, self.krd_id, address_data, parent=self)
             
-            QMessageBox.information(self, "Успех", "Адрес успешно добавлен")
-        else:
-            QMessageBox.critical(self, "Ошибка", f"Ошибка добавления адреса:\n{query.lastError().text()}")
+            if dialog.exec() == 1:  # QDialog.Accepted
+                # Обновить таблицу после редактирования
+                self.load_data()
+                
+                if self.audit_logger:
+                    self.audit_logger.log_action(
+                        action_type='ADDRESS_EDITED',
+                        table_name='addresses',
+                        record_id=address_id,
+                        krd_id=self.krd_id,
+                        description='Отредактирован адрес проживания'
+                    )
+    
+    def on_delete_address(self):
+        """Обработчик кнопки удаления адреса"""
+        # Получить выбранную строку
+        selected_indexes = self.addresses_table.selectedIndexes()
+        
+        if not selected_indexes:
+            QMessageBox.warning(self, "Предупреждение", "⚠️ Выберите адрес для удаления")
+            return
+        
+        # Получить ID адреса
+        row = selected_indexes[0].row()
+        id_index = self.addresses_model.index(row, 0)
+        address_id = self.addresses_model.data(id_index)
+        
+        if not address_id:
+            return
+        
+        # Получить адрес для отображения в подтверждении
+        town_index = self.addresses_model.index(row, 3)  # Колонка "Населенный пункт"
+        town = self.addresses_model.data(town_index)
+        
+        # Подтверждение удаления
+        reply = QMessageBox.question(
+            self,
+            "Подтверждение удаления",
+            f"Вы действительно хотите удалить адрес?\n\n📍 {town}\n\nЭто действие нельзя отменить!",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                query = QSqlQuery(self.db)
+                query.prepare("DELETE FROM krd.addresses WHERE id = ?")
+                query.addBindValue(address_id)
+                
+                if query.exec():
+                    QMessageBox.information(self, "Успех", "✅ Адрес успешно удалён")
+                    self.load_data()
+                    
+                    if self.audit_logger:
+                        self.audit_logger.log_action(
+                            action_type='ADDRESS_DELETED',
+                            table_name='addresses',
+                            record_id=address_id,
+                            krd_id=self.krd_id,
+                            description=f'Удалён адрес: {town}'
+                        )
+                else:
+                    raise Exception(f"Ошибка SQL: {query.lastError().text()}")
+                    
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"❌ Ошибка удаления адреса:\n{str(e)}")
+    
+    def load_address_data(self, address_id):
+        """Загрузка полных данных адреса для редактирования"""
+        query = QSqlQuery(self.db)
+        query.prepare("""
+            SELECT 
+                id,
+                region,
+                district,
+                town,
+                street,
+                house,
+                building,
+                letter,
+                apartment,
+                room,
+                check_date,
+                check_result
+            FROM krd.addresses
+            WHERE id = ?
+        """)
+        query.addBindValue(address_id)
+        query.exec()
+        
+        if query.next():
+            return {
+                'id': query.value('id'),
+                'region': query.value('region') or '',
+                'district': query.value('district') or '',
+                'town': query.value('town') or '',
+                'street': query.value('street') or '',
+                'house': query.value('house') or '',
+                'building': query.value('building') or '',
+                'letter': query.value('letter') or '',
+                'apartment': query.value('apartment') or '',
+                'room': query.value('room') or '',
+                'check_date': query.value('check_date'),
+                'check_result': query.value('check_result') or ''
+            }
+        
+        return None

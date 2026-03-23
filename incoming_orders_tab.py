@@ -1,15 +1,17 @@
 """
 Вкладка входящих поручений на розыск
+Только таблица с кнопками добавления/удаления
 """
 
 from PyQt6.QtWidgets import (
-    QWidget, QVBoxLayout, QScrollArea, QGroupBox, QGridLayout,
-    QLineEdit, QDateEdit, QTextEdit, QLabel, QPushButton, QComboBox,
-    QTableView, QHBoxLayout, QMessageBox
+    QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
+    QTableView, QMessageBox, QHeaderView, QAbstractItemView
 )
-from PyQt6.QtCore import QDate
 from PyQt6.QtSql import QSqlQuery, QSqlQueryModel
+from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
+
+from incoming_order_dialog import IncomingOrderDialog
 
 
 class IncomingOrdersTab(QWidget):
@@ -26,156 +28,78 @@ class IncomingOrdersTab(QWidget):
     
     def init_ui(self):
         """Инициализация интерфейса"""
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        container = QWidget()
-        layout = QVBoxLayout(container)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Заголовок
+        title_label = QLabel("📬 Входящие поручения на розыск")
+        title_font = QFont("Arial", 14, QFont.Weight.Bold)
+        title_label.setFont(title_font)
+        layout.addWidget(title_label)
         
         # Таблица входящих поручений
         self.orders_model = QSqlQueryModel()
         self.orders_table = QTableView()
         self.orders_table.setModel(self.orders_model)
         self.orders_table.setAlternatingRowColors(True)
+        self.orders_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.orders_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self.orders_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self.orders_table.setSortingEnabled(True)
         
+        # Настройка заголовков
         header = self.orders_table.horizontalHeader()
         header.setStretchLastSection(True)
+        header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         
-        layout.addWidget(QLabel("Список входящих поручений:"))
+        # Настройка высоты строк
+        self.orders_table.verticalHeader().setDefaultSectionSize(35)
+        
+        # Подключение двойного клика для редактирования
+        self.orders_table.doubleClicked.connect(self.on_order_double_clicked)
+        
         layout.addWidget(self.orders_table)
         
-        # Форма добавления поручения
-        form_group = QGroupBox("Добавить новое входящее поручение")
-        form_layout = QGridLayout()
+        # Кнопки внизу
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
         
-        # Инициатор розыска
-        form_layout.addWidget(QLabel("Инициатор розыска *:"), 0, 0)
-        self.initiator_type_combo = QComboBox()
-        self.load_initiator_types()
-        form_layout.addWidget(self.initiator_type_combo, 0, 1)
+        add_btn = QPushButton("➕ Добавить поручение")
+        add_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                font-weight: bold;
+                padding: 10px 20px;
+                border-radius: 5px;
+                min-width: 150px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        add_btn.clicked.connect(self.on_add_order)
+        button_layout.addWidget(add_btn)
         
-        form_layout.addWidget(QLabel("Полное наименование инициатора *:"), 0, 2)
-        self.initiator_full_name_input = QLineEdit()
-        form_layout.addWidget(self.initiator_full_name_input, 0, 3, 1, 3)
+        delete_btn = QPushButton("🗑️ Удалить поручение")
+        delete_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f44336;
+                color: white;
+                font-weight: bold;
+                padding: 10px 20px;
+                border-radius: 5px;
+                min-width: 150px;
+            }
+            QPushButton:hover {
+                background-color: #da190b;
+            }
+        """)
+        delete_btn.clicked.connect(self.on_delete_order)
+        button_layout.addWidget(delete_btn)
         
-        form_layout.addWidget(QLabel("Военное управление инициатора *:"), 1, 0)
-        self.initiator_military_unit_combo = QComboBox()
-        self.load_military_units()
-        form_layout.addWidget(self.initiator_military_unit_combo, 1, 1)
-        
-        form_layout.addWidget(QLabel("Исходящая дата поручения *:"), 2, 0)
-        self.order_date_input = QDateEdit()
-        self.order_date_input.setCalendarPopup(True)
-        self.order_date_input.setDate(QDate.currentDate())
-        form_layout.addWidget(self.order_date_input, 2, 1)
-        
-        form_layout.addWidget(QLabel("Исходящий номер поручения *:"), 2, 2)
-        self.order_number_input = QLineEdit()
-        form_layout.addWidget(self.order_number_input, 2, 3)
-        
-        form_layout.addWidget(QLabel("Дата поступления в ВК *:"), 3, 0)
-        self.receipt_date_input = QDateEdit()
-        self.receipt_date_input.setCalendarPopup(True)
-        self.receipt_date_input.setDate(QDate.currentDate())
-        form_layout.addWidget(self.receipt_date_input, 3, 1)
-        
-        form_layout.addWidget(QLabel("Входящий номер в ВК *:"), 3, 2)
-        self.receipt_number_input = QLineEdit()
-        form_layout.addWidget(self.receipt_number_input, 3, 3)
-        
-        # Почтовый адрес инициатора
-        form_layout.addWidget(QLabel("Почтовый адрес инициатора:"), 4, 0, 1, 6)
-        
-        form_layout.addWidget(QLabel("Индекс:"), 5, 0)
-        self.postal_index_input = QLineEdit()
-        form_layout.addWidget(self.postal_index_input, 5, 1)
-        
-        form_layout.addWidget(QLabel("Субъект РФ:"), 5, 2)
-        self.postal_region_input = QLineEdit()
-        form_layout.addWidget(self.postal_region_input, 5, 3)
-        
-        form_layout.addWidget(QLabel("Административный район:"), 6, 0)
-        self.postal_district_input = QLineEdit()
-        form_layout.addWidget(self.postal_district_input, 6, 1)
-        
-        form_layout.addWidget(QLabel("Населенный пункт:"), 6, 2)
-        self.postal_town_input = QLineEdit()
-        form_layout.addWidget(self.postal_town_input, 6, 3)
-        
-        form_layout.addWidget(QLabel("Улица:"), 7, 0)
-        self.postal_street_input = QLineEdit()
-        form_layout.addWidget(self.postal_street_input, 7, 1)
-        
-        form_layout.addWidget(QLabel("Дом:"), 7, 2)
-        self.postal_house_input = QLineEdit()
-        form_layout.addWidget(self.postal_house_input, 7, 3)
-        
-        form_layout.addWidget(QLabel("Корпус:"), 8, 0)
-        self.postal_building_input = QLineEdit()
-        form_layout.addWidget(self.postal_building_input, 8, 1)
-        
-        form_layout.addWidget(QLabel("Литер:"), 8, 2)
-        self.postal_letter_input = QLineEdit()
-        form_layout.addWidget(self.postal_letter_input, 8, 3)
-        
-        form_layout.addWidget(QLabel("Квартира:"), 9, 0)
-        self.postal_apartment_input = QLineEdit()
-        form_layout.addWidget(self.postal_apartment_input, 9, 1)
-        
-        form_layout.addWidget(QLabel("Комната:"), 9, 2)
-        self.postal_room_input = QLineEdit()
-        form_layout.addWidget(self.postal_room_input, 9, 3)
-        
-        form_layout.addWidget(QLabel("Контакты источника:"), 10, 0)
-        self.initiator_contacts_input = QLineEdit()
-        form_layout.addWidget(self.initiator_contacts_input, 10, 1, 1, 3)
-        
-        form_layout.addWidget(QLabel("Дата нашего ответа:"), 11, 0)
-        self.our_response_date_input = QDateEdit()
-        self.our_response_date_input.setCalendarPopup(True)
-        self.our_response_date_input.setDate(QDate.currentDate())
-        form_layout.addWidget(self.our_response_date_input, 11, 1)
-        
-        form_layout.addWidget(QLabel("Исходящий номер нашего ответа:"), 11, 2)
-        self.our_response_number_input = QLineEdit()
-        form_layout.addWidget(self.our_response_number_input, 11, 3)
-        
-        add_btn = QPushButton("Добавить поручение")
-        add_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold;")
-        add_btn.clicked.connect(self.add_order)
-        form_layout.addWidget(add_btn, 12, 0, 1, 6)
-        
-        form_group.setLayout(form_layout)
-        layout.addWidget(form_group)
-        
-        layout.addStretch()
-        scroll.setWidget(container)
-        main_layout = QVBoxLayout(self)
-        main_layout.addWidget(scroll)
-    
-    def load_initiator_types(self):
-        """Загрузка типов инициаторов"""
-        self.initiator_type_combo.clear()
-        
-        query = QSqlQuery(self.db)
-        query.exec("SELECT id, name FROM krd.initiator_types ORDER BY name")
-        
-        while query.next():
-            type_id = query.value(0)
-            type_name = query.value(1)
-            self.initiator_type_combo.addItem(type_name, type_id)
-    
-    def load_military_units(self):
-        """Загрузка военных управлений"""
-        self.initiator_military_unit_combo.clear()
-        self.initiator_military_unit_combo.addItem("", None)
-        
-        query = QSqlQuery(self.db)
-        query.exec("SELECT id, name FROM krd.military_units ORDER BY name")
-        
-        while query.next():
-            unit_id = query.value(0)
-            unit_name = query.value(1)
-            self.initiator_military_unit_combo.addItem(unit_name, unit_id)
+        layout.addLayout(button_layout)
     
     def load_data(self):
         """Загрузка данных из базы"""
@@ -195,86 +119,171 @@ class IncomingOrdersTab(QWidget):
         query.addBindValue(self.krd_id)
         query.exec()
         self.orders_model.setQuery(query)
+        
+        # Скрыть ID колонку
+        self.orders_table.setColumnHidden(0, True)
     
-    def add_order(self):
-        """Добавление нового поручения"""
-        # Валидация
-        if not self.initiator_full_name_input.text().strip():
-            QMessageBox.warning(self, "Ошибка", "Поле 'Полное наименование инициатора' обязательно для заполнения")
-            return
+    def on_add_order(self):
+        """Обработчик кнопки добавления поручения"""
+        dialog = IncomingOrderDialog(self.db, self.krd_id, parent=self)
         
-        if not self.order_number_input.text().strip():
-            QMessageBox.warning(self, "Ошибка", "Поле 'Исходящий номер поручения' обязательно для заполнения")
-            return
-        
-        # Подготовка данных
-        data = {
-            "krd_id": self.krd_id,
-            "initiator_type_id": self.initiator_type_combo.currentData(),
-            "initiator_full_name": self.initiator_full_name_input.text().strip(),
-            "military_unit_id": self.initiator_military_unit_combo.currentData(),
-            "order_date": self.order_date_input.date(),
-            "order_number": self.order_number_input.text().strip(),
-            "receipt_date": self.receipt_date_input.date(),
-            "receipt_number": self.receipt_number_input.text().strip(),
-            "postal_index": self.postal_index_input.text().strip(),
-            "postal_region": self.postal_region_input.text().strip(),
-            "postal_district": self.postal_district_input.text().strip(),
-            "postal_town": self.postal_town_input.text().strip(),
-            "postal_street": self.postal_street_input.text().strip(),
-            "postal_house": self.postal_house_input.text().strip(),
-            "postal_building": self.postal_building_input.text().strip(),
-            "postal_letter": self.postal_letter_input.text().strip(),
-            "postal_apartment": self.postal_apartment_input.text().strip(),
-            "postal_room": self.postal_room_input.text().strip(),
-            "initiator_contacts": self.initiator_contacts_input.text().strip(),
-            "our_response_date": self.our_response_date_input.date(),
-            "our_response_number": self.our_response_number_input.text().strip()
-        }
-        
-        # Сохранение в базу
-        query = QSqlQuery(self.db)
-        query.prepare("""
-            INSERT INTO krd.incoming_orders (
-                krd_id, initiator_type_id, initiator_full_name, military_unit_id,
-                order_date, order_number, receipt_date, receipt_number,
-                postal_index, postal_region, postal_district, postal_town,
-                postal_street, postal_house, postal_building, postal_letter,
-                postal_apartment, postal_room, initiator_contacts,
-                our_response_date, our_response_number
-            ) VALUES (
-                :krd_id, :initiator_type_id, :initiator_full_name, :military_unit_id,
-                :order_date, :order_number, :receipt_date, :receipt_number,
-                :postal_index, :postal_region, :postal_district, :postal_town,
-                :postal_street, :postal_house, :postal_building, :postal_letter,
-                :postal_apartment, :postal_room, :initiator_contacts,
-                :our_response_date, :our_response_number
-            )
-        """)
-        
-        for key, value in data.items():
-            query.bindValue(f":{key}", value)
-        
-        if query.exec():
-            # Очистка формы
-            self.initiator_full_name_input.clear()
-            self.order_number_input.clear()
-            self.postal_index_input.clear()
-            self.postal_region_input.clear()
-            self.postal_district_input.clear()
-            self.postal_town_input.clear()
-            self.postal_street_input.clear()
-            self.postal_house_input.clear()
-            self.postal_building_input.clear()
-            self.postal_letter_input.clear()
-            self.postal_apartment_input.clear()
-            self.postal_room_input.clear()
-            self.initiator_contacts_input.clear()
-            self.our_response_number_input.clear()
-            
-            # Обновление таблицы
+        if dialog.exec() == 1:  # QDialog.Accepted
+            # Обновить таблицу после добавления
             self.load_data()
             
-            QMessageBox.information(self, "Успех", "Поручение успешно добавлено")
-        else:
-            QMessageBox.critical(self, "Ошибка", f"Ошибка добавления поручения:\n{query.lastError().text()}")
+            if self.audit_logger:
+                self.audit_logger.log_action(
+                    action_type='INCOMING_ORDER_ADDED',
+                    table_name='incoming_orders',
+                    krd_id=self.krd_id,
+                    description='Добавлено новое входящее поручение'
+                )
+    
+    def on_order_double_clicked(self, index):
+        """Обработчик двойного клика по записи"""
+        row = index.row()
+        
+        # Получить ID поручения из скрытой колонки
+        id_index = self.orders_model.index(row, 0)
+        order_id = self.orders_model.data(id_index)
+        
+        if not order_id:
+            return
+        
+        # Загрузить полные данные поручения
+        order_data = self.load_order_data(order_id)
+        
+        if order_data:
+            # Открыть диалог редактирования
+            dialog = IncomingOrderDialog(self.db, self.krd_id, order_data, parent=self)
+            
+            if dialog.exec() == 1:  # QDialog.Accepted
+                # Обновить таблицу после редактирования
+                self.load_data()
+                
+                if self.audit_logger:
+                    self.audit_logger.log_action(
+                        action_type='INCOMING_ORDER_EDITED',
+                        table_name='incoming_orders',
+                        record_id=order_id,
+                        krd_id=self.krd_id,
+                        description='Отредактировано входящее поручение'
+                    )
+    
+    def on_delete_order(self):
+        """Обработчик кнопки удаления поручения"""
+        # Получить выбранную строку
+        selected_indexes = self.orders_table.selectedIndexes()
+        
+        if not selected_indexes:
+            QMessageBox.warning(self, "Предупреждение", "⚠️ Выберите поручение для удаления")
+            return
+        
+        # Получить ID поручения
+        row = selected_indexes[0].row()
+        id_index = self.orders_model.index(row, 0)
+        order_id = self.orders_model.data(id_index)
+        
+        if not order_id:
+            return
+        
+        # Получить информацию о поручении для отображения в подтверждении
+        initiator_index = self.orders_model.index(row, 1)  # Колонка "Инициатор"
+        order_number_index = self.orders_model.index(row, 3)  # Колонка "Номер поручения"
+        initiator = self.orders_model.data(initiator_index)
+        order_number = self.orders_model.data(order_number_index)
+        
+        # Подтверждение удаления
+        reply = QMessageBox.question(
+            self,
+            "Подтверждение удаления",
+            f"Вы действительно хотите удалить поручение?\n\n"
+            f"📬 Инициатор: {initiator}\n"
+            f"📋 Номер: {order_number}\n\n"
+            "Это действие нельзя отменить!",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                query = QSqlQuery(self.db)
+                query.prepare("DELETE FROM krd.incoming_orders WHERE id = ?")
+                query.addBindValue(order_id)
+                
+                if query.exec():
+                    QMessageBox.information(self, "Успех", "✅ Поручение успешно удалено")
+                    self.load_data()
+                    
+                    if self.audit_logger:
+                        self.audit_logger.log_action(
+                            action_type='INCOMING_ORDER_DELETED',
+                            table_name='incoming_orders',
+                            record_id=order_id,
+                            krd_id=self.krd_id,
+                            description=f'Удалено поручение: {order_number}'
+                        )
+                else:
+                    raise Exception(f"Ошибка SQL: {query.lastError().text()}")
+                    
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"❌ Ошибка удаления поручения:\n{str(e)}")
+    
+    def load_order_data(self, order_id):
+        """Загрузка полных данных поручения для редактирования"""
+        query = QSqlQuery(self.db)
+        query.prepare("""
+            SELECT 
+                id,
+                initiator_type_id,
+                initiator_full_name,
+                military_unit_id,
+                order_date,
+                order_number,
+                receipt_date,
+                receipt_number,
+                postal_index,
+                postal_region,
+                postal_district,
+                postal_town,
+                postal_street,
+                postal_house,
+                postal_building,
+                postal_letter,
+                postal_apartment,
+                postal_room,
+                initiator_contacts,
+                our_response_date,
+                our_response_number
+            FROM krd.incoming_orders
+            WHERE id = ?
+        """)
+        query.addBindValue(order_id)
+        query.exec()
+        
+        if query.next():
+            return {
+                'id': query.value('id'),
+                'initiator_type_id': query.value('initiator_type_id'),
+                'initiator_full_name': query.value('initiator_full_name') or '',
+                'military_unit_id': query.value('military_unit_id'),
+                'order_date': query.value('order_date'),
+                'order_number': query.value('order_number') or '',
+                'receipt_date': query.value('receipt_date'),
+                'receipt_number': query.value('receipt_number') or '',
+                'postal_index': query.value('postal_index') or '',
+                'postal_region': query.value('postal_region') or '',
+                'postal_district': query.value('postal_district') or '',
+                'postal_town': query.value('postal_town') or '',
+                'postal_street': query.value('postal_street') or '',
+                'postal_house': query.value('postal_house') or '',
+                'postal_building': query.value('postal_building') or '',
+                'postal_letter': query.value('postal_letter') or '',
+                'postal_apartment': query.value('postal_apartment') or '',
+                'postal_room': query.value('postal_room') or '',
+                'initiator_contacts': query.value('initiator_contacts') or '',
+                'our_response_date': query.value('our_response_date'),
+                'our_response_number': query.value('our_response_number') or ''
+            }
+        
+        return None

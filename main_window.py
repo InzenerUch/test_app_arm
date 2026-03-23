@@ -1,22 +1,33 @@
 """
 Модуль для главного окна приложения
 Содержит класс MainWindow для отображения данных КРД и информации о пользователе
+С функцией выгрузки данных в Excel
 """
 
 import sys
+import traceback
+from datetime import datetime
+
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QTableWidget, QTableWidgetItem, QHeaderView, QLabel, QGroupBox,
     QGridLayout, QMenuBar, QStatusBar, QToolBar, QTableView, QPushButton, QDialog,
-    QMessageBox, QMenu
+    QMessageBox, QMenu, QFileDialog, QAbstractItemView
 )
-from PyQt6.QtCore import Qt, QPoint
+from PyQt6.QtCore import Qt, QPoint, QDate
 from PyQt6.QtSql import QSqlDatabase, QSqlQueryModel, QSqlQuery, QSqlTableModel
 from PyQt6.QtGui import QAction, QFont, QContextMenuEvent
-from add_krd_window import AddKrdWindow
 
-# Добавляем импорт логгера аудита
+# === ИМПОРТЫ ДЛЯ ЭКСПОРТА В EXCEL ===
+from openpyxl import Workbook
+from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
+from openpyxl.utils import get_column_letter
+from openpyxl.cell.cell import MergedCell
+
+# === ИМПОРТЫ ПРИЛОЖЕНИЯ ===
+from add_krd_window import AddKrdWindow
 from audit_logger import AuditLogger
+from export_helper import KrdExcelExporter
 
 
 class MainWindow(QMainWindow):
@@ -54,9 +65,7 @@ class MainWindow(QMainWindow):
         self.audit_logger.log_user_login()
     
     def init_ui(self):
-        """
-        Инициализация пользовательского интерфейса
-        """
+        """Инициализация пользовательского интерфейса"""
         # Создание меню
         self.create_menu_bar()
         
@@ -86,13 +95,19 @@ class MainWindow(QMainWindow):
         main_layout.addWidget(krd_data_group)
     
     def create_menu_bar(self):
-        """
-        Создание строки меню
-        """
+        """Создание строки меню"""
         menu_bar = self.menuBar()
         
         # Меню "Файл"
         file_menu = menu_bar.addMenu("Файл")
+        
+        # Действие "Выгрузить все КРД в Excel"
+        export_action = QAction("📊 Выгрузить все КРД в Excel", self)
+        export_action.setShortcut("Ctrl+E")
+        export_action.triggered.connect(self.export_all_krd_to_excel)
+        file_menu.addAction(export_action)
+        
+        file_menu.addSeparator()
         
         # Действие "Выход"
         exit_action = QAction("Выход", self)
@@ -118,65 +133,67 @@ class MainWindow(QMainWindow):
         help_menu.addAction(about_action)
     
     def create_toolbar(self):
-        """
-        Создание панели инструментов
-        """
+        """Создание панели инструментов"""
         toolbar = self.addToolBar("Основная панель")
 
         # Добавляем действия на тулбар
-        refresh_action = QAction("Обновить", self)
+        refresh_action = QAction("🔄 Обновить", self)
         refresh_action.triggered.connect(self.load_krd_data)
         toolbar.addAction(refresh_action)
 
         # Добавляем действие "Добавить КРД"
-        add_krd_action = QAction("Добавить КРД", self)
+        add_krd_action = QAction("➕ Добавить КРД", self)
         add_krd_action.triggered.connect(self.open_krd_add_window)
         toolbar.addAction(add_krd_action)
         
         # Добавляем действие "Удалить КРД"
-        delete_krd_action = QAction("Удалить КРД", self)
+        delete_krd_action = QAction("🗑️ Удалить КРД", self)
         delete_krd_action.triggered.connect(self.delete_selected_krd)
         delete_krd_action.setEnabled(False)  # По умолчанию отключено
         toolbar.addAction(delete_krd_action)
         self.delete_krd_action = delete_krd_action
         
+        # Действие "Выгрузить в Excel"
+        toolbar.addSeparator()
+        export_action = QAction("📊 Выгрузить в Excel", self)
+        export_action.triggered.connect(self.export_all_krd_to_excel)
+        toolbar.addAction(export_action)
+        
         # Добавляем разделитель
         toolbar.addSeparator()
+        
         # Добавляем действие "Удаленные записи" (только для администраторов)
         if self.user_info.get('role') == 'admin':
-            deleted_records_action = QAction("Удаленные записи", self)
+            deleted_records_action = QAction("📁 Удаленные записи", self)
             deleted_records_action.triggered.connect(self.open_deleted_records_window)
             toolbar.addAction(deleted_records_action)
-
         
         # Добавляем действие "Аудит пользователей" (только для администраторов)
         if self.user_info.get('role') == 'admin':
-            audit_action = QAction("Аудит пользователей", self)
+            audit_action = QAction("📋 Аудит пользователей", self)
             audit_action.triggered.connect(self.open_user_audit_window)
             toolbar.addAction(audit_action)
         
         # Добавляем действие "Управление пользователями" (только для администраторов)
         if self.user_info.get('role') == 'admin':
-            user_mgmt_action = QAction("Управление пользователями", self)
+            user_mgmt_action = QAction("👥 Управление пользователями", self)
             user_mgmt_action.triggered.connect(self.open_user_management)
             toolbar.addAction(user_mgmt_action)
+    
     def open_deleted_records_window(self):
         """Открытие окна удаленных записей"""
         from deleted_records_window import DeletedRecordsWindow
         
         deleted_window = DeletedRecordsWindow(self.db)
         deleted_window.exec()
+    
     def create_status_bar(self):
-        """
-        Создание строки состояния
-        """
+        """Создание строки состояния"""
         status_bar = self.statusBar()
         status_bar.showMessage(f"Пользователь: {self.user_info['username']} | Роль: {self.user_info['role']}")
     
     def create_user_info_section(self):
-        """
-        Создание секции с информацией о пользователе
-        """
+        """Создание секции с информацией о пользователе"""
         group_box = QGroupBox("Информация о пользователе")
         layout = QGridLayout()
         
@@ -199,17 +216,13 @@ class MainWindow(QMainWindow):
         return group_box
     
     def create_separator(self):
-        """
-        Создание разделителя между секциями
-        """
+        """Создание разделителя между секциями"""
         separator = QWidget()
         separator.setFixedHeight(10)
         return separator
     
     def create_krd_data_section(self):
-        """
-        Создание секции с данными КРД
-        """
+        """Создание секции с данными КРД"""
         group_box = QGroupBox("Данные КРД")
         layout = QVBoxLayout()
         
@@ -217,7 +230,7 @@ class MainWindow(QMainWindow):
         self.table_model_krd = QSqlQueryModel()
         self.query_table_krd = """SELECT
             k.id AS "ID",
-            CONCAT('КРД-', k.id) AS "Номер КРД",  -- Генерируем номер КРД на основе ID
+            CONCAT('КРД-', k.id) AS "Номер КРД",
             COALESCE(s.surname, '') AS "Фамилия",
             COALESCE(s.name, '') AS "Имя",
             COALESCE(s.patronymic, '') AS "Отчество",
@@ -249,22 +262,19 @@ class MainWindow(QMainWindow):
         self.krd_table_view.customContextMenuRequested.connect(self.show_context_menu)
         
         layout.addWidget(self.krd_table_view)
+        
         group_box.setLayout(layout)
         
         return group_box
     
     def on_selection_changed(self, selected, deselected):
-        """
-        Обработка изменения выделения в таблице
-        """
+        """Обработка изменения выделения в таблице"""
         # Включаем/выключаем кнопку удаления в зависимости от выделения
         has_selection = self.krd_table_view.selectionModel().hasSelection()
         self.delete_krd_action.setEnabled(has_selection)
     
     def show_context_menu(self, position: QPoint):
-        """
-        Показ контекстного меню при правом клике на таблице
-        """
+        """Показ контекстного меню при правом клике на таблице"""
         # Получаем индекс строки, на которой был клик
         index = self.krd_table_view.indexAt(position)
         
@@ -284,13 +294,196 @@ class MainWindow(QMainWindow):
         delete_action.triggered.connect(self.delete_selected_krd)
         menu.addAction(delete_action)
         
+        menu.addSeparator()
+        
+        # Действие "Выгрузить в Excel"
+        export_action = QAction("📊 Выгрузить в Excel", self)
+        export_action.triggered.connect(self.export_all_krd_to_excel)
+        menu.addAction(export_action)
+        
         # Показываем меню в позиции курсора
         menu.exec(self.krd_table_view.mapToGlobal(position))
     
+    def export_all_krd_to_excel(self):
+        """Экспорт ВСЕХ данных КРД в Excel файл"""
+        try:
+            # Диалог выбора пути сохранения
+            default_filename = f"КРД_выгрузка_{QDate.currentDate().toString('yyyy-MM-dd')}.xlsx"
+            file_path, _ = QFileDialog.getSaveFileName(
+                self,
+                "Сохранить выгрузку в Excel",
+                default_filename,
+                "Excel файлы (*.xlsx);;Все файлы (*)"
+            )
+            
+            if not file_path:
+                return  # Пользователь отменил
+            
+            # Показываем индикатор загрузки
+            QMessageBox.information(
+                self,
+                "Выгрузка данных",
+                "⏳ Пожалуйста, подождите...\nИдёт выгрузка данных в Excel."
+            )
+            
+            # Получаем список всех KRD ID
+            query = QSqlQuery(self.db)
+            query.prepare("SELECT id FROM krd.krd ORDER BY id")
+            query.exec()
+            
+            krd_ids = []
+            while query.next():
+                krd_ids.append(query.value(0))
+            
+            if not krd_ids:
+                QMessageBox.warning(
+                    self,
+                    "Предупреждение",
+                    "⚠️ В базе данных нет записей КРД для выгрузки."
+                )
+                return
+            
+            # Создаём Excel файл с несколькими листами
+            wb = Workbook()
+            wb.remove(wb.active)  # Удаляем стандартный лист
+            
+            # Создаём лист с общим списком КРД
+            ws_summary = wb.create_sheet("Список КРД")
+            self._fill_summary_sheet(ws_summary, krd_ids)
+            
+            # Создаём листы для каждой КРД
+            for krd_id in krd_ids:
+                exporter = KrdExcelExporter(self.db, krd_id)
+                ws = wb.create_sheet(f"КРД-{krd_id}")
+                exporter.export_to_single_sheet(ws)
+            
+            # Сохраняем файл
+            wb.save(file_path)
+            
+            # Логирование
+            if self.audit_logger:
+                self.audit_logger.log_action(
+                    action_type='EXPORT_ALL_KRD_EXCEL',
+                    table_name='krd',
+                    krd_id=None,
+                    description=f'Выгрузка всех КРД ({len(krd_ids)} записей) в Excel: {file_path}'
+                )
+            
+            QMessageBox.information(
+                self,
+                "Успех",
+                f"✅ Данные успешно выгружены в Excel\n\n"
+                f"📊 Всего КРД: {len(krd_ids)}\n"
+                f"📁 Файл: {file_path}\n\n"
+                f"Файл содержит:\n"
+                f"• Лист 'Список КРД' - общий реестр\n"
+                f"• Листы 'КРД-X' - подробные данные по каждой КРД"
+            )
+            
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(
+                self,
+                "Ошибка",
+                f"❌ Ошибка при выгрузке в Excel:\n{str(e)}"
+            )
+    
+    def _fill_summary_sheet(self, ws, krd_ids):
+        """Заполнение листа с общим списком КРД"""
+        # Стили
+        header_font = Font(bold=True, size=11, color="FFFFFF")
+        header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
+        header_alignment = Alignment(horizontal="center", vertical="center")
+        thin_border = Border(
+            left=Side(style='thin'),
+            right=Side(style='thin'),
+            top=Side(style='thin'),
+            bottom=Side(style='thin')
+        )
+        
+        # Заголовок
+        ws.merge_cells('A1:H1')
+        cell = ws['A1']
+        cell.value = "ОБЩИЙ РЕЕСТР КАРТОЧЕК РОЗЫСКА (КРД)"
+        cell.font = Font(bold=True, size=14)
+        cell.alignment = header_alignment
+        
+        # Заголовки колонок
+        headers = [
+            "№ КРД", "Фамилия", "Имя", "Отчество",
+            "Дата рождения", "Статус", "Табельный номер", "Личный номер"
+        ]
+        
+        for col, header in enumerate(headers, 1):
+            cell = ws.cell(row=2, column=col, value=header)
+            cell.font = header_font
+            cell.fill = header_fill
+            cell.alignment = header_alignment
+            cell.border = thin_border
+        
+        # Данные - используем IN вместо ANY для совместимости
+        placeholders = ','.join(['%s'] * len(krd_ids))
+        query = QSqlQuery(self.db)
+        query.prepare(f"""
+            SELECT 
+                k.id,
+                s.surname,
+                s.name,
+                s.patronymic,
+                s.birth_date,
+                st.name as status_name,
+                s.tab_number,
+                s.personal_number
+            FROM krd.krd k
+            LEFT JOIN krd.social_data s ON k.id = s.krd_id
+            LEFT JOIN krd.statuses st ON k.status_id = st.id
+            WHERE k.id IN ({placeholders})
+            ORDER BY k.id
+        """)
+        
+        for krd_id in krd_ids:
+            query.addBindValue(krd_id)
+        
+        query.exec()
+        
+        row = 3
+        while query.next():
+            ws.cell(row=row, column=1, value=query.value('id'))
+            ws.cell(row=row, column=2, value=query.value('surname') or '')
+            ws.cell(row=row, column=3, value=query.value('name') or '')
+            ws.cell(row=row, column=4, value=query.value('patronymic') or '')
+            ws.cell(row=row, column=5, value=query.value('birth_date').toString("dd.MM.yyyy") if query.value('birth_date') else '')
+            ws.cell(row=row, column=6, value=query.value('status_name') or '')
+            ws.cell(row=row, column=7, value=query.value('tab_number') or '')
+            ws.cell(row=row, column=8, value=query.value('personal_number') or '')
+            
+            # Применяем границы
+            for col in range(1, 9):
+                ws.cell(row=row, column=col).border = thin_border
+            
+            row += 1
+        
+        # Настройка ширины колонок (исправлено для MergedCell)
+        for col_num in range(1, 9):
+            max_length = 0
+            column_letter = get_column_letter(col_num)
+            
+            # Проходим только по строкам с данными (начиная с 2, заголовки тоже учитываем)
+            for row_num in range(2, row + 1):
+                cell = ws.cell(row=row_num, column=col_num)
+                # Пропускаем merged cells
+                if not isinstance(cell, MergedCell):
+                    try:
+                        if cell.value:
+                            max_length = max(max_length, len(str(cell.value)))
+                    except:
+                        pass
+            
+            adjusted_width = min(max_length + 2, 50)
+            ws.column_dimensions[column_letter].width = adjusted_width
+    
     def delete_selected_krd(self):
-        """
-        Удаление выбранной записи КРД с подтверждением
-        """
+        """Удаление выбранной записи КРД с подтверждением"""
         # Получаем выделенную строку
         selection_model = self.krd_table_view.selectionModel()
         if not selection_model.hasSelection():
@@ -385,15 +578,14 @@ class MainWindow(QMainWindow):
                 )
     
     def open_krd_add_window(self):
+        """Открытие окна добавления КРД"""
         krd_add_window = AddKrdWindow(self.db)
 
         if krd_add_window.exec() == QDialog.DialogCode.Accepted:
             self.load_krd_data()
     
     def open_user_management(self):
-        """
-        Открытие окна управления пользователями (только для администраторов)
-        """
+        """Открытие окна управления пользователями (только для администраторов)"""
         from PyQt6.QtWidgets import QDialog, QVBoxLayout, QDialogButtonBox
         from admin_user_management_tab import AdminUserManagementTab
         
@@ -416,10 +608,8 @@ class MainWindow(QMainWindow):
         dialog.exec()
     
     def on_krd_double_clicked(self, index):
-        """
-        Обработка двойного клика по строке в таблице КРД
-        """
-        # Получаем ID КРД из первой колонки (предполагается, что ID находится в первой колонке)
+        """Обработка двойного клика по строке в таблице КРД"""
+        # Получаем ID КРД из первой колонки
         krd_id = self.table_model_krd.data(self.table_model_krd.index(index.row(), 0))
 
         if krd_id:
@@ -427,7 +617,7 @@ class MainWindow(QMainWindow):
             self.audit_logger.log_krd_view(int(krd_id))
             
             # Открываем окно деталей КРД
-            from krd_details_window import KrdDetailsWindow  # импортируем класс
+            from krd_details_window import KrdDetailsWindow
             details_window = KrdDetailsWindow(int(krd_id), self.db, self.audit_logger)
 
             if details_window.exec() == QDialog.DialogCode.Accepted:
@@ -435,13 +625,11 @@ class MainWindow(QMainWindow):
                 self.load_krd_data()
 
     def load_krd_data(self):
-       self.table_model_krd.setQuery(self.query_table_krd, self.db)
+        """Загрузка данных КРД в таблицу"""
+        self.table_model_krd.setQuery(self.query_table_krd, self.db)
     
     def show_about_dialog(self):
-        """
-        Показ диалога "О программе"
-        """
-        from PyQt6.QtWidgets import QMessageBox
+        """Показ диалога "О программе" """
         QMessageBox.about(
             self,
             "О программе",
@@ -450,10 +638,6 @@ class MainWindow(QMainWindow):
             f"Пользователь: {self.user_info.get('username', 'N/A')}\n"
             f"Роль: {self.user_info.get('role', 'N/A')}"
         )
-    
-    # ========================
-    # МЕТОДЫ АУДИТА
-    # ========================
     
     def closeEvent(self, event):
         """
@@ -467,9 +651,7 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
     
     def open_user_audit_window(self):
-        """
-        Открытие окна аудита действий пользователей
-        """
+        """Открытие окна аудита действий пользователей"""
         from user_audit_window import UserAuditWindow
         
         audit_window = UserAuditWindow(self.db, self.user_info.get('id'))
@@ -477,9 +659,7 @@ class MainWindow(QMainWindow):
 
 
 def main():
-    """
-    Тестовая функция для демонстрации главного окна
-    """
+    """Тестовая функция для демонстрации главного окна"""
     app = QApplication(sys.argv)
     
     # Подключение к базе данных (для тестирования)
@@ -490,7 +670,6 @@ def main():
     db.setPassword("ArmUserSecurePass2026!")
     
     if not db.open():
-        from PyQt6.QtWidgets import QMessageBox
         QMessageBox.critical(None, "Ошибка", f"Не удалось подключиться к базе данных:\n{db.lastError().text()}")
         sys.exit(1)
     
@@ -508,8 +687,6 @@ def main():
     
     sys.exit(app.exec())
 
-
-from PyQt6.QtWidgets import QAbstractItemView  # Импорт для использования в методе
 
 if __name__ == "__main__":
     main()
