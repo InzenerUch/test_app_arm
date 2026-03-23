@@ -1,14 +1,17 @@
 """
-Вкладка адресов проживания
+Вкладка адресов проживания с автодополнением текстовых полей
 """
 
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QScrollArea, QGroupBox, QGridLayout,
-    QLineEdit, QDateEdit, QTextEdit, QLabel, QPushButton,QTableView
+    QLineEdit, QDateEdit, QTextEdit, QLabel, QPushButton, QTableView,
+    QMessageBox
 )
 from PyQt6.QtCore import QDate
 from PyQt6.QtSql import QSqlQuery, QSqlQueryModel
 from PyQt6.QtGui import QFont
+
+from autocomplete_helper import AutocompleteHelper
 
 
 class AddressesTab(QWidget):
@@ -20,8 +23,11 @@ class AddressesTab(QWidget):
         self.db = db_connection
         self.audit_logger = audit_logger
         
+        self.autocomplete_helper = AutocompleteHelper(db_connection)
+        
         self.init_ui()
         self.load_data()
+        self.setup_autocomplete_fields()
     
     def init_ui(self):
         """Инициализация интерфейса"""
@@ -36,7 +42,6 @@ class AddressesTab(QWidget):
         self.addresses_table.setModel(self.addresses_model)
         self.addresses_table.setAlternatingRowColors(True)
         
-        # Настройка заголовков
         header = self.addresses_table.horizontalHeader()
         header.setStretchLastSection(True)
         
@@ -107,6 +112,32 @@ class AddressesTab(QWidget):
         main_layout = QVBoxLayout(self)
         main_layout.addWidget(scroll)
     
+    def setup_autocomplete_fields(self):
+        """Настройка автодополнения для всех текстовых полей"""
+        
+        fields_config = [
+            (self.region_input, 'region', 20),
+            (self.district_input, 'district', 20),
+            (self.town_input, 'town', 20),
+            (self.street_input, 'street', 30),
+            (self.house_input, 'house', 15),
+            (self.building_input, 'building', 15),
+            (self.letter_input, 'letter', 10),
+            (self.apartment_input, 'apartment', 15),
+            (self.room_input, 'room', 15),
+        ]
+        
+        for field_widget, column_name, max_items in fields_config:
+            self.autocomplete_helper.setup_autocomplete(
+                field_widget, 
+                'addresses', 
+                column_name,
+                max_items=max_items,
+                show_on_focus=True
+            )
+        
+        print("✅ Автодополнение настроено для всех полей адресов")
+    
     def load_data(self):
         """Загрузка данных из базы"""
         query = QSqlQuery(self.db)
@@ -134,13 +165,10 @@ class AddressesTab(QWidget):
     
     def add_address(self):
         """Добавление нового адреса"""
-        # Валидация
         if not self.town_input.text().strip():
-            from PyQt6.QtWidgets import QMessageBox
             QMessageBox.warning(self, "Ошибка", "Поле 'Населенный пункт' обязательно для заполнения")
             return
         
-        # Подготовка данных
         data = {
             "krd_id": self.krd_id,
             "region": self.region_input.text().strip(),
@@ -156,7 +184,6 @@ class AddressesTab(QWidget):
             "check_result": self.check_result_input.toPlainText()
         }
         
-        # Сохранение в базу
         query = QSqlQuery(self.db)
         query.prepare("""
             INSERT INTO krd.addresses (
@@ -187,8 +214,9 @@ class AddressesTab(QWidget):
             # Обновление таблицы
             self.load_data()
             
-            from PyQt6.QtWidgets import QMessageBox
+            # === НОВОЕ: Обновляем автодополнение после добавления ===
+            self.autocomplete_helper.refresh_all_fields()
+            
             QMessageBox.information(self, "Успех", "Адрес успешно добавлен")
         else:
-            from PyQt6.QtWidgets import QMessageBox
             QMessageBox.critical(self, "Ошибка", f"Ошибка добавления адреса:\n{query.lastError().text()}")
