@@ -1,6 +1,6 @@
 """
 Модуль для выгрузки данных КРД в Excel
-С поддержкой экспорта фотографий
+С поддержкой экспорта фотографий и конфигурации отчетов
 """
 
 from PyQt6.QtSql import QSqlQuery
@@ -14,17 +14,144 @@ import tempfile
 import os
 import io
 from PIL import Image as PILImage
+from PyQt6.QtCore import QByteArray
 
 
 class KrdExcelExporter:
-    """Экспорт данных КРД в Excel"""
+    """Экспорт данных КРД в Excel с поддержкой конфигурации отчета"""
     
-    def __init__(self, db_connection, krd_id):
+    AVAILABLE_FIELDS = {
+        "social_data": {
+            "title": "Социально-демографические данные",
+            "fields": [
+                ("krd_number", "№ КРД"),
+                ("tab_number", "Табельный номер"),
+                ("personal_number", "Личный номер"),
+                ("category_name", "Категория военнослужащего"),
+                ("rank_name", "Воинское звание"),
+                ("surname", "Фамилия"),
+                ("name", "Имя"),
+                ("patronymic", "Отчество"),
+                ("birth_date", "Дата рождения"),
+                ("birth_place_town", "Населенный пункт места рождения"),
+                ("birth_place_district", "Административный район места рождения"),
+                ("birth_place_region", "Субъект (регион) места рождения"),
+                ("birth_place_country", "Страна места рождения"),
+                ("drafted_by_commissariat", "Наименование комиссариата"),
+                ("draft_date", "Дата призыва"),
+                ("povsk", "Наименование ПОВСК"),
+                ("selection_date", "Дата отбора"),
+                ("education", "Образование"),
+                ("criminal_record", "Сведения о судимости"),
+                ("social_media_account", "Аккаунт в социальных сетях"),
+                ("bank_card_number", "Номер банковской карты"),
+                ("passport_series", "Серия паспорта"),
+                ("passport_number", "Номер паспорта"),
+                ("passport_issue_date", "Дата выдачи паспорта"),
+                ("passport_issued_by", "Кем выдан паспорт"),
+                ("military_id_series", "Серия военного билета"),
+                ("military_id_number", "Номер военного билета"),
+                ("military_id_issue_date", "Дата выдачи военного билета"),
+                ("military_id_issued_by", "Кем выдан военный билет"),
+                ("appearance_features", "Особенности внешности"),
+                ("personal_marks", "Личные приметы"),
+                ("military_contacts", "Контакты в/с"),
+                ("relatives_info", "Сведения о близких родственниках"),
+            ]
+        },
+        "addresses": {
+            "title": "Адреса проживания",
+            "fields": [
+                ("region", "Субъект РФ"),
+                ("district", "Административный район"),
+                ("town", "Населенный пункт"),
+                ("street", "Улица"),
+                ("house", "Дом"),
+                ("building", "Корпус"),
+                ("letter", "Литер"),
+                ("apartment", "Квартира"),
+                ("room", "Комната"),
+                ("check_date", "Дата адресной проверки"),
+                ("check_result", "Результат адресной проверки"),
+            ]
+        },
+        "incoming_orders": {
+            "title": "Входящие поручения на розыск",
+            "fields": [
+                ("initiator_full_name", "Инициатор розыска"),
+                ("order_date", "Исходящая дата поручения"),
+                ("order_number", "Исходящий номер поручения"),
+                ("receipt_date", "Дата поступления в ВК"),
+                ("receipt_number", "Входящий номер в ВК"),
+                ("postal_index", "Индекс"),
+                ("postal_region", "Субъект РФ"),
+                ("postal_district", "Административный район"),
+                ("postal_town", "Населенный пункт"),
+                ("postal_street", "Улица"),
+                ("postal_house", "Дом"),
+                ("initiator_contacts", "Контакты источника"),
+                ("our_response_date", "Дата ответа ВК"),
+                ("our_response_number", "Исходящий номер ответа ВК"),
+                ("military_unit_name", "Военное управление инициатора"),
+            ]
+        },
+        "service_places": {
+            "title": "Места службы",
+            "fields": [
+                ("place_name", "Наименование места службы"),
+                ("military_unit_name", "Военное управление места службы"),
+                ("garrison_name", "Гарнизон места службы"),
+                ("position_name", "Воинская должность"),
+                ("commanders", "Командиры (начальники)"),
+                ("postal_index", "Индекс"),
+                ("postal_region", "Субъект РФ"),
+                ("postal_town", "Населенный пункт"),
+                ("postal_street", "Улица"),
+                ("postal_house", "Дом"),
+                ("place_contacts", "Контакты места службы"),
+            ]
+        },
+        "soch_episodes": {
+            "title": "Сведения о СОЧ",
+            "fields": [
+                ("soch_date", "Дата СОЧ"),
+                ("soch_location", "Место СОЧ"),
+                ("order_date_number", "Дата и номер приказа о СОЧ"),
+                ("witnesses", "Очевидцы СОЧ"),
+                ("reasons", "Вероятные причины СОЧ"),
+                ("weapon_info", "Сведения о наличии оружия"),
+                ("clothing", "Во что был одет"),
+                ("movement_options", "Варианты движения"),
+                ("search_date", "Дата розыска"),
+                ("found_by", "Кем разыскан"),
+                ("notification_date", "Дата уведомления"),
+                ("notification_number", "Номер уведомления"),
+            ]
+        },
+        "outgoing_requests": {
+            "title": "Исходящие запросы и поручения",
+            "fields": [
+                ("request_type_name", "Наименование запроса"),
+                ("recipient_name", "Наименование адресата"),
+                ("military_unit_name", "Военное управление адресата"),
+                ("issue_date", "Исходящая дата"),
+                ("issue_number", "Исходящий номер"),
+                ("postal_index", "Индекс"),
+                ("postal_region", "Субъект РФ"),
+                ("postal_town", "Населенный пункт"),
+                ("postal_street", "Улица"),
+                ("postal_house", "Дом"),
+                ("recipient_contacts", "Контакты"),
+            ]
+        }
+    }
+    
+    def __init__(self, db_connection, krd_id=None, report_config=None):
         self.db = db_connection
         self.krd_id = krd_id
         self.wb = Workbook()
+        self.report_config = report_config or self._get_default_config()
         
-        # Стили для форматирования
         self.header_font = Font(bold=True, size=11, color="FFFFFF")
         self.header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
         self.section_font = Font(bold=True, size=12, color="000000")
@@ -32,7 +159,6 @@ class KrdExcelExporter:
         self.cell_alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
         self.header_alignment = Alignment(horizontal="center", vertical="center")
         
-        # Границы
         self.thin_border = Border(
             left=Side(style='thin'),
             right=Side(style='thin'),
@@ -40,50 +166,48 @@ class KrdExcelExporter:
             bottom=Side(style='thin')
         )
         
-        # Временные файлы для изображений
         self.temp_image_files = []
-        
-        # Размеры для фотографий (в пикселях)
         self.photo_width_px = 200
         self.photo_height_px = 270
     
+    def _get_default_config(self):
+        return {
+            "sections": ["social_data", "addresses", "incoming_orders", 
+                        "service_places", "soch_episodes", "outgoing_requests"],
+            "fields": {}
+        }
+    
     def _cleanup_temp_files(self):
-        """Удаление временных файлов изображений"""
         for temp_file in self.temp_image_files:
             try:
                 if os.path.exists(temp_file):
                     os.remove(temp_file)
-                    print(f"✓ Удалён временный файл: {temp_file}")
             except Exception as e:
                 print(f"✗ Ошибка удаления временного файла {temp_file}: {e}")
         self.temp_image_files = []
     
-    def _load_photo_from_db(self, field_name):
-        """
-        Загрузка фотографии из базы данных
-        Returns: bytes или None
-        """
+    def _load_photo_from_db(self, field_name, krd_id=None):
+        target_krd_id = krd_id if krd_id else self.krd_id
+        
         try:
             query = QSqlQuery(self.db)
             query.prepare(f"""
                 SELECT {field_name} 
                 FROM krd.social_data 
-                WHERE krd_id = ?
+                WHERE krd_id = :krd_id
                 ORDER BY id DESC 
                 LIMIT 1
             """)
-            query.addBindValue(self.krd_id)
+            query.bindValue(":krd_id", target_krd_id)
             
             if not query.exec():
-                print(f"✗ Ошибка запроса для {field_name}: {query.lastError().text()}")
                 return None
             
             if query.next():
                 photo_data = query.value(0)
-                print(f"📷 {field_name}: тип={type(photo_data)}, размер={len(photo_data) if photo_data else 0} байт")
                 
                 if photo_data:
-                    if hasattr(photo_data, 'data'):  # QByteArray
+                    if hasattr(photo_data, 'data'):
                         return bytes(photo_data.data())
                     elif isinstance(photo_data, bytes):
                         return photo_data
@@ -92,303 +216,82 @@ class KrdExcelExporter:
                     elif isinstance(photo_data, memoryview):
                         return bytes(photo_data)
                     else:
-                        print(f"⚠️ Неизвестный тип данных фото: {type(photo_data)}")
                         return bytes(photo_data)
                 else:
-                    print(f"⚠️ Фото {field_name} отсутствует в БД (NULL)")
                     return None
             else:
-                print(f"⚠️ Запись КРД-{self.krd_id} не найдена в social_data")
                 return None
                 
         except Exception as e:
             print(f"✗ Ошибка загрузки фото {field_name}: {e}")
-            import traceback
-            traceback.print_exc()
             return None
     
     def _create_temp_image_file(self, photo_bytes, suffix='.jpg', target_width=None, target_height=None):
-        """
-        Создание временного файла для изображения с масштабированием
-        Returns: путь к файлу или None
-        """
         if not photo_bytes:
-            print("⚠️ Пустые байты изображения")
             return None
         
         try:
-            print(f"📷 Создание временного файла из {len(photo_bytes)} байт...")
-            
-            # Открываем изображение через PIL для проверки и масштабирования
             img = PILImage.open(io.BytesIO(photo_bytes))
-            print(f"✓ Изображение открыто: формат={img.format}, размер={img.size}, режим={img.mode}")
             
-            # === ИСПРАВЛЕНО: Конвертируем RGBA в RGB для JPEG ===
             if img.mode == 'RGBA':
-                # Создаём белый фон для прозрачных областей
                 background = PILImage.new('RGB', img.size, (255, 255, 255))
-                # Накладываем изображение на фон
-                background.paste(img, mask=img.split()[3])  # 3 - альфа-канал
+                background.paste(img, mask=img.split()[3])
                 img = background
-                print(f"✓ Конвертировано RGBA → RGB с белым фоном")
             elif img.mode != 'RGB':
-                # Другие режимы (P, LA и т.д.)
                 img = img.convert('RGB')
-                print(f"✓ Конвертировано {img.mode} → RGB")
             
-            # Масштабируем если указаны размеры
             if target_width and target_height:
                 img = img.resize((target_width, target_height), PILImage.Resampling.LANCZOS)
-                print(f"✓ Изображение масштабировано до {target_width}x{target_height}")
             
-            # Создаём временный файл
             temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
             img.save(temp_file.name, quality=95)
             temp_file.close()
             
             self.temp_image_files.append(temp_file.name)
-            print(f"✓ Временный файл создан: {temp_file.name}")
             return temp_file.name
             
         except Exception as e:
-            print(f"✗ Ошибка создания временного файла изображения: {e}")
-            import traceback
-            traceback.print_exc()
+            print(f"✗ Ошибка создания временного файла: {e}")
             return None
     
-    def _add_image_to_cell(self, ws, image_path, row, col, row_height=100, col_width=30):
-        """
-        Добавление изображения в ячейку Excel с правильным размером
-        """
-        if not image_path or not os.path.exists(image_path):
-            print(f"✗ Изображение не найдено: {image_path}")
-            return False
-        
-        try:
-            print(f"📷 Добавление изображения {image_path} в ячейку {get_column_letter(col)}{row}")
-            
-            # Создаём объект изображения openpyxl
-            img = OpenPyXLImage(image_path)
-            
-            # Получаем реальные размеры изображения
-            original_width, original_height = img.width, img.height
-            
-            # Вычисляем пропорции для масштабирования
-            max_width = col_width * 7  # Примерная ширина в пикселях
-            max_height = row_height * 1.5  # Примерная высота в пикселях
-            
-            # Масштабируем с сохранением пропорций
-            ratio = min(max_width / original_width, max_height / original_height)
-            img.width = original_width * ratio
-            img.height = original_height * ratio
-            
-            # Якорь ячейки (начальная позиция)
-            anchor_cell = f'{get_column_letter(col)}{row}'
-            
-            # Добавляем изображение на лист
-            ws.add_image(img, anchor_cell)
-            
-            # Настраиваем размеры ячейки для изображения
-            ws.row_dimensions[row].height = row_height
-            ws.column_dimensions[get_column_letter(col)].width = col_width
-            
-            print(f"✓ Изображение добавлено в {anchor_cell} (размер: {img.width:.0f}x{img.height:.0f})")
-            return True
-            
-        except Exception as e:
-            print(f"✗ Ошибка добавления изображения: {e}")
-            import traceback
-            traceback.print_exc()
-            return False
-    
-    def _fill_social_data_section(self, ws, data, photos, start_row=1):
-        """Заполнение раздела социально-демографических данных с фотографиями"""
-        row = start_row
-        
-        # Заголовок раздела
-        ws.merge_cells(f'A{row}:AC{row}')
-        cell = ws[f'A{row}']
-        cell.value = "СОЦИАЛЬНО-ДЕМОГРАФИЧЕСКИЕ ДАННЫЕ"
-        cell.font = self.section_font
-        cell.fill = self.section_fill
-        cell.alignment = self.header_alignment
-        row += 1
-        
-        # Заголовки колонок (33 колонки)
-        headers = [
-            "№ КРД", "табельный номер", "личный номер", "категория военнослужащего",
-            "воинское звание", "фамилия", "имя", "отчество", "дата рождения",
-            "населенный пункт места рождения", "административный район места рождения",
-            "субъект (регион) места рождения", "страна места рождения",
-            "Наименование комиссариата", "Дата призыва", "Наименование ПОВСК",
-            "Дата отбора", "Образование", "Сведения о судимости",
-            "Аккаунт в социальных сетях", "Номер банковской карты",
-            "Серия паспорта", "Номер паспорта", "Дата выдачи паспорта",
-            "Кем выдан паспорт", "Серия военного билета", "Номер военного билета",
-            "Дата выдачи военного билета", "Кем выдан военный билет",
-            "Особенности внешности", "Личные приметы", "Контакты в/с",
-            "Сведения о близких родственниках"
-        ]
-        
-        for col, header in enumerate(headers, 1):
-            cell = ws.cell(row=row, column=col, value=header)
-            cell.font = self.header_font
-            cell.fill = self.header_fill
-            cell.alignment = self.header_alignment
-            cell.border = self.thin_border
-        
-        row += 1
-        
-        # Данные
-        values = [
-            data.get('krd_number', ''),
-            data.get('tab_number', ''),
-            data.get('personal_number', ''),
-            data.get('category_name', ''),
-            data.get('rank_name', ''),
-            data.get('surname', ''),
-            data.get('name', ''),
-            data.get('patronymic', ''),
-            self._format_date(data.get('birth_date')),
-            data.get('birth_place_town', ''),
-            data.get('birth_place_district', ''),
-            data.get('birth_place_region', ''),
-            data.get('birth_place_country', ''),
-            data.get('drafted_by_commissariat', ''),
-            self._format_date(data.get('draft_date')),
-            data.get('povsk', ''),
-            self._format_date(data.get('selection_date')),
-            data.get('education', ''),
-            data.get('criminal_record', ''),
-            data.get('social_media_account', ''),
-            data.get('bank_card_number', ''),
-            data.get('passport_series', ''),
-            data.get('passport_number', ''),
-            self._format_date(data.get('passport_issue_date')),
-            data.get('passport_issued_by', ''),
-            data.get('military_id_series', ''),
-            data.get('military_id_number', ''),
-            self._format_date(data.get('military_id_issue_date')),
-            data.get('military_id_issued_by', ''),
-            data.get('appearance_features', ''),
-            data.get('personal_marks', ''),
-            data.get('military_contacts', ''),
-            data.get('relatives_info', '')
-        ]
-        
-        for col, value in enumerate(values, 1):
-            cell = ws.cell(row=row, column=col, value=value)
-            cell.alignment = self.cell_alignment
-            cell.border = self.thin_border
-        
-        row += 2  # Пропускаем строку для данных
-        
-        # === СЕКЦИЯ С ФОТОГРАФИЯМИ ===
-        # Заголовок для фотографий
-        ws.merge_cells(f'A{row}:AC{row}')
-        cell = ws[f'A{row}']
-        cell.value = "ФОТОГРАФИИ ВОЕННОСЛУЖАЩЕГО"
-        cell.font = self.section_font
-        cell.fill = self.section_fill
-        cell.alignment = self.header_alignment
-        row += 1
-        
-        # Заголовки для 4 фотографий (каждая занимает 8 колонок)
-        photo_labels = [
-            ('civilian', 'Фото в гражданской одежде'),
-            ('military_headgear', 'Фото в военной форме\nс головным убором'),
-            ('military_no_headgear', 'Фото в военной форме\nбез головного убора'),
-            ('distinctive_marks', 'Фото отличительных примет')
-        ]
-        
-        # Создаём заголовки для фото
-        for i, (photo_key, label) in enumerate(photo_labels):
-            start_col = i * 8 + 1
-            end_col = start_col + 7
-            ws.merge_cells(f'{get_column_letter(start_col)}{row}:{get_column_letter(end_col)}{row}')
-            cell = ws[f'{get_column_letter(start_col)}{row}']
-            cell.value = label
-            cell.font = self.header_font
-            cell.fill = self.header_fill
-            cell.alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            cell.border = self.thin_border
-        
-        row += 1
-        
-        # === ВСТАВЛЯЕМ ФОТОГРАФИИ ===
-        photo_row = row
-        for i, (photo_key, label) in enumerate(photo_labels):
-            start_col = i * 8 + 1
-            
-            if photos.get(photo_key):
-                # Вставляем фото
-                self._add_image_to_cell(
-                    ws, 
-                    photos[photo_key], 
-                    row=photo_row, 
-                    col=start_col,
-                    row_height=80,   # Высота строки для фото
-                    col_width=12     # Ширина колонки для фото
-                )
-            else:
-                # Если фото нет, пишем текст
-                end_col = start_col + 7
-                ws.merge_cells(f'{get_column_letter(start_col)}{photo_row}:{get_column_letter(end_col)}{photo_row}')
-                cell = ws[f'{get_column_letter(start_col)}{photo_row}']
-                cell.value = "Фото отсутствует"
-                cell.alignment = Alignment(horizontal="center", vertical="center")
-                cell.border = self.thin_border
-        
-        # Устанавливаем высоту строк для фотографий
-        ws.row_dimensions[photo_row].height = 80
-        
-        row = photo_row + 2  # Пропускаем 2 строки после фото
-        
-        return row
-    
     def export_to_excel(self, file_path):
-        """Экспорт всех данных КРД в Excel файл"""
         try:
             print(f"\n{'='*60}")
             print(f"📊 НАЧАЛО ЭКСПОРТА КРД-{self.krd_id}")
             print(f"{'='*60}")
             
-            # Удаляем стандартный лист
             self.wb.remove(self.wb.active)
-            
-            # Создаём основной лист с данными
             ws = self.wb.create_sheet("Данные КРД")
             
-            # Загружаем все данные
             social_data = self._load_social_data()
-            addresses = self._load_addresses()
-            incoming_orders = self._load_incoming_orders()
-            service_places = self._load_service_places()
-            soch_episodes = self._load_soch_episodes()
-            outgoing_requests = self._load_outgoing_requests()
+            row = self._fill_social_data_section(ws, social_data, start_row=1)
             
-            # Загружаем фотографии
-            print(f"\n📷 ЗАГРУЗКА ФОТОГРАФИЙ...")
-            photos = self._load_photos()
+            if "addresses" in self.report_config.get("sections", []):
+                addresses = self._load_addresses()
+                row = self._fill_addresses_section(ws, addresses, start_row=row)
             
-            # Заполняем лист данными
-            row = self._fill_social_data_section(ws, social_data, photos, start_row=1)
-            row = self._fill_addresses_section(ws, addresses, start_row=row)
-            row = self._fill_incoming_orders_section(ws, incoming_orders, start_row=row)
-            row = self._fill_service_places_section(ws, service_places, start_row=row)
-            row = self._fill_soch_episodes_section(ws, soch_episodes, start_row=row)
-            row = self._fill_outgoing_requests_section(ws, outgoing_requests, start_row=row)
+            if "incoming_orders" in self.report_config.get("sections", []):
+                incoming_orders = self._load_incoming_orders()
+                row = self._fill_incoming_orders_section(ws, incoming_orders, start_row=row)
             
-            # Настройка ширины колонок
+            if "service_places" in self.report_config.get("sections", []):
+                service_places = self._load_service_places()
+                row = self._fill_service_places_section(ws, service_places, start_row=row)
+            
+            if "soch_episodes" in self.report_config.get("sections", []):
+                soch_episodes = self._load_soch_episodes()
+                row = self._fill_soch_episodes_section(ws, soch_episodes, start_row=row)
+            
+            if "outgoing_requests" in self.report_config.get("sections", []):
+                outgoing_requests = self._load_outgoing_requests()
+                row = self._fill_outgoing_requests_section(ws, outgoing_requests, start_row=row)
+            
             self._adjust_column_widths(ws)
             
-            # === ВАЖНО: Сохраняем файл ПЕРЕД очисткой временных файлов ===
             print(f"\n💾 СОХРАНЕНИЕ ФАЙЛА: {file_path}")
             self.wb.save(file_path)
             print(f"✓ Файл сохранён: {file_path}")
             
-            # === ТОЛЬКО ПОСЛЕ СОХРАНЕНИЯ очищаем временные файлы ===
-            print(f"\n🧹 ОЧИСТКА ВРЕМЕННЫХ ФАЙЛОВ...")
             self._cleanup_temp_files()
             
             print(f"\n{'='*60}")
@@ -403,98 +306,203 @@ class KrdExcelExporter:
             print(f"{'='*60}\n")
             import traceback
             traceback.print_exc()
-            # Даже при ошибке очищаем временные файлы
             self._cleanup_temp_files()
             raise
     
-    def export_to_single_sheet(self, ws):
-        """Экспорт данных одной КРД на один лист"""
+    def export_multiple_krd_to_excel(self, file_path, krd_ids=None):
         try:
-            row = 1
+            print(f"\n{'='*60}")
+            print(f"📊 НАЧАЛО МАССОВОГО ЭКСПОРТА КРД (ОДИН ЛИСТ)")
+            print(f"{'='*60}")
             
-            # Заголовок
-            ws.merge_cells(f'A1:AC1')
-            cell = ws[f'A1']
-            cell.value = f"КАРТОЧКА РОЗЫСКА №{self.krd_id}"
-            cell.font = Font(bold=True, size=16)
-            cell.alignment = self.header_alignment
-            row += 1
+            if krd_ids is None:
+                krd_ids = self.report_config.get("krd_ids", [])
             
-            # Загружаем все данные
-            social_data = self._load_social_data()
-            addresses = self._load_addresses()
-            incoming_orders = self._load_incoming_orders()
-            service_places = self._load_service_places()
-            soch_episodes = self._load_soch_episodes()
-            outgoing_requests = self._load_outgoing_requests()
+            if not krd_ids:
+                raise Exception("Не указан список КРД для экспорта")
             
-            # Загружаем фотографии
-            photos = self._load_photos()
+            print(f"📋 Всего записей для экспорта: {len(krd_ids)}")
             
-            # Заполняем лист данными
-            row = self._fill_social_data_section(ws, social_data, photos, start_row=row)
-            row = self._fill_addresses_section(ws, addresses, start_row=row)
-            row = self._fill_incoming_orders_section(ws, incoming_orders, start_row=row)
-            row = self._fill_service_places_section(ws, service_places, start_row=row)
-            row = self._fill_soch_episodes_section(ws, soch_episodes, start_row=row)
-            row = self._fill_outgoing_requests_section(ws, outgoing_requests, start_row=row)
+            self.wb.remove(self.wb.active)
+            ws = self.wb.create_sheet("Отчет по КРД")
             
-            # Настройка ширины колонок
+            row = self._fill_multiple_krd_to_single_sheet(ws, krd_ids)
+            
             self._adjust_column_widths(ws)
+            
+            print(f"\n💾 СОХРАНЕНИЕ ФАЙЛА: {file_path}")
+            self.wb.save(file_path)
+            print(f"✓ Файл сохранён: {file_path}")
+            
+            self._cleanup_temp_files()
+            
+            print(f"\n{'='*60}")
+            print(f"✅ МАССОВЫЙ ЭКСПОРТ ЗАВЕРШЁН УСПЕШНО")
+            print(f"{'='*60}\n")
             
             return True
             
         except Exception as e:
-            print(f"Ошибка экспорта на лист: {e}")
+            print(f"\n{'='*60}")
+            print(f"✗ ОШИБКА МАССОВОГО ЭКСПОРТА: {e}")
+            print(f"{'='*60}\n")
             import traceback
             traceback.print_exc()
+            self._cleanup_temp_files()
             raise
     
-    def _load_photos(self):
-        """Загрузка всех фотографий из базы данных с масштабированием"""
-        photos = {
-            'civilian': None,
-            'military_headgear': None,
-            'military_no_headgear': None,
-            'distinctive_marks': None
-        }
+    def _fill_multiple_krd_to_single_sheet(self, ws, krd_ids):
+        row = 1
         
-        # Загружаем каждое фото
-        photo_fields = {
-            'civilian': 'photo_civilian',
-            'military_headgear': 'photo_military_headgear',
-            'military_no_headgear': 'photo_military_no_headgear',
-            'distinctive_marks': 'photo_distinctive_marks'
-        }
+        ws.merge_cells(f'A1:{get_column_letter(10)}1')
+        cell = ws[f'A1']
+        cell.value = "ОТЧЕТ ПО КАРТОЧКАМ РОЗЫСКА (КРД)"
+        cell.font = Font(bold=True, size=14, color="FFFFFF")
+        cell.fill = self.section_fill
+        cell.alignment = self.header_alignment
+        row += 2
         
-        print(f"\n📷 Загрузка фотографий для КРД-{self.krd_id}:")
-        for photo_key, field_name in photo_fields.items():
-            print(f"  • {photo_key} ({field_name})...")
-            photo_bytes = self._load_photo_from_db(field_name)
-            if photo_bytes:
-                # Масштабируем изображение под размер ячейки
-                temp_file = self._create_temp_image_file(
-                    photo_bytes, 
-                    target_width=self.photo_width_px,
-                    target_height=self.photo_height_px
-                )
-                if temp_file:
-                    photos[photo_key] = temp_file
-                    print(f"    ✓ Загружено: {temp_file} ({len(photo_bytes)} байт)")
-                else:
-                    print(f"    ✗ Не удалось создать временный файл")
+        sections = self.report_config.get("sections", [])
+        fields_config = self.report_config.get("fields", {})
+        
+        export_columns = []
+        
+        if "social_data" in sections:
+            social_fields = fields_config.get("social_data", [])
+            if social_fields:
+                all_social_fields = dict(self.AVAILABLE_FIELDS["social_data"]["fields"])
+                for field_key in social_fields:
+                    if field_key in all_social_fields:
+                        export_columns.append((field_key, all_social_fields[field_key]))
             else:
-                print(f"    ⚠️ Фото отсутствует в БД")
+                export_columns.extend(self.AVAILABLE_FIELDS["social_data"]["fields"])
         
-        return photos
+        for section in sections:
+            if section != "social_data" and section in self.AVAILABLE_FIELDS:
+                section_fields = fields_config.get(section, [])
+                if section_fields:
+                    all_section_fields = dict(self.AVAILABLE_FIELDS[section]["fields"])
+                    for field_key in section_fields:
+                        if field_key in all_section_fields:
+                            export_columns.append((field_key, all_section_fields[field_key]))
+                else:
+                    export_columns.extend(self.AVAILABLE_FIELDS[section]["fields"])
+        
+        print(f"\n📋 Полей для экспорта: {len(export_columns)}")
+        
+        for col, (field_key, field_name) in enumerate(export_columns, 1):
+            cell = ws.cell(row=row, column=col, value=field_name)
+            cell.font = self.header_font
+            cell.fill = self.header_fill
+            cell.alignment = self.header_alignment
+            cell.border = self.thin_border
+        
+        row += 1
+        
+        print(f"\n📝 Экспорт данных...")
+        for krd_id in krd_ids:
+            print(f"  • Обработка КРД-{krd_id}...")
+            
+            data = self._load_all_data_for_krd(krd_id)
+            
+            print(f"    Загружено полей: {len(data)}")
+            if 'krd_number' in data:
+                print(f"    № КРД: {data['krd_number']}")
+            if 'surname' in data:
+                print(f"    Фамилия: {data['surname']}")
+            
+            for col, (field_key, field_name) in enumerate(export_columns, 1):
+                value = self._get_field_value(data, field_key)
+                cell = ws.cell(row=row, column=col, value=value)
+                cell.alignment = self.cell_alignment
+                cell.border = self.thin_border
+            
+            row += 1
+        
+        print(f"  ✓ Экспортировано {len(krd_ids)} записей")
+        return row
+    
+    def _load_all_data_for_krd(self, krd_id):
+        data = {}
+        
+        social_data = self._load_social_data_for_krd(krd_id)
+        data.update(social_data)
+        
+        addresses = self._load_addresses_for_krd(krd_id)
+        if addresses:
+            data.update(addresses[0])
+        
+        incoming_orders = self._load_incoming_orders_for_krd(krd_id)
+        if incoming_orders:
+            data.update(incoming_orders[0])
+        
+        service_places = self._load_service_places_for_krd(krd_id)
+        if service_places:
+            data.update(service_places[0])
+        
+        soch_episodes = self._load_soch_episodes_for_krd(krd_id)
+        if soch_episodes:
+            data.update(soch_episodes[0])
+        
+        outgoing_requests = self._load_outgoing_requests_for_krd(krd_id)
+        if outgoing_requests:
+            data.update(outgoing_requests[0])
+        
+        return data
+    
+    def _get_field_value(self, data, field_key):
+        value = data.get(field_key, '')
+        
+        if field_key.endswith('_date') and value:
+            try:
+                if hasattr(value, 'toString'):
+                    return value.toString("dd.MM.yyyy")
+                else:
+                    return str(value)
+            except:
+                return str(value) if value else ''
+        
+        if value is None:
+            return ''
+        
+        return value
+    
+    def export_to_single_sheet(self, ws):
+        social_data = self._load_social_data()
+        row = self._fill_social_data_section(ws, social_data, start_row=1)
+        
+        if "addresses" in self.report_config.get("sections", []):
+            addresses = self._load_addresses()
+            row = self._fill_addresses_section(ws, addresses, start_row=row)
+        
+        if "incoming_orders" in self.report_config.get("sections", []):
+            incoming_orders = self._load_incoming_orders()
+            row = self._fill_incoming_orders_section(ws, incoming_orders, start_row=row)
+        
+        if "service_places" in self.report_config.get("sections", []):
+            service_places = self._load_service_places()
+            row = self._fill_service_places_section(ws, service_places, start_row=row)
+        
+        if "soch_episodes" in self.report_config.get("sections", []):
+            soch_episodes = self._load_soch_episodes()
+            row = self._fill_soch_episodes_section(ws, soch_episodes, start_row=row)
+        
+        if "outgoing_requests" in self.report_config.get("sections", []):
+            outgoing_requests = self._load_outgoing_requests()
+            row = self._fill_outgoing_requests_section(ws, outgoing_requests, start_row=row)
+        
+        return True
     
     def _load_social_data(self):
-        """Загрузка социально-демографических данных"""
-        query = QSqlQuery(self.db)
-        query.prepare("""
+        return self._load_social_data_for_krd(self.krd_id)
+    
+    def _load_social_data_for_krd(self, krd_id):
+        """
+        ИСПРАВЛЕНО: Убрана несуществующая колонка krd_number, используется kr.id
+        """
+        query_string = f"""
             SELECT 
-                k.id as krd_id,
-                k.krd_number,
+                kr.id as krd_id,
                 s.tab_number,
                 s.personal_number,
                 c.name as category_name,
@@ -529,19 +537,30 @@ class KrdExcelExporter:
                 s.military_contacts,
                 s.relatives_info
             FROM krd.social_data s
-            LEFT JOIN krd.krd ON s.krd_id = krd.id
+            LEFT JOIN krd.krd kr ON s.krd_id = kr.id
             LEFT JOIN krd.categories c ON s.category_id = c.id
             LEFT JOIN krd.ranks r ON s.rank_id = r.id
-            WHERE s.krd_id = ?
+            WHERE s.krd_id = {int(krd_id)}
             ORDER BY s.id DESC
             LIMIT 1
-        """)
-        query.addBindValue(self.krd_id)
-        query.exec()
+        """
+        
+        query = QSqlQuery(self.db)
+        
+        print(f"    📝 SQL запрос выполнен для КРД-{krd_id}")
+        
+        if not query.exec(query_string):
+            print(f"    ⚠️ Ошибка SQL: {query.lastError().text()}")
+            return {}
         
         if query.next():
+            # === ИСПРАВЛЕНО: Формируем krd_number из ID ===
+            krd_id_value = query.value('krd_id')
+            krd_number = f"КРД-{krd_id_value}" if krd_id_value else ''
+            
             return {
-                'krd_number': query.value('krd_number') or '',
+                'krd_id': krd_id_value or '',
+                'krd_number': krd_number,  # Форматируем как "КРД-X"
                 'tab_number': query.value('tab_number') or '',
                 'personal_number': query.value('personal_number') or '',
                 'category_name': query.value('category_name') or '',
@@ -576,21 +595,24 @@ class KrdExcelExporter:
                 'military_contacts': query.value('military_contacts') or '',
                 'relatives_info': query.value('relatives_info') or ''
             }
-        return {}
+        else:
+            print(f"    ⚠️ Нет данных для КРД-{krd_id}")
+            return {}
     
     def _load_addresses(self):
-        """Загрузка адресов проживания"""
-        query = QSqlQuery(self.db)
-        query.prepare("""
+        return self._load_addresses_for_krd(self.krd_id)
+    
+    def _load_addresses_for_krd(self, krd_id):
+        query_string = f"""
             SELECT 
                 region, district, town, street, house, building, letter,
                 apartment, room, check_date, check_result
             FROM krd.addresses
-            WHERE krd_id = ?
+            WHERE krd_id = {int(krd_id)}
             ORDER BY id DESC
-        """)
-        query.addBindValue(self.krd_id)
-        query.exec()
+        """
+        query = QSqlQuery(self.db)
+        query.exec(query_string)
         
         addresses = []
         while query.next():
@@ -610,9 +632,10 @@ class KrdExcelExporter:
         return addresses
     
     def _load_incoming_orders(self):
-        """Загрузка входящих поручений"""
-        query = QSqlQuery(self.db)
-        query.prepare("""
+        return self._load_incoming_orders_for_krd(self.krd_id)
+    
+    def _load_incoming_orders_for_krd(self, krd_id):
+        query_string = f"""
             SELECT 
                 i.initiator_full_name, i.order_date, i.order_number,
                 i.receipt_date, i.receipt_number, i.postal_index,
@@ -623,11 +646,11 @@ class KrdExcelExporter:
                 i.our_response_number, m.name as military_unit_name
             FROM krd.incoming_orders i
             LEFT JOIN krd.military_units m ON i.military_unit_id = m.id
-            WHERE i.krd_id = ?
+            WHERE i.krd_id = {int(krd_id)}
             ORDER BY i.receipt_date DESC
-        """)
-        query.addBindValue(self.krd_id)
-        query.exec()
+        """
+        query = QSqlQuery(self.db)
+        query.exec(query_string)
         
         orders = []
         while query.next():
@@ -655,9 +678,10 @@ class KrdExcelExporter:
         return orders
     
     def _load_service_places(self):
-        """Загрузка мест службы"""
-        query = QSqlQuery(self.db)
-        query.prepare("""
+        return self._load_service_places_for_krd(self.krd_id)
+    
+    def _load_service_places_for_krd(self, krd_id):
+        query_string = f"""
             SELECT 
                 s.place_name, m.name as military_unit_name,
                 g.name as garrison_name, p.name as position_name,
@@ -669,11 +693,11 @@ class KrdExcelExporter:
             LEFT JOIN krd.military_units m ON s.military_unit_id = m.id
             LEFT JOIN krd.garrisons g ON s.garrison_id = g.id
             LEFT JOIN krd.positions p ON s.position_id = p.id
-            WHERE s.krd_id = ?
+            WHERE s.krd_id = {int(krd_id)}
             ORDER BY s.id DESC
-        """)
-        query.addBindValue(self.krd_id)
-        query.exec()
+        """
+        query = QSqlQuery(self.db)
+        query.exec(query_string)
         
         places = []
         while query.next():
@@ -698,9 +722,10 @@ class KrdExcelExporter:
         return places
     
     def _load_soch_episodes(self):
-        """Загрузка эпизодов СОЧ"""
-        query = QSqlQuery(self.db)
-        query.prepare("""
+        return self._load_soch_episodes_for_krd(self.krd_id)
+    
+    def _load_soch_episodes_for_krd(self, krd_id):
+        query_string = f"""
             SELECT 
                 soch_date, soch_location, order_date_number, witnesses,
                 reasons, weapon_info, clothing, movement_options, other_info,
@@ -709,11 +734,11 @@ class KrdExcelExporter:
                 search_circumstances, notification_recipient, notification_date,
                 notification_number
             FROM krd.soch_episodes
-            WHERE krd_id = ?
+            WHERE krd_id = {int(krd_id)}
             ORDER BY soch_date DESC
-        """)
-        query.addBindValue(self.krd_id)
-        query.exec()
+        """
+        query = QSqlQuery(self.db)
+        query.exec(query_string)
         
         episodes = []
         while query.next():
@@ -742,9 +767,10 @@ class KrdExcelExporter:
         return episodes
     
     def _load_outgoing_requests(self):
-        """Загрузка исходящих запросов"""
-        query = QSqlQuery(self.db)
-        query.prepare("""
+        return self._load_outgoing_requests_for_krd(self.krd_id)
+    
+    def _load_outgoing_requests_for_krd(self, krd_id):
+        query_string = f"""
             SELECT 
                 r.recipient_name, r.issue_date, r.issue_number,
                 r.postal_index, r.postal_region, r.postal_district,
@@ -756,11 +782,11 @@ class KrdExcelExporter:
             FROM krd.outgoing_requests r
             LEFT JOIN krd.military_units m ON r.military_unit_id = m.id
             LEFT JOIN krd.request_types t ON r.request_type_id = t.id
-            WHERE r.krd_id = ?
+            WHERE r.krd_id = {int(krd_id)}
             ORDER BY r.issue_date DESC
-        """)
-        query.addBindValue(self.krd_id)
-        query.exec()
+        """
+        query = QSqlQuery(self.db)
+        query.exec(query_string)
         
         requests = []
         while query.next():
@@ -787,7 +813,6 @@ class KrdExcelExporter:
         return requests
     
     def _format_date(self, date_value):
-        """Форматирование даты"""
         if date_value:
             try:
                 return date_value.toString("dd.MM.yyyy")
@@ -795,12 +820,49 @@ class KrdExcelExporter:
                 return str(date_value)
         return ""
     
+    def _fill_social_data_section(self, ws, data, start_row=1):
+        row = start_row
+        selected_fields = self.report_config.get("fields", {}).get("social_data", [])
+        
+        ws.merge_cells(f'A1:AC1')
+        cell = ws[f'A1']
+        cell.value = "СОЦИАЛЬНО-ДЕМОГРАФИЧЕСКИЕ ДАННЫЕ"
+        cell.font = self.section_font
+        cell.fill = self.section_fill
+        cell.alignment = self.header_alignment
+        row += 1
+        
+        all_fields = self.AVAILABLE_FIELDS.get("social_data", {}).get("fields", [])
+        
+        if selected_fields:
+            fields_to_export = [(k, v) for k, v in all_fields if k in selected_fields]
+        else:
+            fields_to_export = all_fields
+        
+        for col, (field_key, field_name) in enumerate(fields_to_export, 1):
+            cell = ws.cell(row=row, column=col, value=field_name)
+            cell.font = self.header_font
+            cell.fill = self.header_fill
+            cell.alignment = self.header_alignment
+            cell.border = self.thin_border
+        
+        row += 1
+        
+        for col, (field_key, field_name) in enumerate(fields_to_export, 1):
+            value = data.get(field_key, '')
+            if field_key.endswith('_date') and value:
+                value = self._format_date(value)
+            cell = ws.cell(row=row, column=col, value=value)
+            cell.alignment = self.cell_alignment
+            cell.border = self.thin_border
+        
+        row += 2
+        return row
     
     def _fill_addresses_section(self, ws, addresses, start_row=1):
-        """Заполнение раздела адресов проживания"""
         row = start_row
+        selected_fields = self.report_config.get("fields", {}).get("addresses", [])
         
-        # Заголовок раздела
         ws.merge_cells(f'A{row}:AC{row}')
         cell = ws[f'A{row}']
         cell.value = "АДРЕСА ПРОЖИВАНИЯ"
@@ -809,15 +871,15 @@ class KrdExcelExporter:
         cell.alignment = self.header_alignment
         row += 1
         
-        # Заголовки колонок
-        headers = [
-            "Субъект РФ", "Административный район", "Населенный пункт",
-            "Улица", "Дом", "Корпус", "Литер", "Квартира", "Комната",
-            "Дата адресной проверки", "Результат адресной проверки"
-        ]
+        all_fields = self.AVAILABLE_FIELDS.get("addresses", {}).get("fields", [])
         
-        for col, header in enumerate(headers, 1):
-            cell = ws.cell(row=row, column=col, value=header)
+        if selected_fields:
+            fields_to_export = [(k, v) for k, v in all_fields if k in selected_fields]
+        else:
+            fields_to_export = all_fields
+        
+        for col, (field_key, field_name) in enumerate(fields_to_export, 1):
+            cell = ws.cell(row=row, column=col, value=field_name)
             cell.font = self.header_font
             cell.fill = self.header_fill
             cell.alignment = self.header_alignment
@@ -825,36 +887,22 @@ class KrdExcelExporter:
         
         row += 1
         
-        # Данные
         for addr in addresses:
-            values = [
-                addr.get('region', ''),
-                addr.get('district', ''),
-                addr.get('town', ''),
-                addr.get('street', ''),
-                addr.get('house', ''),
-                addr.get('building', ''),
-                addr.get('letter', ''),
-                addr.get('apartment', ''),
-                addr.get('room', ''),
-                self._format_date(addr.get('check_date')),
-                addr.get('check_result', '')
-            ]
-            
-            for col, value in enumerate(values, 1):
+            for col, (field_key, field_name) in enumerate(fields_to_export, 1):
+                value = addr.get(field_key, '')
+                if field_key.endswith('_date') and value:
+                    value = self._format_date(value)
                 cell = ws.cell(row=row, column=col, value=value)
                 cell.alignment = self.cell_alignment
                 cell.border = self.thin_border
-            
             row += 1
         
         return row
     
     def _fill_incoming_orders_section(self, ws, orders, start_row=1):
-        """Заполнение раздела входящих поручений"""
         row = start_row
+        selected_fields = self.report_config.get("fields", {}).get("incoming_orders", [])
         
-        # Заголовок раздела
         ws.merge_cells(f'A{row}:AC{row}')
         cell = ws[f'A{row}']
         cell.value = "ВХОДЯЩИЕ ПОРУЧЕНИЯ НА РОЗЫСК"
@@ -863,19 +911,15 @@ class KrdExcelExporter:
         cell.alignment = self.header_alignment
         row += 1
         
-        # Заголовки колонок
-        headers = [
-            "Инициатор розыска", "Полное наименование инициатора розыска",
-            "Военное управление инициатора розыска", "Исходящая дата поручения",
-            "Исходящий номер поручения", "Дата поступления в ВК",
-            "Входящий номер в ВК", "Индекс", "Субъект РФ",
-            "Административный район", "Населенный пункт", "Улица",
-            "Дом", "Корпус", "Литер", "Квартира", "Комната",
-            "Контакты источника", "Дата ответа ВК", "Исходящий номер ответа ВК"
-        ]
+        all_fields = self.AVAILABLE_FIELDS.get("incoming_orders", {}).get("fields", [])
         
-        for col, header in enumerate(headers, 1):
-            cell = ws.cell(row=row, column=col, value=header)
+        if selected_fields:
+            fields_to_export = [(k, v) for k, v in all_fields if k in selected_fields]
+        else:
+            fields_to_export = all_fields
+        
+        for col, (field_key, field_name) in enumerate(fields_to_export, 1):
+            cell = ws.cell(row=row, column=col, value=field_name)
             cell.font = self.header_font
             cell.fill = self.header_fill
             cell.alignment = self.header_alignment
@@ -883,45 +927,22 @@ class KrdExcelExporter:
         
         row += 1
         
-        # Данные
         for order in orders:
-            values = [
-                order.get('initiator_full_name', ''),
-                order.get('initiator_full_name', ''),
-                order.get('military_unit_name', ''),
-                self._format_date(order.get('order_date')),
-                order.get('order_number', ''),
-                self._format_date(order.get('receipt_date')),
-                order.get('receipt_number', ''),
-                order.get('postal_index', ''),
-                order.get('postal_region', ''),
-                order.get('postal_district', ''),
-                order.get('postal_town', ''),
-                order.get('postal_street', ''),
-                order.get('postal_house', ''),
-                order.get('postal_building', ''),
-                order.get('postal_letter', ''),
-                order.get('postal_apartment', ''),
-                order.get('postal_room', ''),
-                order.get('initiator_contacts', ''),
-                self._format_date(order.get('our_response_date')),
-                order.get('our_response_number', '')
-            ]
-            
-            for col, value in enumerate(values, 1):
+            for col, (field_key, field_name) in enumerate(fields_to_export, 1):
+                value = order.get(field_key, '')
+                if field_key.endswith('_date') and value:
+                    value = self._format_date(value)
                 cell = ws.cell(row=row, column=col, value=value)
                 cell.alignment = self.cell_alignment
                 cell.border = self.thin_border
-            
             row += 1
         
         return row
     
     def _fill_service_places_section(self, ws, places, start_row=1):
-        """Заполнение раздела мест службы"""
         row = start_row
+        selected_fields = self.report_config.get("fields", {}).get("service_places", [])
         
-        # Заголовок раздела
         ws.merge_cells(f'A{row}:AC{row}')
         cell = ws[f'A{row}']
         cell.value = "МЕСТА СЛУЖБЫ"
@@ -930,18 +951,15 @@ class KrdExcelExporter:
         cell.alignment = self.header_alignment
         row += 1
         
-        # Заголовки колонок
-        headers = [
-            "Наименование места службы", "Военное управление места службы",
-            "Гарнизон места службы", "Воинская должность",
-            "Командиры (начальники) (воинское звание, ФИО, контакты)",
-            "Индекс", "Субъект РФ", "Административный район",
-            "Населенный пункт", "Улица", "Дом", "Корпус", "Литер",
-            "Квартира", "Комната", "Контакты места службы"
-        ]
+        all_fields = self.AVAILABLE_FIELDS.get("service_places", {}).get("fields", [])
         
-        for col, header in enumerate(headers, 1):
-            cell = ws.cell(row=row, column=col, value=header)
+        if selected_fields:
+            fields_to_export = [(k, v) for k, v in all_fields if k in selected_fields]
+        else:
+            fields_to_export = all_fields
+        
+        for col, (field_key, field_name) in enumerate(fields_to_export, 1):
+            cell = ws.cell(row=row, column=col, value=field_name)
             cell.font = self.header_font
             cell.fill = self.header_fill
             cell.alignment = self.header_alignment
@@ -949,41 +967,20 @@ class KrdExcelExporter:
         
         row += 1
         
-        # Данные
         for place in places:
-            values = [
-                place.get('place_name', ''),
-                place.get('military_unit_name', ''),
-                place.get('garrison_name', ''),
-                place.get('position_name', ''),
-                place.get('commanders', ''),
-                place.get('postal_index', ''),
-                place.get('postal_region', ''),
-                place.get('postal_district', ''),
-                place.get('postal_town', ''),
-                place.get('postal_street', ''),
-                place.get('postal_house', ''),
-                place.get('postal_building', ''),
-                place.get('postal_letter', ''),
-                place.get('postal_apartment', ''),
-                place.get('postal_room', ''),
-                place.get('place_contacts', '')
-            ]
-            
-            for col, value in enumerate(values, 1):
+            for col, (field_key, field_name) in enumerate(fields_to_export, 1):
+                value = place.get(field_key, '')
                 cell = ws.cell(row=row, column=col, value=value)
                 cell.alignment = self.cell_alignment
                 cell.border = self.thin_border
-            
             row += 1
         
         return row
     
     def _fill_soch_episodes_section(self, ws, episodes, start_row=1):
-        """Заполнение раздела сведений о СОЧ"""
         row = start_row
+        selected_fields = self.report_config.get("fields", {}).get("soch_episodes", [])
         
-        # Заголовок раздела
         ws.merge_cells(f'A{row}:AC{row}')
         cell = ws[f'A{row}']
         cell.value = "СВЕДЕНИЯ О СОЧ"
@@ -992,21 +989,15 @@ class KrdExcelExporter:
         cell.alignment = self.header_alignment
         row += 1
         
-        # Заголовки колонок
-        headers = [
-            "Дата СОЧ", "Место СОЧ", "Дата и номер приказа о СОЧ",
-            "Очевидцы СОЧ", "Вероятные причины СОЧ",
-            "Сведения о наличии оружия", "Во что был одет",
-            "Варианты движения", "Другая значимая информация",
-            "Контакт дежурного по ВК", "Контакт дежурного по ОМВД",
-            "Сведения о проверке", "Сведения о прокуратуре",
-            "Сведения об уголовном деле", "Дата розыска",
-            "Обстоятельства розыска", "Кем разыскан",
-            "Дата уведомления", "Номер уведомления", "Адресат уведомления"
-        ]
+        all_fields = self.AVAILABLE_FIELDS.get("soch_episodes", {}).get("fields", [])
         
-        for col, header in enumerate(headers, 1):
-            cell = ws.cell(row=row, column=col, value=header)
+        if selected_fields:
+            fields_to_export = [(k, v) for k, v in all_fields if k in selected_fields]
+        else:
+            fields_to_export = all_fields
+        
+        for col, (field_key, field_name) in enumerate(fields_to_export, 1):
+            cell = ws.cell(row=row, column=col, value=field_name)
             cell.font = self.header_font
             cell.fill = self.header_fill
             cell.alignment = self.header_alignment
@@ -1014,45 +1005,22 @@ class KrdExcelExporter:
         
         row += 1
         
-        # Данные
         for episode in episodes:
-            values = [
-                self._format_date(episode.get('soch_date')),
-                episode.get('soch_location', ''),
-                episode.get('order_date_number', ''),
-                episode.get('witnesses', ''),
-                episode.get('reasons', ''),
-                episode.get('weapon_info', ''),
-                episode.get('clothing', ''),
-                episode.get('movement_options', ''),
-                episode.get('other_info', ''),
-                episode.get('duty_officer_commissariat', ''),
-                episode.get('duty_officer_omvd', ''),
-                episode.get('investigation_info', ''),
-                episode.get('prosecution_info', ''),
-                episode.get('criminal_case_info', ''),
-                self._format_date(episode.get('search_date')),
-                episode.get('search_circumstances', ''),
-                episode.get('found_by', ''),
-                self._format_date(episode.get('notification_date')),
-                episode.get('notification_number', ''),
-                episode.get('notification_recipient', '')
-            ]
-            
-            for col, value in enumerate(values, 1):
+            for col, (field_key, field_name) in enumerate(fields_to_export, 1):
+                value = episode.get(field_key, '')
+                if field_key.endswith('_date') and value:
+                    value = self._format_date(value)
                 cell = ws.cell(row=row, column=col, value=value)
                 cell.alignment = self.cell_alignment
                 cell.border = self.thin_border
-            
             row += 1
         
         return row
     
     def _fill_outgoing_requests_section(self, ws, requests, start_row=1):
-        """Заполнение раздела исходящих запросов"""
         row = start_row
+        selected_fields = self.report_config.get("fields", {}).get("outgoing_requests", [])
         
-        # Заголовок раздела
         ws.merge_cells(f'A{row}:AC{row}')
         cell = ws[f'A{row}']
         cell.value = "ИСХОДЯЩИЕ ЗАПРОСЫ И ПОРУЧЕНИЯ"
@@ -1061,18 +1029,15 @@ class KrdExcelExporter:
         cell.alignment = self.header_alignment
         row += 1
         
-        # Заголовки колонок
-        headers = [
-            "Наименование запроса", "Наименование адресата",
-            "Военное управление адресата", "Исходящая дата",
-            "Исходящий номер", "Индекс", "Субъект РФ",
-            "Административный район", "Населенный пункт",
-            "Улица", "Дом", "Корпус", "Литер", "Квартира",
-            "Комната", "Контакты"
-        ]
+        all_fields = self.AVAILABLE_FIELDS.get("outgoing_requests", {}).get("fields", [])
         
-        for col, header in enumerate(headers, 1):
-            cell = ws.cell(row=row, column=col, value=header)
+        if selected_fields:
+            fields_to_export = [(k, v) for k, v in all_fields if k in selected_fields]
+        else:
+            fields_to_export = all_fields
+        
+        for col, (field_key, field_name) in enumerate(fields_to_export, 1):
+            cell = ws.cell(row=row, column=col, value=field_name)
             cell.font = self.header_font
             cell.fill = self.header_fill
             cell.alignment = self.header_alignment
@@ -1080,39 +1045,20 @@ class KrdExcelExporter:
         
         row += 1
         
-        # Данные
         for req in requests:
-            values = [
-                req.get('request_type_name', ''),
-                req.get('recipient_name', ''),
-                req.get('military_unit_name', ''),
-                self._format_date(req.get('issue_date')),
-                req.get('issue_number', ''),
-                req.get('postal_index', ''),
-                req.get('postal_region', ''),
-                req.get('postal_district', ''),
-                req.get('postal_town', ''),
-                req.get('postal_street', ''),
-                req.get('postal_house', ''),
-                req.get('postal_building', ''),
-                req.get('postal_letter', ''),
-                req.get('postal_apartment', ''),
-                req.get('postal_room', ''),
-                req.get('recipient_contacts', '')
-            ]
-            
-            for col, value in enumerate(values, 1):
+            for col, (field_key, field_name) in enumerate(fields_to_export, 1):
+                value = req.get(field_key, '')
+                if field_key.endswith('_date') and value:
+                    value = self._format_date(value)
                 cell = ws.cell(row=row, column=col, value=value)
                 cell.alignment = self.cell_alignment
                 cell.border = self.thin_border
-            
             row += 1
         
         return row
     
     def _adjust_column_widths(self, ws):
-        """Настройка ширины колонок"""
-        for col_num in range(1, 30):
+        for col_num in range(1, 50):
             max_length = 0
             column_letter = get_column_letter(col_num)
             
