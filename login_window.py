@@ -57,7 +57,6 @@ class LoginWindow(QDialog):
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
 
         # Чекбокс "Запомнить меня"
-        self.remember_checkbox = QCheckBox("Запомнить меня")
 
         # Кнопка входа
         login_button = QPushButton("Войти")
@@ -66,7 +65,6 @@ class LoginWindow(QDialog):
         # Добавление виджетов в форму
         layout.addRow("Имя пользователя:", self.username_input)
         layout.addRow("Пароль:", self.password_input)
-        layout.addRow(self.remember_checkbox)
         layout.addRow(login_button)
 
         return layout

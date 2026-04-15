@@ -1,7 +1,7 @@
 """
 Модуль для главного окна приложения
 Содержит класс MainWindow для отображения данных КРД и информации о пользователе
-С функцией выгрузки данных в Excel
+С функцией выгрузки данных в Excel и поиском в реальном времени
 """
 
 import sys
@@ -12,11 +12,11 @@ from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
     QTableWidget, QTableWidgetItem, QHeaderView, QLabel, QGroupBox,
     QGridLayout, QMenuBar, QStatusBar, QToolBar, QTableView, QPushButton, QDialog,
-    QMessageBox, QMenu, QFileDialog, QAbstractItemView, QProgressDialog
+    QMessageBox, QMenu, QFileDialog, QAbstractItemView, QProgressDialog, QLineEdit
 )
-from PyQt6.QtCore import Qt, QPoint, QDate
+from PyQt6.QtCore import Qt, QPoint, QDate, QTimer
 from PyQt6.QtSql import QSqlDatabase, QSqlQueryModel, QSqlQuery, QSqlTableModel
-from PyQt6.QtGui import QAction, QFont, QContextMenuEvent
+from PyQt6.QtGui import QAction, QFont, QContextMenuEvent, QIcon
 
 # === ИМПОРТЫ ДЛЯ ЭКСПОРТА В EXCEL ===
 from openpyxl import Workbook
@@ -55,6 +55,14 @@ class MainWindow(QMainWindow):
         # Установка основных параметров окна
         self.setWindowTitle("АРМ Сотрудника дознания - Главное окно")
         self.setGeometry(100, 100, 1200, 800)
+        
+        # Переменная для хранения поискового запроса
+        self.search_query = ""
+        
+        # Таймер для задержки поиска (debounce)
+        self.search_timer = QTimer()
+        self.search_timer.setSingleShot(True)
+        self.search_timer.timeout.connect(self._perform_search)
         
         # Инициализация интерфейса
         self.init_ui()
@@ -204,6 +212,57 @@ class MainWindow(QMainWindow):
         group_box = QGroupBox("Данные КРД")
         layout = QVBoxLayout()
         
+        # === СТРОКА ПОИСКА ===
+        search_layout = QHBoxLayout()
+        
+        search_label = QLabel("🔍 Поиск:")
+        search_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        search_layout.addWidget(search_label)
+        
+        self.search_input = QLineEdit()
+        self.search_input.setPlaceholderText("Введите фамилию, имя, отчество или номер КРД...")
+        self.search_input.setMinimumHeight(35)
+        self.search_input.setStyleSheet("""
+            QLineEdit {
+                padding: 8px;
+                border: 1px solid #ccc;
+                border-radius: 5px;
+                font-size: 13px;
+            }
+            QLineEdit:focus {
+                border: 2px solid #2196F3;
+            }
+        """)
+        self.search_input.textChanged.connect(self.on_search_text_changed)
+        search_layout.addWidget(self.search_input)
+        
+        # Кнопка очистки поиска
+        clear_search_btn = QPushButton("✕")
+        clear_search_btn.setMaximumWidth(40)
+        clear_search_btn.setMinimumHeight(35)
+        clear_search_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f44336;
+                color: white;
+                border-radius: 5px;
+                font-weight: bold;
+            }
+            QPushButton:hover {
+                background-color: #d32f2f;
+            }
+        """)
+        clear_search_btn.clicked.connect(self.clear_search)
+        search_layout.addWidget(clear_search_btn)
+        
+        # Счётчик найденных записей
+        self.found_count_label = QLabel("Найдено: 0 записей")
+        self.found_count_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        self.found_count_label.setStyleSheet("QLabel { color: #2196F3; padding: 5px; }")
+        search_layout.addWidget(self.found_count_label)
+        
+        layout.addLayout(search_layout)
+        # ==========================
+        
         self.table_model_krd = QSqlQueryModel()
         self.query_table_krd = """SELECT
             k.id AS "ID",
@@ -216,9 +275,10 @@ class MainWindow(QMainWindow):
         FROM krd.krd k
         LEFT JOIN krd.social_data s ON k.id = s.krd_id
         LEFT JOIN krd.statuses st ON k.status_id = st.id
-        ORDER BY k.id DESC
-        LIMIT 100"""
-        self.table_model_krd.setQuery(self.query_table_krd, self.db)
+        WHERE k.is_deleted = FALSE
+        ORDER BY k.id DESC"""
+        
+        self.load_krd_data()
         
         self.krd_table_view = QTableView()
         self.krd_table_view.setModel(self.table_model_krd)
@@ -239,6 +299,74 @@ class MainWindow(QMainWindow):
         
         group_box.setLayout(layout)
         return group_box
+    
+    def on_search_text_changed(self, text):
+        """Обработка изменения текста в строке поиска"""
+        self.search_query = text.strip()
+        
+        # Запускаем таймер для задержки поиска (debounce 300ms)
+        self.search_timer.stop()
+        self.search_timer.start(300)
+    
+    def _perform_search(self):
+        """Выполнение поиска с задержкой"""
+        self.load_krd_data()
+    
+    def clear_search(self):
+        """Очистка строки поиска"""
+        self.search_input.clear()
+        self.search_query = ""
+        self.load_krd_data()
+        self.search_input.setFocus()
+    
+    def load_krd_data(self):
+        """Загрузка данных КРД в таблицу с учётом поиска"""
+        query = QSqlQuery(self.db)
+        
+        if self.search_query:
+            # Поиск по фамилии, имени, отчеству или номеру КРД
+            search_query = f"""
+                SELECT
+                    k.id AS "ID",
+                    CONCAT('КРД-', k.id) AS "Номер КРД",
+                    COALESCE(s.surname, '') AS "Фамилия",
+                    COALESCE(s.name, '') AS "Имя",
+                    COALESCE(s.patronymic, '') AS "Отчество",
+                    COALESCE(st.name, 'Неизвестен') AS "Статус",
+                    k.last_service_place_id AS "ID последнего места службы"
+                FROM krd.krd k
+                LEFT JOIN krd.social_data s ON k.id = s.krd_id
+                LEFT JOIN krd.statuses st ON k.status_id = st.id
+                WHERE k.is_deleted = FALSE
+                AND (
+                    LOWER(s.surname) LIKE LOWER(:search) OR
+                    LOWER(s.name) LIKE LOWER(:search) OR
+                    LOWER(s.patronymic) LIKE LOWER(:search) OR
+                    LOWER(CONCAT('КРД-', k.id)) LIKE LOWER(:search) OR
+                    LOWER(s.surname || ' ' || s.name || ' ' || s.patronymic) LIKE LOWER(:search)
+                )
+                ORDER BY k.id DESC
+            """
+            query.prepare(search_query)
+            query.bindValue(":search", f"%{self.search_query}%")
+        else:
+            # Без поиска - все записи
+            query.prepare(self.query_table_krd)
+        
+        if query.exec():
+            self.table_model_krd.setQuery(query)
+            
+            # Обновляем счётчик найденных записей
+            count = self.table_model_krd.rowCount()
+            if self.search_query:
+                self.found_count_label.setText(f"🔍 Найдено: {count} записей по запросу \"{self.search_query}\"")
+                self.found_count_label.setStyleSheet("QLabel { color: #4CAF50; padding: 5px; font-weight: bold; }")
+            else:
+                self.found_count_label.setText(f"📊 Всего записей: {count}")
+                self.found_count_label.setStyleSheet("QLabel { color: #2196F3; padding: 5px; font-weight: bold; }")
+        else:
+            print(f"⚠️ Ошибка загрузки данных: {query.lastError().text()}")
+            self.found_count_label.setText("⚠️ Ошибка загрузки данных")
     
     def on_selection_changed(self, selected, deselected):
         """Обработка изменения выделения в таблице"""
@@ -277,7 +405,6 @@ class MainWindow(QMainWindow):
         Генерация отчетов по всем КРД в базе данных
         """
         try:
-            # === ИСПРАВЛЕНО: Убран параметр export_mode ===
             dialog = ReportConfigDialog(self.db, self)
             dialog.report_configured.connect(lambda config: self._on_report_configured(config))
             
@@ -466,10 +593,6 @@ class MainWindow(QMainWindow):
 
             if details_window.exec() == QDialog.DialogCode.Accepted:
                 self.load_krd_data()
-
-    def load_krd_data(self):
-        """Загрузка данных КРД в таблицу"""
-        self.table_model_krd.setQuery(self.query_table_krd, self.db)
     
     def show_about_dialog(self):
         """Показ диалога "О программе" """
