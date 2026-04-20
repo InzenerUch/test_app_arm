@@ -79,7 +79,7 @@ COLUMN_DESCRIPTIONS = {
     "relatives_info": "Сведения о близких родственниках (ФИО, контакты, адреса)",
     
     # ========================
-    # АДРЕСА ПРОЖИВАНИЯ (addresses)
+    # АДРЕСА ПРОЖИВАНИЯ (addresses) - ВСЕ 11 ПОЛЕЙ
     # ========================
     "region": "📍 Субъект РФ (область, край, республика, автономный округ)",
     "district": "📍 Административный район (район области/края)",
@@ -155,6 +155,10 @@ class DocumentGeneratorTab(QWidget):
         self.generated_doc_path = None
         self.selected_file_path = None
         self.current_template_id = None
+        
+        # === ИСПРАВЛЕНО: Добавлен атрибут current_table_name ===
+        self.current_table_name = "social_data"  # Значение по умолчанию
+        # ========================================================
         
         # Выбранные записи из связанных таблиц
         self.selected_address_id = None
@@ -1113,7 +1117,7 @@ class DocumentGeneratorTab(QWidget):
                 "military_id_series", "military_id_number", "military_id_issue_date", "military_id_issued_by",
                 "appearance_features", "personal_marks", "federal_search_info", "military_contacts", "relatives_info"
             ],
-            # === ВСЕ СТОЛБЦЫ ИЗ addresses ===
+            # === ВСЕ 11 СТОЛБЦОВ ИЗ addresses ===
             "addresses": [
                 "region",       # Субъект РФ
                 "district",     # Район
