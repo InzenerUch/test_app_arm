@@ -15,7 +15,7 @@ from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QTextEdit, QPushButton,
     QLabel, QGroupBox, QFileDialog, QMessageBox, QComboBox, QTabWidget, QLineEdit,
     QTableWidget, QTableWidgetItem, QGridLayout, QHeaderView, QAbstractItemView,
-    QTableView, QMenu, QSpacerItem, QSizePolicy, QToolTip, QSplitter
+    QTableView, QMenu, QSpacerItem, QSizePolicy, QToolTip, QSplitter, QDialog
 )
 from PyQt6.QtCore import Qt, QByteArray, QPoint, QDate, QRect
 from PyQt6.QtSql import QSqlQuery, QSqlQueryModel
@@ -25,6 +25,7 @@ from audit_logger import AuditLogger
 from composite_field_widget import CompositeFieldWidget
 from field_mapping_manager import FieldMappingManager
 from database_handler import DatabaseHandler
+from mapping_editor_dialog import MappingEditorDialog
 
 
 # ГЛОБАЛЬНЫЙ ОБРАБОТЧИК ИСКЛЮЧЕНИЙ
@@ -54,8 +55,8 @@ COLUMN_DESCRIPTIONS = {
     "birth_place_country": "Страна места рождения",
     "tab_number": "Табельный номер",
     "personal_number": "Личный номер",
-    "category_name": "Категория военнослужащего (офицер, солдат и т.д.)",
-    "rank_name": "Воинское звание",
+    "category_id": "ID категории военнослужащего",
+    "rank_id": "ID воинского звания",
     "drafted_by_commissariat": "Наименование военкомата призыва",
     "draft_date": "Дата призыва на военную службу",
     "povsk": "Наименование ПОВСК (пункт отбора на военную службу по контракту)",
@@ -77,6 +78,10 @@ COLUMN_DESCRIPTIONS = {
     "federal_search_info": "Сведения о федеральном розыске",
     "military_contacts": "Контакты военнослужащего (телефон, email)",
     "relatives_info": "Сведения о близких родственниках (ФИО, контакты, адреса)",
+    "photo_civilian": "Фото в гражданской одежде",
+    "photo_military_headgear": "Фото в форме с головным убором",
+    "photo_military_no_headgear": "Фото в форме без головного убора",
+    "photo_distinctive_marks": "Фото отличительных примет",
     
     # ========================
     # АДРЕСА ПРОЖИВАНИЯ (addresses) - ВСЕ 11 ПОЛЕЙ
@@ -97,9 +102,9 @@ COLUMN_DESCRIPTIONS = {
     # МЕСТА СЛУЖБЫ (service_places)
     # ========================
     "place_name": "🎖️ Наименование места службы (воинская часть, подразделение)",
-    "military_unit_name": "🎖️ Воинское управление (ЦВО, ЮВО, ЗВО, ВДВ и т.д.)",
-    "garrison_name": "🎖️ Гарнизон (наименование военного гарнизона)",
-    "position_name": "🎖️ Воинская должность (наименование должности)",
+    "military_unit_id": "🎖️ ID военного управления",
+    "garrison_id": "🎖️ ID гарнизона",
+    "position_id": "🎖️ ID воинской должности",
     "commanders": "🎖️ Командиры (начальники) с контактами (ФИО, телефоны)",
     "postal_index": "📮 Почтовый индекс (цифровой код почтового отделения)",
     "postal_region": "📮 Субъект РФ почтового адреса (для корреспонденции)",
@@ -141,6 +146,13 @@ COLUMN_DESCRIPTIONS = {
 # === ОБРАТНЫЙ СПРАВОЧНИК: Русское описание → DB колонка ===
 DESCRIPTION_TO_COLUMN = {v: k for k, v in COLUMN_DESCRIPTIONS.items()}
 
+# === ТАБЛИЦЫ С ВЫБОРОМ ЗАПИСЕЙ ===
+TABLES_WITH_SELECTION = {
+    "addresses": "🏠 Адрес проживания",
+    "service_places": "🎖️ Место службы",
+    "soch_episodes": "⚠️ Эпизод СОЧ"
+}
+
 
 class DocumentGeneratorTab(QWidget):
     """Вкладка для генерации документов из шаблонов"""
@@ -155,28 +167,32 @@ class DocumentGeneratorTab(QWidget):
         self.generated_doc_path = None
         self.selected_file_path = None
         self.current_template_id = None
-        
-        # === ИСПРАВЛЕНО: Добавлен атрибут current_table_name ===
-        self.current_table_name = "social_data"  # Значение по умолчанию
-        # ========================================================
+        self.current_table_name = "social_data"
         
         # Выбранные записи из связанных таблиц
         self.selected_address_id = None
         self.selected_service_place_id = None
         self.selected_soch_episode_id = None
         
-        # Инициализация модулей
-        self.composite_widget = CompositeFieldWidget(self)
-        self.mapping_manager = FieldMappingManager(self)
-        self.db_handler = DatabaseHandler(self.db)
+        # Отслеживание используемых таблиц
+        self.used_tables_in_mappings = set()
         
         print(f"\n{'='*60}")
         print(f"🔧 DocumentGeneratorTab инициализирован для КРД-{krd_id}")
         print(f"{'='*60}\n")
         
+        # === 1. Сначала создаём UI ===
         self.init_ui()
+        
+        # === 2. ТЕПЕРЬ инициализируем модули ===
+        self.composite_widget = CompositeFieldWidget(self)
+        self.mapping_manager = FieldMappingManager(self)
+        self.db_handler = DatabaseHandler(self.db)
+        
+        # === 3. Загружаем данные ===
         self.load_document_templates()
         self.load_related_records()
+        self.load_db_columns()
     
     def init_ui(self):
         layout = QVBoxLayout()
@@ -228,20 +244,40 @@ class DocumentGeneratorTab(QWidget):
         
         layout.addWidget(records_group)
         
-        # Выбор шаблона
-        template_layout = QHBoxLayout()
-        template_layout.addWidget(QLabel("📄 Шаблон документа:"))
+        # === Выбор шаблона с кнопкой редактирования ===
+        template_group = QGroupBox("📄 Выбор шаблона документа")
+        template_layout = QGridLayout(template_group)
+        template_layout.setSpacing(10)
+        
+        template_layout.addWidget(QLabel("Шаблон документа:"), 0, 0)
         self.template_combo = QComboBox()
         self.template_combo.setMinimumWidth(300)
         self.template_combo.currentIndexChanged.connect(self.on_template_changed)
-        template_layout.addWidget(self.template_combo)
+        template_layout.addWidget(self.template_combo, 0, 1)
         
-        save_mapping_btn = QPushButton("💾 Сохранить сопоставления")
-        save_mapping_btn.setStyleSheet("background-color: #2196F3; color: white; font-weight: bold;")
-        save_mapping_btn.clicked.connect(self.save_mappings_now)
-        template_layout.addWidget(save_mapping_btn)
+        # Кнопка редактирования сопоставлений
+        edit_btn = QPushButton("✏️ Редактировать сопоставления")
+        edit_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9800;
+                color: white;
+                font-weight: bold;
+                padding: 8px 20px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #F57C00;
+            }
+        """)
+        edit_btn.clicked.connect(self.open_mapping_editor)
+        template_layout.addWidget(edit_btn, 0, 2)
         
-        layout.addLayout(template_layout)
+        info_label = QLabel("💡 Нажмите «Редактировать сопоставления» чтобы настроить какие поля из БД подставлять в шаблон")
+        info_label.setStyleSheet("QLabel { color: #666; padding: 5px; }")
+        info_label.setWordWrap(True)
+        template_layout.addWidget(info_label, 1, 0, 1, 3)
+        
+        layout.addWidget(template_group)
         
         # === Поля для метаданных запроса ===
         metadata_group = QGroupBox("📝 Информация о запросе (сохраняется в базу данных)")
@@ -259,54 +295,17 @@ class DocumentGeneratorTab(QWidget):
         
         layout.addWidget(metadata_group)
         
-        # === Таблица сопоставления полей ===
-        mapping_group = QGroupBox("🔗 Сопоставление полей шаблона с данными из БД")
-        mapping_layout = QVBoxLayout()
-        
-        info_label = QLabel("💡 Выберите переменную из шаблона и укажите, какое поле из базы данных должно быть подставлено")
-        info_label.setStyleSheet("QLabel { color: #666; padding: 5px; background-color: #f0f0f0; border-radius: 3px; }")
-        info_label.setWordWrap(True)
-        mapping_layout.addWidget(info_label)
-        
-        self.mapping_table = QTableWidget()
-        self.mapping_table.setColumnCount(3)
-        self.mapping_table.setHorizontalHeaderLabels([
-            "Переменная из шаблона",
-            "Поле из базы данных",
-            "Тип"
-        ])
-        self.mapping_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self.mapping_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        
-        header = self.mapping_table.horizontalHeader()
-        header.setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
-        header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
-        self.mapping_table.setColumnWidth(2, 80)
-        
-        mapping_layout.addWidget(self.mapping_table)
-        
-        # Кнопки управления
-        btn_layout = QHBoxLayout()
-        btn_layout.addWidget(QPushButton("➕ Добавить сопоставление", clicked=self.add_field_mapping))
-        btn_layout.addWidget(QPushButton("🔗 Добавить составное поле", clicked=self.add_composite_field_mapping))
-        btn_layout.addWidget(QPushButton("🗑️ Удалить сопоставление", clicked=self.remove_field_mapping))
-        mapping_layout.addLayout(btn_layout)
-        
-        mapping_group.setLayout(mapping_layout)
-        layout.addWidget(mapping_group)
-        
-        # === ЕДИНАЯ КНОПКА ===
+        # === КНОПКА ГЕНЕРАЦИИ ===
         generate_btn = QPushButton("📄 Сформировать документ и сохранить в базу")
-        generate_btn.setMinimumHeight(50)
+        generate_btn.setMinimumHeight(60)
         generate_btn.setStyleSheet("""
             QPushButton {
                 background-color: #4CAF50;
                 color: white;
                 font-weight: bold;
-                font-size: 13px;
+                font-size: 14px;
                 border-radius: 5px;
-                padding: 15px;
+                padding: 20px;
             }
             QPushButton:hover {
                 background-color: #45a049;
@@ -315,40 +314,70 @@ class DocumentGeneratorTab(QWidget):
         generate_btn.clicked.connect(self.generate_and_save_document)
         layout.addWidget(generate_btn)
         
+        # Добавляем распорку чтобы прижать кнопку генерации вниз
+        layout.addStretch()
+        
         return widget
+    
+    def open_mapping_editor(self):
+        """Открытие окна редактирования сопоставлений"""
+        if not self.current_template_id:
+            QMessageBox.warning(self, "Ошибка", "Сначала выберите шаблон документа")
+            return
+        
+        dialog = MappingEditorDialog(
+            parent=self,
+            krd_id=self.krd_id,
+            db_connection=self.db,
+            template_id=self.current_template_id,
+            audit_logger=self.audit_logger
+        )
+        
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Перезагружаем сопоставления после сохранения
+            self._update_used_tables_tracking()
+            QMessageBox.information(self, "Успех", "✅ Сопоставления обновлены!\nТеперь можно сформировать документ.")
     
     # ========================
     # МЕТОДЫ ДЛЯ РАБОТЫ С РУССКИМИ НАЗВАНИЯМИ
     # ========================
     
-    def _get_column_description(self, column_name):
+    def get_column_description(self, column_name):
         """Получение русского описания для колонки БД"""
         return COLUMN_DESCRIPTIONS.get(column_name, column_name)
     
-    def _get_column_name(self, description):
+    def get_column_name(self, description):
         """Получение имени колонки БД из русского описания"""
         return DESCRIPTION_TO_COLUMN.get(description, description)
     
-    def _create_db_column_combo(self, selected_column=None):
+    def get_table_by_column(self, column_name):
+        """Определение таблицы по имени колонки"""
+        for table_name, columns in self.db_columns.items():
+            if column_name in columns:
+                return table_name
+        return None
+    
+    def create_db_column_combo(self, selected_column=None):
         """Создание ComboBox с русскими описаниями полей БД"""
         combo = QComboBox()
         combo.setEditable(False)
+        combo.setMaxVisibleItems(50)
+        combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+        combo.view().setMinimumHeight(400)
+        combo.setMinimumWidth(350)
+        combo.setMaximumWidth(600)
         
-        # Собираем все доступные колонки
         all_columns = []
         for table_name, columns in self.db_columns.items():
             for col in columns:
                 if col in COLUMN_DESCRIPTIONS:
                     all_columns.append((col, COLUMN_DESCRIPTIONS[col]))
         
-        # Сортируем по описанию
         all_columns.sort(key=lambda x: x[1])
         
-        # Добавляем в ComboBox: отображаем описание, храним имя колонки
         for col_name, col_description in all_columns:
             combo.addItem(col_description, col_name)
         
-        # Выбираем нужную колонку
         if selected_column:
             index = combo.findData(selected_column)
             if index >= 0:
@@ -475,11 +504,31 @@ class DocumentGeneratorTab(QWidget):
             QMessageBox.warning(self, "Ошибка", "Введите адресата")
             return
         
+        # === ПРОВЕРКА: Выбраны ли записи для используемых таблиц ===
+        validation_errors = []
+        
+        if "addresses" in self.used_tables_in_mappings and not self.selected_address_id:
+            validation_errors.append("🏠 Не выбран адрес проживания")
+        
+        if "service_places" in self.used_tables_in_mappings and not self.selected_service_place_id:
+            validation_errors.append("🎖️ Не выбрано место службы")
+        
+        if "soch_episodes" in self.used_tables_in_mappings and not self.selected_soch_episode_id:
+            validation_errors.append("⚠️ Не выбран эпизод СОЧ")
+        
+        if validation_errors:
+            error_message = "⚠️ Для генерации документа необходимо выбрать записи:\n\n"
+            error_message += "\n".join(validation_errors)
+            error_message += "\n\n💡 Выберите соответствующие значения в ComboBox вверху вкладки."
+            
+            QMessageBox.warning(self, "Требуется выбор записей", error_message)
+            return
+        
         print(f"📋 Template ID: {template_id}")
         
-        # Сохранение сопоставлений
+        # Сохранение сопоставлений (теперь просто проверяем что они есть в БД)
         if not self.save_mappings_now():
-            print("❌ Ошибка: Не удалось сохранить сопоставления")
+            print("❌ Ошибка: Не удалось загрузить сопоставления")
             return
         
         try:
@@ -811,7 +860,23 @@ class DocumentGeneratorTab(QWidget):
                 if not column_name:
                     continue
                 
-                value = self._get_value_from_database(table_name, column_name, krd_id)
+                # Определяем таблицу для этой колонки
+                col_table = self.get_table_by_column(column_name)
+                
+                # Выбираем ID записи в зависимости от таблицы
+                selected_id = None
+                if col_table == "addresses":
+                    selected_id = self.selected_address_id
+                elif col_table == "service_places":
+                    selected_id = self.selected_service_place_id
+                elif col_table == "soch_episodes":
+                    selected_id = self.selected_soch_episode_id
+                
+                # Получаем значение из выбранной записи или последней
+                if selected_id and col_table in TABLES_WITH_SELECTION:
+                    value = self._get_value_from_specific_record(col_table, column_name, selected_id)
+                else:
+                    value = self._get_value_from_database(col_table, column_name, krd_id)
                 
                 if value:
                     parts.append(str(value))
@@ -843,138 +908,63 @@ class DocumentGeneratorTab(QWidget):
         
         return f"КРД-{self.krd_id}/З-{count}"
     
-    def add_field_mapping(self):
-        """Добавление простого сопоставления"""
-        print(f"\n{'='*60}")
-        print(f"📝 ДОБАВЛЕНИЕ ПРОСТОГО СОПОСТАВЛЕНИЯ")
-        print(f"{'='*60}")
+    def load_request_types(self):
+        """Загрузка типов запросов из базы данных"""
+        print(f"🔄 Загрузка типов запросов...")
+        self.request_type_combo.clear()
         
-        try:
-            if self.template_combo.count() == 0:
-                print("❌ Ошибка: Шаблоны не загружены")
-                QMessageBox.warning(self, "Ошибка", "Сначала добавьте шаблон")
-                return
-            
-            tid = self.template_combo.currentData()
-            
-            if not tid:
-                print("❌ Ошибка: Шаблон не выбран")
-                QMessageBox.warning(self, "Ошибка", "Выберите шаблон")
-                return
-            
-            if not self.template_variables:
-                self.load_template_variables(tid)
-            
-            if not self.db_columns:
-                self.load_db_columns()
-            
-            if not self.template_variables:
-                QMessageBox.warning(self, "Ошибка", "Не загружены переменные шаблона")
-                return
-            
-            if not self.db_columns:
-                QMessageBox.warning(self, "Ошибка", "Не загружены поля БД")
-                return
-            
-            row = self.mapping_table.rowCount()
-            self.mapping_table.insertRow(row)
-            
-            var_combo = QComboBox()
-            var_combo.addItems(self.template_variables)
-            self.mapping_table.setCellWidget(row, 0, var_combo)
-            
-            # === НОВОЕ: ComboBox с русскими описаниями ===
-            col_combo = self._create_db_column_combo()
-            self.mapping_table.setCellWidget(row, 1, col_combo)
-            
-            type_label = QLabel("Простое")
-            type_label.setStyleSheet("color: #666; font-size: 10px;")
-            self.mapping_table.setCellWidget(row, 2, type_label)
-            
-            self.mapping_table.resizeRowToContents(row)
-            self.mapping_table.selectRow(row)
-            
-            print(f"✅ Сопоставление добавлено в строку #{row}")
-            print(f"   Переменная: {var_combo.currentText()}")
-            print(f"   Поле БД: {col_combo.currentData()} ({col_combo.currentText()})")
-            
-            self.save_mappings_now()
-            
-            if self.audit_logger:
-                field_name = var_combo.currentText()
-                db_column = col_combo.currentData()
-                table_name = self.get_table_by_column(db_column)
-                self.audit_logger.log_mapping_create(
-                    template_id=tid,
-                    field_name=field_name,
-                    db_column=db_column,
-                    table_name=table_name
-                )
-            
-            print(f"{'='*60}\n")
-            
-        except Exception as e:
-            print(f"❌ Ошибка добавления сопоставления: {e}")
-            traceback.print_exc()
-            QMessageBox.critical(self, "Ошибка", f"Ошибка добавления сопоставления:\n{str(e)}")
+        query = QSqlQuery(self.db)
+        query.exec("SELECT id, name FROM krd.request_types ORDER BY name")
+        
+        count = 0
+        while query.next():
+            type_id = query.value(0)
+            type_name = query.value(1)
+            self.request_type_combo.addItem(type_name, type_id)
+            count += 1
+        
+        print(f"✅ Загружено {count} типов запросов")
     
-    def add_composite_field_mapping(self):
-        """Добавление составного поля"""
+    # ========================
+    # ✅ ИСПРАВЛЕННЫЙ МЕТОД (Решение 3)
+    # ========================
+    
+    def save_mappings_now(self):
+        """
+        Сохранение сопоставлений (Решение 3: без mapping_table)
+        Сопоставления уже сохранены в БД через MappingEditorDialog
+        """
         if not self.current_template_id:
-            QMessageBox.warning(self, "Ошибка", "Выберите шаблон")
-            return
+            print("⚠️ Шаблон не выбран")
+            return False
         
-        row = self.mapping_table.rowCount()
-        self.composite_widget.add_composite_field_mapping(row)
-        self.save_mappings_now()
+        # Сопоставления уже сохранены в БД через MappingEditorDialog
+        # Просто обновляем отслеживание используемых таблиц
+        self._update_used_tables_tracking()
+        
+        print(f"✅ Сопоставления загружены из БД для шаблона {self.current_template_id}")
+        return True
     
-    def remove_field_mapping(self):
-        """Удаление сопоставления"""
-        selected_rows = self.mapping_table.selectionModel().selectedRows()
-        if not selected_rows:
-            QMessageBox.warning(self, "Внимание", "Выберите сопоставление для удаления")
-            return
+    def _update_used_tables_tracking(self):
+        """Обновление отслеживания используемых таблиц в сопоставлениях"""
+        self.used_tables_in_mappings = set()
         
-        row = selected_rows[0].row()
+        query = QSqlQuery(self.db)
+        query.prepare("""
+            SELECT table_name, is_composite, db_columns
+            FROM krd.field_mappings
+            WHERE template_id = ?
+        """)
+        query.addBindValue(self.current_template_id)
         
-        var_widget = self.mapping_table.cellWidget(row, 0)
-        col_widget = self.mapping_table.cellWidget(row, 1)
-        
-        if not var_widget or not col_widget:
-            return
-        
-        var_name = var_widget.currentText()
-        is_composite = hasattr(col_widget, 'layout')
-        col_name = "Составное поле" if is_composite else col_widget.currentData()
-        
-        reply = QMessageBox.question(
-            self, "Подтверждение удаления",
-            f"Удалить сопоставление?\nПеременная: {var_name}\nПоле: {col_name}",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            try:
-                if self.current_template_id:
-                    field_name_clean = var_name.strip('{} ')
-                    self.mapping_manager.delete_field_mapping(
-                        self.current_template_id, 
-                        field_name_clean, 
-                        col_name
-                    )
+        if query.exec():
+            while query.next():
+                table_name = query.value(0)
                 
-                self.mapping_table.removeRow(row)
-                
-                if self.audit_logger:
-                    self.audit_logger.log_mapping_delete(
-                        field_name=field_name_clean,
-                        db_column=col_name
-                    )
-                
-                QMessageBox.information(self, "Успех", "Сопоставление удалено")
-                
-            except Exception as e:
-                QMessageBox.critical(self, "Ошибка", f"Ошибка удаления:\n{str(e)}")
+                if table_name in TABLES_WITH_SELECTION:
+                    self.used_tables_in_mappings.add(table_name)
+        
+        print(f"📊 Используемые таблицы: {self.used_tables_in_mappings}")
     
     def on_template_changed(self):
         tid = self.template_combo.currentData()
@@ -984,78 +974,9 @@ class DocumentGeneratorTab(QWidget):
             self.current_template_id = tid
             if self.audit_logger:
                 self.audit_logger.log_template_view(tid, template_name)
-            self.load_field_mappings(tid)
+            self._update_used_tables_tracking()
         else:
             self.current_template_id = None
-    
-    def save_mappings_now(self):
-        if not self.current_template_id:
-            return False
-        
-        result = self.mapping_manager.save_field_mappings(self.current_template_id)
-        
-        if result:
-            QMessageBox.information(self, "Успех", "Сопоставления сохранены!")
-        
-        return result
-    
-    def load_field_mappings(self, template_id):
-        print(f"\n{'='*60}")
-        print(f"📥 ЗАГРУЗКА СОПОСТАВЛЕНИЙ")
-        print(f"{'='*60}")
-        
-        try:
-            self.mapping_table.setRowCount(0)
-            
-            self.load_template_variables(template_id)
-            self.load_db_columns()
-            
-            self.mapping_manager.load_field_mappings(template_id)
-            
-            row_count = self.mapping_table.rowCount()
-            print(f"✅ Загружено сопоставлений: {row_count}")
-            
-        except Exception as e:
-            print(f"❌ Ошибка загрузки: {e}")
-            traceback.print_exc()
-    
-    def add_simple_mapping_row(self, row, field_name, db_column, table_name):
-        """Добавление простого сопоставления с русским описанием"""
-        self.mapping_table.insertRow(row)
-        
-        var_combo = QComboBox()
-        var_combo.addItems(self.template_variables)
-        var_combo.setCurrentText(field_name)
-        self.mapping_table.setCellWidget(row, 0, var_combo)
-        
-        # === НОВОЕ: ComboBox с русским описанием ===
-        col_combo = self._create_db_column_combo(db_column)
-        self.mapping_table.setCellWidget(row, 1, col_combo)
-        
-        type_label = QLabel("Простое")
-        type_label.setStyleSheet("color: #666; font-size: 10px;")
-        self.mapping_table.setCellWidget(row, 2, type_label)
-        
-        self.mapping_table.resizeRowToContents(row)
-    
-    def add_composite_mapping_row(self, row, field_name, db_columns_json, table_name):
-        """Добавление составного сопоставления"""
-        self.composite_widget.create_composite_field_row(
-            row, field_name, db_columns_json, table_name, self.mapping_table
-        )
-    
-    def load_request_types(self):
-        self.request_type_combo.clear()
-        query = QSqlQuery(self.db)
-        query.exec("SELECT id, name FROM krd.request_types ORDER BY name")
-        while query.next():
-            self.request_type_combo.addItem(query.value(1), query.value(0))
-    
-    def get_table_by_column(self, col):
-        for tbl, cols in self.db_columns.items():
-            if col in cols:
-                return tbl
-        return None
     
     def load_template_variables(self, template_id):
         query = QSqlQuery(self.db)
@@ -1117,19 +1038,9 @@ class DocumentGeneratorTab(QWidget):
                 "military_id_series", "military_id_number", "military_id_issue_date", "military_id_issued_by",
                 "appearance_features", "personal_marks", "federal_search_info", "military_contacts", "relatives_info"
             ],
-            # === ВСЕ 11 СТОЛБЦОВ ИЗ addresses ===
             "addresses": [
-                "region",       # Субъект РФ
-                "district",     # Район
-                "town",         # Населенный пункт
-                "street",       # Улица
-                "house",        # Дом
-                "building",     # Корпус
-                "letter",       # Литера
-                "apartment",    # Квартира
-                "room",         # Комната
-                "check_date",   # Дата проверки
-                "check_result"  # Результат проверки
+                "region", "district", "town", "street", "house",
+                "building", "letter", "apartment", "room", "check_date", "check_result"
             ],
             "service_places": [
                 "place_name", "military_unit_id", "garrison_id", "position_id", "commanders",
@@ -1319,9 +1230,3 @@ class DocumentGeneratorTab(QWidget):
             query.addBindValue(template_id)
             query.exec()
             self.load_document_templates()
-    
-    def get_table_by_column(self, col):
-        for tbl, cols in self.db_columns.items():
-            if col in cols:
-                return tbl
-        return None

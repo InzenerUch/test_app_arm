@@ -12,9 +12,6 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
-# === УДАЛЕНО: from composite_field_widget import CompositeFieldWidget ===
-# Эта строка вызывала циклический импорт!
-
 # === СПРАВОЧНИК: DB колонка → Русское описание ===
 # ✅ Основан на реальной схеме БД из schema_only.sql
 COLUMN_DESCRIPTIONS = {
@@ -161,6 +158,11 @@ class CompositeFieldWidget:
             parent.db_columns = {}
     
     def _create_column_combo(self, selected_column=None, table_name=None):
+        """
+        Создание ComboBox с русскими описаниями колонок и прокруткой
+        
+        ✅ ИСПРАВЛЕНО: Теперь показывает ВСЕ колонки из ВСЕХ таблиц
+        """
         combo = QComboBox()
         combo.setEditable(False)
         combo.setMaxVisibleItems(50)
@@ -174,14 +176,21 @@ class CompositeFieldWidget:
         seen = set()
         
         # ✅ ИСПРАВЛЕНО: Всегда берём ВСЕ таблицы (игнорируем table_name)
-        # target_tables = {table_name} if (table_name and table_name in self.parent.db_columns) else self.parent.db_columns.keys()
-        target_tables = self.parent.db_columns.keys()  # ← ВСЕГДА все таблицы
+        # Раньше было: target_tables = {table_name} если передан table_name
+        # Теперь: target_tables = ВСЕ таблицы всегда
+        target_tables = self.parent.db_columns.keys()
+        
+        print(f"🔍 [COMBO] Загрузка колонок из таблиц: {list(target_tables)}")
         
         for tbl in target_tables:
-            for col in self.parent.db_columns.get(tbl, []):
+            columns = self.parent.db_columns.get(tbl, [])
+            print(f"   📊 Таблица {tbl}: {len(columns)} колонок")
+            
+            for col in columns:
                 if col in seen:
                     continue
                 seen.add(col)
+                # ✅ Показываем ВСЕ колонки. Если есть описание - берём его, иначе техническое имя
                 desc = COLUMN_DESCRIPTIONS.get(col, col)
                 all_columns.append((col, desc))
         
@@ -190,7 +199,7 @@ class CompositeFieldWidget:
         for col_name, col_desc in all_columns:
             combo.addItem(col_desc, col_name)
             
-        print(f"📊 [COMBO] Загружено: {combo.count()} столбцов (ВСЕ таблицы)")
+        print(f"✅ [COMBO] Загружено: {combo.count()} столбцов (ВСЕ таблицы)")
         
         if selected_column:
             idx = combo.findData(selected_column.strip())
@@ -253,10 +262,10 @@ class CompositeFieldWidget:
         num_label.setObjectName(f"num_{row}_{idx}")
         col_layout.addWidget(num_label)
         
-        # ComboBox с колонками
+        # ✅ ComboBox с колонками (теперь показывает ВСЕ таблицы)
         col_combo = self._create_column_combo(
             selected_column=col_info.get('column', ''),
-            table_name=table_name
+            table_name=None  # ← Игнорируем table_name, показываем все таблицы
         )
         col_combo.setObjectName(f"col_{row}_{idx}")
         col_layout.addWidget(col_combo, 2)
