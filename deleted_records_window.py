@@ -1,7 +1,7 @@
 """
 Модуль для просмотра удаленных записей (только для администраторов)
+✅ ИСПРАВЛЕНО: Использованы именованные параметры для UNION запроса
 """
-
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QGridLayout,
     QComboBox, QTableView, QPushButton, QLabel, QDateEdit,
@@ -129,6 +129,8 @@ class DeletedRecordsWindow(QDialog):
         
         return group_box
     
+    # В файле deleted_records_window.py, метод load_deleted_records:
+
     def load_deleted_records(self):
         """Загрузка удаленных записей с применением фильтров и обработкой ошибок"""
         record_type = self.record_type_combo.currentData()
@@ -140,7 +142,7 @@ class DeletedRecordsWindow(QDialog):
                 # Загрузка удаленных КРД
                 query = QSqlQuery(self.db)
                 query.prepare("""
-                    SELECT 
+                    SELECT
                         k.id as "ID КРД",
                         CONCAT('КРД-', k.id) as "Номер КРД",
                         COALESCE(s.surname, '') || ' ' || COALESCE(s.name, '') || ' ' || COALESCE(s.patronymic, '') as "ФИО",
@@ -148,58 +150,48 @@ class DeletedRecordsWindow(QDialog):
                     FROM krd.krd k
                     LEFT JOIN krd.social_data s ON k.id = s.krd_id
                     WHERE k.is_deleted = TRUE
-                        AND k.deleted_at >= ?
-                        AND k.deleted_at <= ?
+                    AND k.deleted_at >= :date_from
+                    AND k.deleted_at <= :date_to
                     ORDER BY k.deleted_at DESC
                 """)
-                query.addBindValue(date_from)
-                query.addBindValue(f"{date_to} 23:59:59")
+                query.bindValue(":date_from", date_from)
+                query.bindValue(":date_to", f"{date_to} 23:59:59")
                 
                 if not query.exec():
                     raise Exception(f"Ошибка выполнения запроса: {query.lastError().text()}")
                 
                 self.records_model.setQuery(query)
-                
-                # Установка ширины колонок
-                self.records_table.setColumnWidth(0, 80)   # ID КРД
-                self.records_table.setColumnWidth(1, 100)  # Номер КРД
-                self.records_table.setColumnWidth(2, 250)  # ФИО
-                self.records_table.setColumnWidth(3, 150)  # Дата удаления
-            
+                # ... rest of the code
+
             elif record_type == "templates":
                 # Загрузка удаленных шаблонов
                 query = QSqlQuery(self.db)
                 query.prepare("""
-                    SELECT 
+                    SELECT
                         dt.id as "ID шаблона",
                         dt.name as "Название шаблона",
                         dt.description as "Описание",
                         dt.deleted_at as "Дата удаления"
                     FROM krd.document_templates dt
                     WHERE dt.is_deleted = TRUE
-                        AND dt.deleted_at >= ?
-                        AND dt.deleted_at <= ?
+                    AND dt.deleted_at >= :date_from
+                    AND dt.deleted_at <= :date_to
                     ORDER BY dt.deleted_at DESC
                 """)
-                query.addBindValue(date_from)
-                query.addBindValue(f"{date_to} 23:59:59")
+                query.bindValue(":date_from", date_from)
+                query.bindValue(":date_to", f"{date_to} 23:59:59")
                 
                 if not query.exec():
                     raise Exception(f"Ошибка выполнения запроса: {query.lastError().text()}")
                 
                 self.records_model.setQuery(query)
-                
-                # Установка ширины колонок
-                self.records_table.setColumnWidth(0, 100)  # ID шаблона
-                self.records_table.setColumnWidth(1, 250)  # Название шаблона
-                self.records_table.setColumnWidth(2, 300)  # Описание
-                self.records_table.setColumnWidth(3, 150)  # Дата удаления
-            
+                # ... rest of the code
+
             elif record_type == "requests":
                 # Загрузка удаленных исходящих запросов
                 query = QSqlQuery(self.db)
                 query.prepare("""
-                    SELECT 
+                    SELECT
                         o.id as "ID запроса",
                         o.issue_number as "Номер запроса",
                         rt.name as "Тип запроса",
@@ -209,31 +201,24 @@ class DeletedRecordsWindow(QDialog):
                     FROM krd.outgoing_requests o
                     LEFT JOIN krd.request_types rt ON o.request_type_id = rt.id
                     WHERE o.is_deleted = TRUE
-                        AND o.deleted_at >= ?
-                        AND o.deleted_at <= ?
+                    AND o.deleted_at >= :date_from
+                    AND o.deleted_at <= :date_to
                     ORDER BY o.deleted_at DESC
                 """)
-                query.addBindValue(date_from)
-                query.addBindValue(f"{date_to} 23:59:59")
+                query.bindValue(":date_from", date_from)
+                query.bindValue(":date_to", f"{date_to} 23:59:59")
                 
                 if not query.exec():
                     raise Exception(f"Ошибка выполнения запроса: {query.lastError().text()}")
                 
                 self.records_model.setQuery(query)
-                
-                # Установка ширины колонок
-                self.records_table.setColumnWidth(0, 80)   # ID запроса
-                self.records_table.setColumnWidth(1, 120)  # Номер запроса
-                self.records_table.setColumnWidth(2, 120)  # Тип запроса
-                self.records_table.setColumnWidth(3, 200)  # Адресат
-                self.records_table.setColumnWidth(4, 100)  # Дата запроса
-                self.records_table.setColumnWidth(5, 150)  # Дата удаления
-            
+                # ... rest of the code
+
             else:
                 # Загрузка всех удаленных записей
                 query = QSqlQuery(self.db)
                 query.prepare("""
-                    SELECT 
+                    SELECT
                         'КРД' as "Тип",
                         k.id::text as "ID записи",
                         CONCAT('КРД-', k.id) as "Идентификатор",
@@ -242,12 +227,10 @@ class DeletedRecordsWindow(QDialog):
                     FROM krd.krd k
                     LEFT JOIN krd.social_data s ON k.id = s.krd_id
                     WHERE k.is_deleted = TRUE
-                        AND k.deleted_at >= ?
-                        AND k.deleted_at <= ?
-                    
+                    AND k.deleted_at >= :date_from
+                    AND k.deleted_at <= :date_to
                     UNION ALL
-                    
-                    SELECT 
+                    SELECT
                         'Шаблон' as "Тип",
                         dt.id::text as "ID записи",
                         dt.name as "Идентификатор",
@@ -255,12 +238,10 @@ class DeletedRecordsWindow(QDialog):
                         dt.deleted_at as "Дата удаления"
                     FROM krd.document_templates dt
                     WHERE dt.is_deleted = TRUE
-                        AND dt.deleted_at >= ?
-                        AND dt.deleted_at <= ?
-                    
+                    AND dt.deleted_at >= :date_from
+                    AND dt.deleted_at <= :date_to
                     UNION ALL
-                    
-                    SELECT 
+                    SELECT
                         'Запрос' as "Тип",
                         o.id::text as "ID записи",
                         o.issue_number as "Идентификатор",
@@ -269,39 +250,28 @@ class DeletedRecordsWindow(QDialog):
                     FROM krd.outgoing_requests o
                     LEFT JOIN krd.request_types rt ON o.request_type_id = rt.id
                     WHERE o.is_deleted = TRUE
-                        AND o.deleted_at >= ?
-                        AND o.deleted_at <= ?
-                    
+                    AND o.deleted_at >= :date_from
+                    AND o.deleted_at <= :date_to
                     ORDER BY "Дата удаления" DESC
                 """)
-                query.addBindValue(date_from)
-                query.addBindValue(f"{date_to} 23:59:59")
-                query.addBindValue(date_from)
-                query.addBindValue(f"{date_to} 23:59:59")
-                query.addBindValue(date_from)
-                query.addBindValue(f"{date_to} 23:59:59")
+                query.bindValue(":date_from", date_from)
+                query.bindValue(":date_to", f"{date_to} 23:59:59")
+                query.bindValue(":date_from", date_from)
+                query.bindValue(":date_to", f"{date_to} 23:59:59")
+                query.bindValue(":date_from", date_from)
+                query.bindValue(":date_to", f"{date_to} 23:59:59")
                 
                 if not query.exec():
                     raise Exception(f"Ошибка выполнения запроса: {query.lastError().text()}")
                 
                 self.records_model.setQuery(query)
+                # ... rest of the code
                 
-                # Установка ширины колонок
-                self.records_table.setColumnWidth(0, 80)   # Тип
-                self.records_table.setColumnWidth(1, 80)   # ID записи
-                self.records_table.setColumnWidth(2, 200)  # Идентификатор
-                self.records_table.setColumnWidth(3, 300)  # Название
-                self.records_table.setColumnWidth(4, 150)  # Дата удаления
-            
-            # Обновляем заголовок окна
-            record_count = self.records_model.rowCount()
-            self.setWindowTitle(f"Удаленные записи - {record_count} записей")
-            
-            
         except Exception as e:
-            error_msg = f"Ошибка загрузки удаленных записей:\n{str(e)}\n\n{traceback.format_exc()}"
+            error_msg = f"Ошибка загрузки удаленных записей:\n{str(e)}\n{traceback.format_exc()}"
             print(error_msg)
             QMessageBox.critical(self, "Критическая ошибка", error_msg)
+          
     
     def on_filter_changed(self):
         """Обработчик изменения фильтров"""

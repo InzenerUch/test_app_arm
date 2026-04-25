@@ -1,7 +1,7 @@
 """
 Модуль для главного окна приложения
 Содержит класс MainWindow для отображения данных КРД и информации о пользователе
-С функцией выгрузки данных в Excel и поиском в реальном времени
+С функцией выгрузки данных в Excel, поиском в реальном времени и сортировкой по столбцам
 """
 
 import sys
@@ -59,6 +59,20 @@ class MainWindow(QMainWindow):
         # Переменная для хранения поискового запроса
         self.search_query = ""
         
+        # === ДЛЯ СОРТИРОВКИ ===
+        self.sort_column = 0  # Индекс столбца для сортировки
+        self.sort_order = Qt.SortOrder.DescendingOrder  # Порядок сортировки
+        self.sort_column_names = {
+            0: "k.id",  # ID
+            1: "k.id",  # Номер КРД (сортируем по ID)
+            2: "s.surname",  # Фамилия
+            3: "s.name",  # Имя
+            4: "s.patronymic",  # Отчество
+            5: "st.name",  # Статус
+            6: "k.last_service_place_id"  # ID последнего места службы
+        }
+        # ===================
+        
         # Таймер для задержки поиска (debounce)
         self.search_timer = QTimer()
         self.search_timer.setSingleShot(True)
@@ -114,9 +128,57 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
         
+        # === Меню "Справочники" (ДОСТУПНО ВСЕМ ПОЛЬЗОВАТЕЛЯМ) ===
+        ref_menu = menu_bar.addMenu("📚 Справочники")
+        
+        # Все справочники
+        all_refs_action = QAction("📋 Все справочники", self)
+        all_refs_action.setShortcut("Ctrl+R")
+        all_refs_action.triggered.connect(self.open_reference_editor)
+        ref_menu.addAction(all_refs_action)
+        
+        ref_menu.addSeparator()
+        
+        # Быстрый доступ к часто используемым справочникам
+        categories_action = QAction("Категории военнослужащих", self)
+        categories_action.triggered.connect(lambda: self.open_reference_editor("categories"))
+        ref_menu.addAction(categories_action)
+        
+        ranks_action = QAction("Воинские звания", self)
+        ranks_action.triggered.connect(lambda: self.open_reference_editor("ranks"))
+        ref_menu.addAction(ranks_action)
+        
+        statuses_action = QAction("Статусы КРД", self)
+        statuses_action.triggered.connect(lambda: self.open_reference_editor("statuses"))
+        ref_menu.addAction(statuses_action)
+        
+        ref_menu.addSeparator()
+        
+        military_units_action = QAction("Военные управления", self)
+        military_units_action.triggered.connect(lambda: self.open_reference_editor("military_units"))
+        ref_menu.addAction(military_units_action)
+        
+        garrisons_action = QAction("Гарнизоны", self)
+        garrisons_action.triggered.connect(lambda: self.open_reference_editor("garrisons"))
+        ref_menu.addAction(garrisons_action)
+        
+        positions_action = QAction("Воинские должности", self)
+        positions_action.triggered.connect(lambda: self.open_reference_editor("positions"))
+        ref_menu.addAction(positions_action)
+        
+        ref_menu.addSeparator()
+        
+        request_types_action = QAction("Типы запросов", self)
+        request_types_action.triggered.connect(lambda: self.open_reference_editor("request_types"))
+        ref_menu.addAction(request_types_action)
+        
+        initiator_types_action = QAction("Типы инициаторов", self)
+        initiator_types_action.triggered.connect(lambda: self.open_reference_editor("initiator_types"))
+        ref_menu.addAction(initiator_types_action)
+        
         # Меню "Отчеты" (только для администраторов)
         if self.user_info.get('role') == 'admin':
-            reports_menu = menu_bar.addMenu("Отчеты")
+            reports_menu = menu_bar.addMenu("📊 Отчеты")
             
             # Управление шаблонами отчетов
             templates_action = QAction("⚙️ Управление шаблонами отчетов", self)
@@ -154,27 +216,40 @@ class MainWindow(QMainWindow):
         toolbar.addAction(delete_krd_action)
         self.delete_krd_action = delete_krd_action
         
-        # === Кнопка массового экспорта по всем КРД ===
+        # === РАЗДЕЛИТЕЛЬ ===
         toolbar.addSeparator()
+        
+        # === КНОПКИ ОТЧЕТОВ И СПРАВОЧНИКОВ (в одной группе) ===
+        
+        # Кнопка массового экспорта по всем КРД
         generate_all_action = QAction("📥 Отчеты по всем КРД", self)
         generate_all_action.setToolTip("Сгенерировать отчеты по всем КРД в базе данных с выбором шаблона")
         generate_all_action.triggered.connect(self.on_generate_all_reports)
         toolbar.addAction(generate_all_action)
         
-        toolbar.addSeparator()
+        # === Кнопка справочников (ДОСТУПНО ВСЕМ ПОЛЬЗОВАТЕЛЯМ) ===
+        ref_action = QAction("📚 Справочники", self)
+        ref_action.setToolTip("Редактирование справочников системы")
+        ref_action.triggered.connect(self.open_reference_editor)
+        toolbar.addAction(ref_action)
         
+        # === Административные функции (только для администраторов) ===
         if self.user_info.get('role') == 'admin':
+            toolbar.addSeparator()
+            
             deleted_records_action = QAction("📁 Удаленные записи", self)
             deleted_records_action.triggered.connect(self.open_deleted_records_window)
             toolbar.addAction(deleted_records_action)
+            
+            user_mgmt_action = QAction("👥 Управление пользователями", self)
+            user_mgmt_action.triggered.connect(self.open_user_management)
+            toolbar.addAction(user_mgmt_action)
             
             audit_action = QAction("📋 Аудит пользователей", self)
             audit_action.triggered.connect(self.open_user_audit_window)
             toolbar.addAction(audit_action)
             
-            user_mgmt_action = QAction("👥 Управление пользователями", self)
-            user_mgmt_action.triggered.connect(self.open_user_management)
-            toolbar.addAction(user_mgmt_action)
+
     
     def create_status_bar(self):
         """Создание строки состояния"""
@@ -285,8 +360,16 @@ class MainWindow(QMainWindow):
         self.krd_table_view.setAlternatingRowColors(True)
         self.krd_table_view.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
         self.krd_table_view.setSelectionMode(QTableView.SelectionMode.SingleSelection)
+        
+        # === ВКЛЮЧАЕМ СОРТИРОВКУ ПО ЗАГОЛОВКАМ ===
         header = self.krd_table_view.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        header.setSortIndicatorShown(True)  # Показывать индикатор сортировки
+        header.setSortIndicator(self.sort_column, self.sort_order)  # Установить начальную сортировку
+        header.setSectionsClickable(True)  # Разрешить клики по заголовкам
+        header.sortIndicatorChanged.connect(self.on_sort_indicator_changed)  # Подключить сигнал
+        # ===========================================
+        
         self.krd_table_view.doubleClicked.connect(self.on_krd_double_clicked)
         
         selection_model = self.krd_table_view.selectionModel()
@@ -299,6 +382,22 @@ class MainWindow(QMainWindow):
         
         group_box.setLayout(layout)
         return group_box
+    
+    # === МЕТОД ДЛЯ ОБРАБОТКИ КЛИКА ПО ЗАГОЛОВКУ ===
+    def on_sort_indicator_changed(self, logical_index, order):
+        """
+        Обработка изменения сортировки при клике на заголовок столбца
+        
+        Args:
+            logical_index: Индекс столбца
+            order: Порядок сортировки (Ascending/Descending)
+        """
+        self.sort_column = logical_index
+        self.sort_order = order
+        
+        # Обновляем данные с новой сортировкой
+        self.load_krd_data()
+    # ===============================================
     
     def on_search_text_changed(self, text):
         """Обработка изменения текста в строке поиска"""
@@ -320,8 +419,12 @@ class MainWindow(QMainWindow):
         self.search_input.setFocus()
     
     def load_krd_data(self):
-        """Загрузка данных КРД в таблицу с учётом поиска"""
+        """Загрузка данных КРД в таблицу с учётом поиска и сортировки"""
         query = QSqlQuery(self.db)
+        
+        # Определяем поле для сортировки
+        sort_field = self.sort_column_names.get(self.sort_column, "k.id")
+        sort_order = "ASC" if self.sort_order == Qt.SortOrder.AscendingOrder else "DESC"
         
         if self.search_query:
             # Поиск по фамилии, имени, отчеству или номеру КРД
@@ -345,13 +448,27 @@ class MainWindow(QMainWindow):
                     LOWER(CONCAT('КРД-', k.id)) LIKE LOWER(:search) OR
                     LOWER(s.surname || ' ' || s.name || ' ' || s.patronymic) LIKE LOWER(:search)
                 )
-                ORDER BY k.id DESC
+                ORDER BY {sort_field} {sort_order}
             """
             query.prepare(search_query)
             query.bindValue(":search", f"%{self.search_query}%")
         else:
-            # Без поиска - все записи
-            query.prepare(self.query_table_krd)
+            # Без поиска - все записи с сортировкой
+            base_query = """SELECT
+                k.id AS "ID",
+                CONCAT('КРД-', k.id) AS "Номер КРД",
+                COALESCE(s.surname, '') AS "Фамилия",
+                COALESCE(s.name, '') AS "Имя",
+                COALESCE(s.patronymic, '') AS "Отчество",
+                COALESCE(st.name, 'Неизвестен') AS "Статус",
+                k.last_service_place_id AS "ID последнего места службы"
+            FROM krd.krd k
+            LEFT JOIN krd.social_data s ON k.id = s.krd_id
+            LEFT JOIN krd.statuses st ON k.status_id = st.id
+            WHERE k.is_deleted = FALSE
+            ORDER BY {sort_field} {sort_order}"""
+            
+            query.prepare(base_query.format(sort_field=sort_field, sort_order=sort_order))
         
         if query.exec():
             self.table_model_krd.setQuery(query)
@@ -398,7 +515,31 @@ class MainWindow(QMainWindow):
         
         menu.exec(self.krd_table_view.mapToGlobal(position))
     
+    # ========================
+    # === НОВЫЕ МЕТОДЫ ДЛЯ СПРАВОЧНИКОВ (ДОСТУПНО ВСЕМ) ===
+    # ========================
+    
+    def open_reference_editor(self, initial_table=None):
+        """
+        Открытие редактора справочников
+        ✅ ДОСТУПНО ВСЕМ ПОЛЬЗОВАТЕЛЯМ (не только администраторам)
+        
+        Args:
+            initial_table: Имя таблицы для открытия (опционально)
+        """
+        try:
+            from reference_editor_dialog import ReferenceEditorDialog
+            
+            dialog = ReferenceEditorDialog(self.db, self, initial_table)
+            dialog.exec()
+            
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Ошибка при открытии редактора справочников:\n{str(e)}")
+    
+    # ========================
     # === МЕТОДЫ ДЛЯ ГЕНЕРАЦИИ ОТЧЕТОВ ===
+    # ========================
     
     def on_generate_all_reports(self):
         """
@@ -485,7 +626,9 @@ class MainWindow(QMainWindow):
         
         dialog.exec()
     
+    # ========================
     # === СУЩЕСТВУЮЩИЕ МЕТОДЫ ===
+    # ========================
     
     def delete_selected_krd(self):
         """Удаление выбранной записи КРД с подтверждением"""

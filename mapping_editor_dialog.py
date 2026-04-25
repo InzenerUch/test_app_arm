@@ -1,7 +1,7 @@
 """
 Диалог для редактирования сопоставлений полей шаблона с данными из БД
+✅ ДОБАВЛЕНО: SearchableComboBox для поиска полей
 """
-
 import os
 import tempfile
 import json
@@ -17,7 +17,7 @@ from PyQt6.QtGui import QFont
 from docx import Document
 from composite_field_widget import CompositeFieldWidget
 from field_mapping_manager import FieldMappingManager
-
+from searchable_combo import SearchableComboBox  # ✅ ИМПОРТ НОВОГО КЛАССА
 
 # === СПРАВОЧНИК: DB колонка → Русское описание ===
 COLUMN_DESCRIPTIONS = {
@@ -55,7 +55,6 @@ COLUMN_DESCRIPTIONS = {
     "federal_search_info": "Сведения о федеральном розыске",
     "military_contacts": "Контакты военнослужащего",
     "relatives_info": "Сведения о близких родственниках",
-    
     # addresses
     "region": "📍 Субъект РФ (область, край, республика)",
     "district": "📍 Административный район",
@@ -68,7 +67,6 @@ COLUMN_DESCRIPTIONS = {
     "room": "📍 Номер комнаты",
     "check_date": "📅 Дата адресной проверки",
     "check_result": "✅ Результат проверки",
-    
     # service_places
     "place_name": "🎖️ Наименование места службы",
     "military_unit_id": "🎖️ ID военного управления",
@@ -86,7 +84,6 @@ COLUMN_DESCRIPTIONS = {
     "postal_apartment": "📮 Квартира почтового адреса",
     "postal_room": "📮 Комната почтового адреса",
     "place_contacts": "📞 Контакты места службы",
-    
     # soch_episodes
     "soch_date": "⚠️ Дата СОЧ",
     "soch_location": "⚠️ Место СОЧ",
@@ -225,6 +222,7 @@ class MappingEditorDialog(QDialog):
         
         # Кнопки сохранения и закрытия
         button_box = QDialogButtonBox()
+        
         save_btn = QPushButton("💾 Сохранить сопоставления")
         save_btn.setStyleSheet("""
             QPushButton {
@@ -259,8 +257,8 @@ class MappingEditorDialog(QDialog):
         
         button_box.addButton(save_btn, QDialogButtonBox.ButtonRole.AcceptRole)
         button_box.addButton(cancel_btn, QDialogButtonBox.ButtonRole.RejectRole)
-        
         layout.addWidget(button_box)
+        
         self.setLayout(layout)
         
         # Загрузка данных
@@ -284,6 +282,7 @@ class MappingEditorDialog(QDialog):
         var_combo.addItems(self.template_variables)
         self.mapping_table.setCellWidget(row, 0, var_combo)
         
+        # ✅ ИСПОЛЬЗУЕМ SearchableComboBox
         col_combo = self._create_db_column_combo()
         self.mapping_table.setCellWidget(row, 1, col_combo)
         
@@ -328,6 +327,7 @@ class MappingEditorDialog(QDialog):
         var_combo.setCurrentText(field_name)
         self.mapping_table.setCellWidget(row, 0, var_combo)
         
+        # ✅ ИСПОЛЬЗУЕМ SearchableComboBox
         col_combo = self._create_db_column_combo(db_column)
         self.mapping_table.setCellWidget(row, 1, col_combo)
         
@@ -348,35 +348,79 @@ class MappingEditorDialog(QDialog):
         self.mapping_table.setRowCount(0)
         self.mapping_manager.load_field_mappings(template_id)
     
-    # ==============================================
-    
     def _create_db_column_combo(self, selected_column=None):
         """Создание ComboBox с русскими описаниями полей БД"""
-        combo = QComboBox()
-        combo.setEditable(False)
-        combo.setMaxVisibleItems(50)
-        combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        combo.view().setMinimumHeight(400)
-        combo.setMinimumWidth(350)
-        combo.setMaximumWidth(600)
-        
-        all_columns = []
-        for table_name, columns in self.db_columns.items():
-            for col in columns:
-                if col in COLUMN_DESCRIPTIONS:
-                    all_columns.append((col, COLUMN_DESCRIPTIONS[col]))
-        
-        all_columns.sort(key=lambda x: x[1])
-        
-        for col_name, col_description in all_columns:
-            combo.addItem(col_description, col_name)
-        
-        if selected_column:
-            index = combo.findData(selected_column)
-            if index >= 0:
-                combo.setCurrentIndex(index)
-        
-        return combo
+        try:
+            print(f"\n{'='*60}")
+            print(f"🔧 СОЗДАНИЕ COMBOBOX ДЛЯ ПОЛЯ БД")
+            print(f"{'='*60}")
+            
+            combo = SearchableComboBox()
+            
+            if combo is None:
+                print("❌ ОШИБКА: Не удалось создать SearchableComboBox!")
+                return None
+            
+            print(f"✅ SearchableComboBox создан: {combo}")
+            print(f"   Тип: {type(combo).__name__}")
+            print(f"   Редактируемый: {combo.isEditable()}")
+            
+            combo.setMaxVisibleItems(50)
+            combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            combo.view().setMinimumHeight(400)
+            combo.setMinimumWidth(350)
+            combo.setMaximumWidth(600)
+            
+            # ✅ ИСПРАВЛЕНО: completer() — это метод в PyQt6!
+            completer = combo.completer()
+            if completer:
+                print(f"✅ Completer настроен")
+                print(f"   CaseSensitivity: {completer.caseSensitivity()}")
+                print(f"   FilterMode: {completer.filterMode()}")
+                print(f"   CompletionMode: {completer.completionMode()}")
+            else:
+                print("❌ ОШИБКА: Completer не создан!")
+            
+            all_columns = []
+            for table_name, columns in self.db_columns.items():
+                for col in columns:
+                    if col in COLUMN_DESCRIPTIONS:
+                        all_columns.append((col, COLUMN_DESCRIPTIONS[col]))
+            
+            all_columns.sort(key=lambda x: x[1])
+            
+            print(f"\n📊 Загрузка {len(all_columns)} колонок...")
+            
+            for col_name, col_description in all_columns:
+                combo.addItem(col_description, col_name)
+            
+            print(f"✅ Добавлено элементов: {combo.count()}")
+            
+            if selected_column:
+                index = combo.findData(selected_column)
+                if index >= 0:
+                    combo.setCurrentIndex(index)
+                    print(f"✅ Выбран элемент: {combo.currentText()} (data={combo.currentData()})")
+                else:
+                    print(f"⚠️ Предупреждение: Колонка '{selected_column}' не найдена")
+            
+            if combo.count() == 0:
+                print("❌ ОШИБКА: ComboBox пуст!")
+            else:
+                print(f"✅ ComboBox готов к использованию")
+            
+            print(f"{'='*60}\n")
+            return combo
+            
+        except Exception as e:
+            print(f"❌ КРИТИЧЕСКАЯ ОШИБКА при создании ComboBox: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            print("⚠️ Создаем fallback ComboBox...")
+            combo = QComboBox()
+            combo.addItem("Ошибка загрузки", None)
+            return combo
     
     def load_template_variables(self, template_id):
         """Загрузка переменных из шаблона"""
