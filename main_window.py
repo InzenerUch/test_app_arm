@@ -631,7 +631,7 @@ class MainWindow(QMainWindow):
     # ========================
     
     def delete_selected_krd(self):
-        """Удаление выбранной записи КРД с подтверждением"""
+        """Мягкое удаление выбранной записи КРД (помечает как удалённую, не удаляет из БД)"""
         selection_model = self.krd_table_view.selectionModel()
         if not selection_model.hasSelection():
             QMessageBox.warning(self, "Внимание", "Выберите КРД для удаления")
@@ -658,13 +658,15 @@ class MainWindow(QMainWindow):
             f"Вы действительно хотите удалить КРД?\n\n"
             f"Номер КРД: {krd_number}\n"
             f"Военнослужащий: {full_name}\n\n"
-            f"⚠️ Внимание: Все связанные данные будут удалены безвозвратно!",
+            f"⚠️ Внимание: Запись будет скрыта из списка, но сохранена в базе данных.\n"
+            f"Восстановить можно через меню '📁 Удаленные записи' (только для администраторов).",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
         
         if reply == QMessageBox.StandardButton.Yes:
             try:
+                # ✅ СОХРАНЯЕМ СТАРЫЕ ДАННЫЕ ДЛЯ АУДИТА
                 query_data = QSqlQuery(self.db)
                 query_data.prepare("SELECT s.* FROM krd.social_data s WHERE s.krd_id = ?")
                 query_data.addBindValue(krd_id)
@@ -679,19 +681,37 @@ class MainWindow(QMainWindow):
                 if not self.db.transaction():
                     raise Exception(f"Не удалось начать транзакцию: {self.db.lastError().text()}")
                 
+                # ✅ ИСПРАВЛЕНО: МЯГКОЕ УДАЛЕНИЕ (UPDATE вместо DELETE)
                 query = QSqlQuery(self.db)
-                query.prepare("DELETE FROM krd.krd WHERE id = ?")
-                query.addBindValue(krd_id)
+                query.prepare("""
+                    UPDATE krd.krd 
+                    SET is_deleted = TRUE, 
+                        deleted_at = CURRENT_TIMESTAMP,
+                        deleted_by = :user_id
+                    WHERE id = :id
+                """)
+                query.bindValue(":user_id", self.user_info.get('id'))
+                query.bindValue(":id", krd_id)
                 
                 if not query.exec():
                     raise Exception(f"Ошибка при удалении КРД: {query.lastError().text()}")
                 
+                if query.numRowsAffected() == 0:
+                    raise Exception("Запись не найдена или уже удалена")
+                
                 if not self.db.commit():
                     raise Exception(f"Ошибка при коммите транзакции: {self.db.lastError().text()}")
                 
+                # ✅ ЛОГИРОВАНИЕ МЯГКОГО УДАЛЕНИЯ
                 self.audit_logger.log_krd_delete(krd_id, old_data)
                 
-                QMessageBox.information(self, "Успех", f"КРД №{krd_number} успешно удален!")
+                QMessageBox.information(
+                    self, 
+                    "Успех", 
+                    f"✅ КРД №{krd_number} успешно скрыт!\n\n"
+                    f"Запись сохранена в базе данных.\n"
+                    f"Восстановить можно через меню администратора '📁 Удаленные записи'."
+                )
                 self.load_krd_data()
                 
             except Exception as e:

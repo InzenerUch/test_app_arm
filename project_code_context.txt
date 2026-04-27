@@ -5,326 +5,1027 @@
 ========================================
 
 """
-Модуль для окна добавления новой КРД и социальных данных
+Модуль для окна добавления новой КРД со всеми связанными данными
+✅ ИСПОЛЬЗУЕТ ВКЛАДКИ как в KrdDetailsWindow
+✅ Позволяет заполнить всю информацию сразу
 """
-
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QFormLayout, QHBoxLayout, 
-    QLineEdit, QTextEdit, QDateEdit, QSpinBox, 
-    QPushButton, QMessageBox, QGroupBox, QComboBox,
-    QScrollArea, QWidget
+    QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox, QTabWidget,
+    QLabel, QGroupBox, QScrollArea, QWidget, QGridLayout, QLineEdit, 
+    QTextEdit, QDateEdit, QComboBox, QFileDialog
 )
-from PyQt6.QtCore import Qt, QDate
+from PyQt6.QtCore import Qt, QDate, QByteArray
+from PyQt6.QtGui import QFont, QPixmap
 from PyQt6.QtSql import QSqlQuery
+import os
+import traceback
+
+# Импорт всех вкладок
+from social_data_tab import SocialDataTab
+from addresses_tab import AddressesTab
+from service_places_tab import ServicePlacesTab
+from incoming_orders_tab import IncomingOrdersTab
+from soch_episodes_tab import SochEpisodesTab
 
 
 class AddKrdWindow(QDialog):
     """
-    Окно для добавления новой КРД и социальных данных
+    Окно для добавления новой КРД со всеми связанными данными
     """
     
-    def __init__(self, db_connection):
-        """
-        Инициализация окна добавления КРД
-        
-        Args:
-            db_connection: соединение с базой данных
-        """
+    def __init__(self, db_connection, audit_logger=None):
         super().__init__()
         self.db = db_connection
+        self.audit_logger = audit_logger
+        self.krd_id = None  # Будет установлен после создания КРД
         
-        self.setWindowTitle("Добавить новую КРД")
+        self.setWindowTitle("➕ Добавление новой карточки розыска (КРД)")
         self.setModal(True)
-        self.resize(650, 500)  # Уменьшили начальный размер
+        self.resize(1200, 800)
         
         self.init_ui()
     
     def init_ui(self):
-        """
-        Инициализация пользовательского интерфейса
-        """
+        """Инициализация пользовательского интерфейса"""
         main_layout = QVBoxLayout()
+        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(20, 20, 20, 20)
         
-        # Создаем область прокрутки
-        scroll_area = QScrollArea()
-        scroll_area.setWidgetResizable(True)  # Позволяет содержимому растягиваться
+        # Заголовок
+        title_label = QLabel("➕ Добавление новой карточки розыска")
+        title_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        title_label.setStyleSheet("QLabel { padding: 10px; background-color: #E3F2FD; border-radius: 5px; }")
+        main_layout.addWidget(title_label)
         
-        # Создаем центральный виджет для области прокрутки
-        scroll_widget = QWidget()
-        scroll_layout = QVBoxLayout(scroll_widget)
+        # Информация
+        info_label = QLabel("💡 Заполните все необходимые данные. Поля со знаком * обязательны для заполнения.")
+        info_label.setStyleSheet("QLabel { color: #666; padding: 8px; background-color: #f0f0f0; border-radius: 5px; }")
+        info_label.setWordWrap(True)
+        main_layout.addWidget(info_label)
         
-        # Создаем форму для ввода данных
-        form_layout = QFormLayout()
+        # Создаем вкладки
+        tabs = QTabWidget()
         
-        # Обязательные поля
-        self.surname_input = QLineEdit()
-        self.name_input = QLineEdit()
-        self.patronymic_input = QLineEdit()
+        # Вкладка 1: Социально-демографические данные
+        self.social_data_tab = SocialDataTabForAdd(self.db)
+        tabs.addTab(self.social_data_tab, "📋 Социально-демографические данные")
         
-        # Добавляем обязательные поля в форму
-        form_layout.addRow("Фамилия*:", self.surname_input)
-        form_layout.addRow("Имя*:", self.name_input)
-        form_layout.addRow("Отчество*:", self.patronymic_input)
+        # Вкладка 2: Адреса проживания
+        self.addresses_tab = AddressesTabForAdd(self.db)
+        tabs.addTab(self.addresses_tab, "🏠 Адреса проживания")
         
-        # Дополнительные поля социальных данных
-        self.birth_date_input = QDateEdit()
-        self.birth_date_input.setDate(QDate.currentDate())
-        self.birth_date_input.setCalendarPopup(True)
+        # Вкладка 3: Места службы
+        self.service_places_tab = ServicePlacesTabForAdd(self.db)
+        tabs.addTab(self.service_places_tab, "🎖️ Места службы")
         
-        self.birth_place_town_input = QLineEdit()
-        self.birth_place_district_input = QLineEdit()
-        self.birth_place_region_input = QLineEdit()
-        self.birth_place_country_input = QLineEdit()
+        # Вкладка 4: Входящие поручения
+        self.incoming_orders_tab = IncomingOrdersTabForAdd(self.db)
+        tabs.addTab(self.incoming_orders_tab, "📬 Входящие поручения")
         
-        self.tab_number_input = QLineEdit()
-        self.personal_number_input = QLineEdit()
+        # Вкладка 5: Эпизоды СОЧ
+        self.soch_episodes_tab = SochEpisodesTabForAdd(self.db)
+        tabs.addTab(self.soch_episodes_tab, "⚠️ Эпизоды СОЧ")
         
-        # Выпадающий список для категории
-        self.category_combo = QComboBox()
-        self.load_categories()
+        main_layout.addWidget(tabs, 1)
         
-        # Выпадающий список для звания
-        self.rank_combo = QComboBox()
-        self.load_ranks()
-        
-        self.drafted_by_commissariat_input = QLineEdit()
-        self.draft_date_input = QDateEdit()
-        self.draft_date_input.setDate(QDate.currentDate())
-        self.draft_date_input.setCalendarPopup(True)
-        
-        self.povsk_input = QLineEdit()
-        self.selection_date_input = QDateEdit()
-        self.selection_date_input.setDate(QDate.currentDate())
-        self.selection_date_input.setCalendarPopup(True)
-        
-        self.education_input = QLineEdit()
-        self.criminal_record_input = QTextEdit()
-        self.social_media_account_input = QLineEdit()
-        self.bank_card_number_input = QLineEdit()
-        
-        # Паспортные данные
-        self.passport_series_input = QLineEdit()
-        self.passport_number_input = QLineEdit()
-        self.passport_issue_date_input = QDateEdit()
-        self.passport_issue_date_input.setDate(QDate.currentDate())
-        self.passport_issue_date_input.setCalendarPopup(True)
-        self.passport_issued_by_input = QLineEdit()
-        
-        # Военный билет
-        self.military_id_series_input = QLineEdit()
-        self.military_id_number_input = QLineEdit()
-        self.military_id_issue_date_input = QDateEdit()
-        self.military_id_issue_date_input.setDate(QDate.currentDate())
-        self.military_id_issue_date_input.setCalendarPopup(True)
-        self.military_id_issued_by_input = QLineEdit()
-        
-        # Внешность
-        self.appearance_features_input = QTextEdit()
-        self.personal_marks_input = QTextEdit()
-        self.federal_search_info_input = QTextEdit()
-        self.military_contacts_input = QLineEdit()
-        self.relatives_info_input = QTextEdit()
-        
-        # Добавляем дополнительные поля в форму
-        form_layout.addRow("Дата рождения:", self.birth_date_input)
-        form_layout.addRow("Место рождения (город):", self.birth_place_town_input)
-        form_layout.addRow("Место рождения (район):", self.birth_place_district_input)
-        form_layout.addRow("Место рождения (регион):", self.birth_place_region_input)
-        form_layout.addRow("Место рождения (страна):", self.birth_place_country_input)
-        form_layout.addRow("Табельный номер:", self.tab_number_input)
-        form_layout.addRow("Личный номер:", self.personal_number_input)
-        form_layout.addRow("Категория:", self.category_combo)
-        form_layout.addRow("Воинское звание:", self.rank_combo)
-        form_layout.addRow("Призван военкоматом:", self.drafted_by_commissariat_input)
-        form_layout.addRow("Дата призыва:", self.draft_date_input)
-        form_layout.addRow("ПВО/ПВС:", self.povsk_input)
-        form_layout.addRow("Дата отбора:", self.selection_date_input)
-        form_layout.addRow("Образование:", self.education_input)
-        form_layout.addRow("Судимость:", self.criminal_record_input)
-        form_layout.addRow("Соцсети:", self.social_media_account_input)
-        form_layout.addRow("Банковская карта:", self.bank_card_number_input)
-        form_layout.addRow("Серия паспорта:", self.passport_series_input)
-        form_layout.addRow("Номер паспорта:", self.passport_number_input)
-        form_layout.addRow("Дата выдачи паспорта:", self.passport_issue_date_input)
-        form_layout.addRow("Кем выдан паспорт:", self.passport_issued_by_input)
-        form_layout.addRow("Серия воен. билета:", self.military_id_series_input)
-        form_layout.addRow("Номер воен. билета:", self.military_id_number_input)
-        form_layout.addRow("Дата выдачи воен. билета:", self.military_id_issue_date_input)
-        form_layout.addRow("Кем выдан воен. билет:", self.military_id_issued_by_input)
-        form_layout.addRow("Особенности внешности:", self.appearance_features_input)
-        form_layout.addRow("Особые приметы:", self.personal_marks_input)
-        form_layout.addRow("Инф. о федеральном розыске:", self.federal_search_info_input)
-        form_layout.addRow("Военные контакты:", self.military_contacts_input)
-        form_layout.addRow("Информация о родных:", self.relatives_info_input)
-        
-        scroll_layout.addLayout(form_layout)
-        
-        # Устанавливаем виджет в область прокрутки
-        scroll_area.setWidget(scroll_widget)
-        
-        main_layout.addWidget(scroll_area)
-        
-        # Кнопки
+        # Кнопки внизу
         button_layout = QHBoxLayout()
+        button_layout.setSpacing(10)
         
-        save_button = QPushButton("Сохранить")
+        save_button = QPushButton("💾 Создать КРД")
+        save_button.setMinimumHeight(50)
+        save_button.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                font-weight: bold;
+                font-size: 14px;
+                border-radius: 5px;
+                padding: 15px 30px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
         save_button.clicked.connect(self.save_krd)
-        
-        cancel_button = QPushButton("Отмена")
-        cancel_button.clicked.connect(self.reject)
-        
         button_layout.addWidget(save_button)
+        
+        cancel_button = QPushButton("❌ Отмена")
+        cancel_button.setMinimumHeight(50)
+        cancel_button.setStyleSheet("""
+            QPushButton {
+                background-color: #f44336;
+                color: white;
+                font-weight: bold;
+                font-size: 14px;
+                border-radius: 5px;
+                padding: 15px 30px;
+            }
+            QPushButton:hover {
+                background-color: #da190b;
+            }
+        """)
+        cancel_button.clicked.connect(self.reject)
         button_layout.addWidget(cancel_button)
         
         main_layout.addLayout(button_layout)
-        
         self.setLayout(main_layout)
     
-    def load_categories(self):
-        """
-        Загрузка категорий из базы данных
-        """
-        query = QSqlQuery(self.db)
-        query.exec("SELECT id, name FROM krd.categories ORDER BY name")
-        
-        while query.next():
-            category_id = query.value(0)
-            category_name = query.value(1)
-            self.category_combo.addItem(category_name, category_id)
-    
-    def load_ranks(self):
-        """
-        Загрузка воинских званий из базы данных
-        """
-        query = QSqlQuery(self.db)
-        query.exec("SELECT id, name FROM krd.ranks ORDER BY name")
-        
-        while query.next():
-            rank_id = query.value(0)
-            rank_name = query.value(1)
-            self.rank_combo.addItem(rank_name, rank_id)
-    
     def save_krd(self):
-        """
-        Сохранение новой КРД и социальных данных
-        """
+        """Сохранение новой КРД со всеми связанными данными"""
         # Проверяем обязательные поля
-        if not self.validate_inputs():
+        if not self.social_data_tab.validate_required_fields():
+            QMessageBox.warning(
+                self, 
+                "Ошибка валидации", 
+                "Заполните обязательные поля (Фамилия, Имя, Отчество)!"
+            )
+            return
+        
+        # Подтверждение
+        reply = QMessageBox.question(
+            self,
+            "Подтверждение создания",
+            "Вы действительно хотите создать новую карточку розыска?\n\n"
+            "Будут сохранены:\n"
+            "• Социально-демографические данные\n"
+            f"• Адреса проживания: {len(self.addresses_tab.get_data())}\n"
+            f"• Места службы: {len(self.service_places_tab.get_data())}\n"
+            f"• Входящие поручения: {len(self.incoming_orders_tab.get_data())}\n"
+            f"• Эпизоды СОЧ: {len(self.soch_episodes_tab.get_data())}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes
+        )
+        
+        if reply != QMessageBox.StandardButton.Yes:
             return
         
         try:
             # Начинаем транзакцию
-            self.db.transaction()
+            if not self.db.transaction():
+                raise Exception(f"Не удалось начать транзакцию: {self.db.lastError().text()}")
             
-            # Создаем новую запись в таблице krd
+            # 1. Создаём запись в таблице krd
             krd_query = QSqlQuery(self.db)
             krd_query.prepare("INSERT INTO krd.krd DEFAULT VALUES RETURNING id")
-            krd_query.exec()
+            
+            if not krd_query.exec():
+                raise Exception(f"Ошибка создания КРД: {krd_query.lastError().text()}")
             
             if not krd_query.next():
-                raise Exception("Не удалось создать новую КРД")
+                raise Exception("Не удалось получить ID новой КРД")
             
-            krd_id = krd_query.value(0)
+            self.krd_id = krd_query.value(0)
+            print(f"✅ Создана КРД с ID: {self.krd_id}")
             
-            # Создаем запись в таблице social_data
+            # 2. Сохраняем социально-демографические данные
+            social_data = self.social_data_tab.get_data()
+            social_data['krd_id'] = self.krd_id
+            
             social_query = QSqlQuery(self.db)
             social_query.prepare("""
                 INSERT INTO krd.social_data (
-                    krd_id, surname, name, patronymic, birth_date, 
+                    krd_id, surname, name, patronymic, birth_date,
                     birth_place_town, birth_place_district, birth_place_region, birth_place_country,
                     tab_number, personal_number, category_id, rank_id,
                     drafted_by_commissariat, draft_date, povsk, selection_date,
                     education, criminal_record, social_media_account, bank_card_number,
                     passport_series, passport_number, passport_issue_date, passport_issued_by,
                     military_id_series, military_id_number, military_id_issue_date, military_id_issued_by,
-                    appearance_features, personal_marks, federal_search_info, military_contacts, relatives_info
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    appearance_features, personal_marks, federal_search_info, military_contacts, relatives_info,
+                    photo_civilian, photo_military_headgear, photo_military_no_headgear, photo_distinctive_marks
+                ) VALUES (
+                    :krd_id, :surname, :name, :patronymic, :birth_date,
+                    :birth_place_town, :birth_place_district, :birth_place_region, :birth_place_country,
+                    :tab_number, :personal_number, :category_id, :rank_id,
+                    :drafted_by_commissariat, :draft_date, :povsk, :selection_date,
+                    :education, :criminal_record, :social_media_account, :bank_card_number,
+                    :passport_series, :passport_number, :passport_issue_date, :passport_issued_by,
+                    :military_id_series, :military_id_number, :military_id_issue_date, :military_id_issued_by,
+                    :appearance_features, :personal_marks, :federal_search_info, :military_contacts, :relatives_info,
+                    :photo_civilian, :photo_military_headgear, :photo_military_no_headgear, :photo_distinctive_marks
+                )
             """)
             
-            # Привязываем значения
-            social_query.addBindValue(krd_id)
-            social_query.addBindValue(self.surname_input.text().strip())
-            social_query.addBindValue(self.name_input.text().strip())
-            social_query.addBindValue(self.patronymic_input.text().strip())
-            social_query.addBindValue(self.birth_date_input.date())
-            
-            social_query.addBindValue(self.birth_place_town_input.text().strip())
-            social_query.addBindValue(self.birth_place_district_input.text().strip())
-            social_query.addBindValue(self.birth_place_region_input.text().strip())
-            social_query.addBindValue(self.birth_place_country_input.text().strip())
-            
-            social_query.addBindValue(self.tab_number_input.text().strip())
-            social_query.addBindValue(self.personal_number_input.text().strip())
-            
-            # Получаем ID выбранной категории и звания
-            category_id = self.category_combo.currentData()
-            rank_id = self.rank_combo.currentData()
-            
-            social_query.addBindValue(category_id if category_id is not None else None)
-            social_query.addBindValue(rank_id if rank_id is not None else None)
-            
-            social_query.addBindValue(self.drafted_by_commissariat_input.text().strip())
-            social_query.addBindValue(self.draft_date_input.date())
-            social_query.addBindValue(self.povsk_input.text().strip())
-            social_query.addBindValue(self.selection_date_input.date())
-            
-            social_query.addBindValue(self.education_input.text().strip())
-            social_query.addBindValue(self.criminal_record_input.toPlainText())
-            social_query.addBindValue(self.social_media_account_input.text().strip())
-            social_query.addBindValue(self.bank_card_number_input.text().strip())
-            
-            social_query.addBindValue(self.passport_series_input.text().strip())
-            social_query.addBindValue(self.passport_number_input.text().strip())
-            social_query.addBindValue(self.passport_issue_date_input.date())
-            social_query.addBindValue(self.passport_issued_by_input.text().strip())
-            
-            social_query.addBindValue(self.military_id_series_input.text().strip())
-            social_query.addBindValue(self.military_id_number_input.text().strip())
-            social_query.addBindValue(self.military_id_issue_date_input.date())
-            social_query.addBindValue(self.military_id_issued_by_input.text().strip())
-            
-            social_query.addBindValue(self.appearance_features_input.toPlainText())
-            social_query.addBindValue(self.personal_marks_input.toPlainText())
-            social_query.addBindValue(self.federal_search_info_input.toPlainText())
-            social_query.addBindValue(self.military_contacts_input.text().strip())
-            social_query.addBindValue(self.relatives_info_input.toPlainText())
+            for key, value in social_data.items():
+                social_query.bindValue(f":{key}", value)
             
             if not social_query.exec():
-                raise Exception(f"Ошибка при сохранении социальных данных: {social_query.lastError().text()}")
+                raise Exception(f"Ошибка сохранения социальных данных: {social_query.lastError().text()}")
             
-            # Фиксируем транзакцию
-            self.db.commit()
+            print(f"✅ Сохранены социальные данные")
             
-            QMessageBox.information(self, "Успех", f"Новая КРД создана с ID: {krd_id}")
+            # 3. Сохраняем адреса проживания
+            addresses = self.addresses_tab.get_data()
+            for addr in addresses:
+                addr['krd_id'] = self.krd_id
+                self._save_address(addr)
             
-            # Закрываем окно
+            print(f"✅ Сохранено адресов: {len(addresses)}")
+            
+            # 4. Сохраняем места службы
+            service_places = self.service_places_tab.get_data()
+            for sp in service_places:
+                sp['krd_id'] = self.krd_id
+                self._save_service_place(sp)
+            
+            print(f"✅ Сохранено мест службы: {len(service_places)}")
+            
+            # 5. Сохраняем входящие поручения
+            incoming_orders = self.incoming_orders_tab.get_data()
+            for order in incoming_orders:
+                order['krd_id'] = self.krd_id
+                self._save_incoming_order(order)
+            
+            print(f"✅ Сохранено входящих поручений: {len(incoming_orders)}")
+            
+            # 6. Сохраняем эпизоды СОЧ
+            soch_episodes = self.soch_episodes_tab.get_data()
+            for episode in soch_episodes:
+                episode['krd_id'] = self.krd_id
+                self._save_soch_episode(episode)
+            
+            print(f"✅ Сохранено эпизодов СОЧ: {len(soch_episodes)}")
+            
+            # Коммит транзакции
+            if not self.db.commit():
+                raise Exception(f"Ошибка коммита транзакции: {self.db.lastError().text()}")
+            
+            # Логирование
+            if self.audit_logger:
+                self.audit_logger.log_krd_create(self.krd_id, {
+                    'surname': social_data.get('surname'),
+                    'name': social_data.get('name'),
+                    'patronymic': social_data.get('patronymic')
+                })
+            
+            QMessageBox.information(
+                self,
+                "Успех",
+                f"✅ Карточка розыска успешно создана!\n\n"
+                f"ID КРД: {self.krd_id}\n"
+                f"Военнослужащий: {social_data.get('surname')} {social_data.get('name')} {social_data.get('patronymic')}\n\n"
+                f"Сохранено данных:\n"
+                f"• Адресов: {len(addresses)}\n"
+                f"• Мест службы: {len(service_places)}\n"
+                f"• Входящих поручений: {len(incoming_orders)}\n"
+                f"• Эпизодов СОЧ: {len(soch_episodes)}"
+            )
+            
             self.accept()
             
         except Exception as e:
-            # Откатываем транзакцию в случае ошибки
+            # Откат транзакции
             self.db.rollback()
-            QMessageBox.critical(self, "Ошибка", f"Ошибка при сохранении данных:\n{str(e)}")
+            print(f"❌ Ошибка: {e}")
+            traceback.print_exc()
+            QMessageBox.critical(
+                self,
+                "Ошибка",
+                f"Ошибка при создании КРД:\n{str(e)}"
+            )
     
-    def validate_inputs(self):
-        """
-        Проверка обязательных полей
-        """
+    def _save_address(self, addr_data):
+        """Сохранение адреса проживания"""
+        query = QSqlQuery(self.db)
+        query.prepare("""
+            INSERT INTO krd.addresses (
+                krd_id, region, district, town, street, house, building,
+                letter, apartment, room, check_date, check_result
+            ) VALUES (
+                :krd_id, :region, :district, :town, :street, :house, :building,
+                :letter, :apartment, :room, :check_date, :check_result
+            )
+        """)
+        
+        for key, value in addr_data.items():
+            query.bindValue(f":{key}", value)
+        
+        if not query.exec():
+            raise Exception(f"Ошибка сохранения адреса: {query.lastError().text()}")
+    
+    def _save_service_place(self, sp_data):
+        """Сохранение места службы"""
+        query = QSqlQuery(self.db)
+        query.prepare("""
+            INSERT INTO krd.service_places (
+                krd_id, place_name, military_unit_id, garrison_id, position_id,
+                commanders, postal_index, postal_region, postal_district, postal_town,
+                postal_street, postal_house, postal_building, postal_letter,
+                postal_apartment, postal_room, place_contacts
+            ) VALUES (
+                :krd_id, :place_name, :military_unit_id, :garrison_id, :position_id,
+                :commanders, :postal_index, :postal_region, :postal_district, :postal_town,
+                :postal_street, :postal_house, :postal_building, :postal_letter,
+                :postal_apartment, :postal_room, :place_contacts
+            )
+        """)
+        
+        for key, value in sp_data.items():
+            query.bindValue(f":{key}", value)
+        
+        if not query.exec():
+            raise Exception(f"Ошибка сохранения места службы: {query.lastError().text()}")
+    
+    def _save_incoming_order(self, order_data):
+        """Сохранение входящего поручения"""
+        query = QSqlQuery(self.db)
+        query.prepare("""
+            INSERT INTO krd.incoming_orders (
+                krd_id, initiator_type_id, initiator_full_name, military_unit_id,
+                order_date, order_number, receipt_date, receipt_number,
+                postal_index, postal_region, postal_district, postal_town,
+                postal_street, postal_house, postal_building, postal_letter,
+                postal_apartment, postal_room, initiator_contacts,
+                our_response_date, our_response_number
+            ) VALUES (
+                :krd_id, :initiator_type_id, :initiator_full_name, :military_unit_id,
+                :order_date, :order_number, :receipt_date, :receipt_number,
+                :postal_index, :postal_region, :postal_district, :postal_town,
+                :postal_street, :postal_house, :postal_building, :postal_letter,
+                :postal_apartment, :postal_room, :initiator_contacts,
+                :our_response_date, :our_response_number
+            )
+        """)
+        
+        for key, value in order_data.items():
+            query.bindValue(f":{key}", value)
+        
+        if not query.exec():
+            raise Exception(f"Ошибка сохранения поручения: {query.lastError().text()}")
+    
+    def _save_soch_episode(self, episode_data):
+        """Сохранение эпизода СОЧ"""
+        query = QSqlQuery(self.db)
+        query.prepare("""
+            INSERT INTO krd.soch_episodes (
+                krd_id, soch_date, soch_location, order_date_number, witnesses,
+                reasons, weapon_info, clothing, movement_options, other_info,
+                duty_officer_commissariat, duty_officer_omvd, investigation_info,
+                prosecution_info, criminal_case_info, search_date, found_by,
+                search_circumstances, notification_recipient, notification_date,
+                notification_number
+            ) VALUES (
+                :krd_id, :soch_date, :soch_location, :order_date_number, :witnesses,
+                :reasons, :weapon_info, :clothing, :movement_options, :other_info,
+                :duty_officer_commissariat, :duty_officer_omvd, :investigation_info,
+                :prosecution_info, :criminal_case_info, :search_date, :found_by,
+                :search_circumstances, :notification_recipient, :notification_date,
+                :notification_number
+            )
+        """)
+        
+        for key, value in episode_data.items():
+            query.bindValue(f":{key}", value)
+        
+        if not query.exec():
+            raise Exception(f"Ошибка сохранения эпизода СОЧ: {query.lastError().text()}")
+
+
+# ============================================================================
+# ВКЛАДКИ ДЛЯ ДОБАВЛЕНИЯ (упрощённые версии без загрузки данных)
+# ============================================================================
+
+class SocialDataTabForAdd(QWidget):
+    """Вкладка социальных данных для добавления"""
+    
+    def __init__(self, db_connection):
+        super().__init__()
+        self.db = db_connection
+        self.photo_paths = {}
+        self.init_ui()
+        self.load_combo_data()
+    
+    def init_ui(self):
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setSpacing(15)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        # Группа 1: Основные данные
+        group1 = QGroupBox("Основные данные (поля со знаком * обязательны)")
+        group1.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        group1_layout = QGridLayout()
+        group1_layout.setSpacing(8)
+        
+        self.surname_input = QLineEdit()
+        self.surname_input.setPlaceholderText("Введите фамилию")
+        group1_layout.addWidget(QLabel("Фамилия *:"), 0, 0)
+        group1_layout.addWidget(self.surname_input, 0, 1)
+        
+        self.name_input = QLineEdit()
+        self.name_input.setPlaceholderText("Введите имя")
+        group1_layout.addWidget(QLabel("Имя *:"), 0, 2)
+        group1_layout.addWidget(self.name_input, 0, 3)
+        
+        self.patronymic_input = QLineEdit()
+        self.patronymic_input.setPlaceholderText("Введите отчество")
+        group1_layout.addWidget(QLabel("Отчество *:"), 0, 4)
+        group1_layout.addWidget(self.patronymic_input, 0, 5)
+        
+        self.tab_number_input = QLineEdit()
+        group1_layout.addWidget(QLabel("Табельный номер:"), 1, 0)
+        group1_layout.addWidget(self.tab_number_input, 1, 1)
+        
+        self.personal_number_input = QLineEdit()
+        group1_layout.addWidget(QLabel("Личный номер:"), 1, 2)
+        group1_layout.addWidget(self.personal_number_input, 1, 3)
+        
+        self.category_combo = QComboBox()
+        group1_layout.addWidget(QLabel("Категория:"), 2, 0)
+        group1_layout.addWidget(self.category_combo, 2, 1)
+        
+        self.rank_combo = QComboBox()
+        group1_layout.addWidget(QLabel("Воинское звание:"), 2, 2)
+        group1_layout.addWidget(self.rank_combo, 2, 3)
+        
+        group1.setLayout(group1_layout)
+        layout.addWidget(group1)
+        
+        # Группа 2: Место рождения
+        group2 = QGroupBox("Место рождения")
+        group2.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        group2_layout = QGridLayout()
+        group2_layout.setSpacing(8)
+        
+        self.birth_place_town_input = QLineEdit()
+        group2_layout.addWidget(QLabel("Населенный пункт:"), 0, 0)
+        group2_layout.addWidget(self.birth_place_town_input, 0, 1)
+        
+        self.birth_place_district_input = QLineEdit()
+        group2_layout.addWidget(QLabel("Район:"), 0, 2)
+        group2_layout.addWidget(self.birth_place_district_input, 0, 3)
+        
+        self.birth_place_region_input = QLineEdit()
+        group2_layout.addWidget(QLabel("Субъект (регион):"), 1, 0)
+        group2_layout.addWidget(self.birth_place_region_input, 1, 1)
+        
+        self.birth_place_country_input = QLineEdit()
+        group2_layout.addWidget(QLabel("Страна:"), 1, 2)
+        group2_layout.addWidget(self.birth_place_country_input, 1, 3)
+        
+        self.birth_date_input = QDateEdit()
+        self.birth_date_input.setCalendarPopup(True)
+        self.birth_date_input.setDate(QDate.currentDate())
+        group2_layout.addWidget(QLabel("Дата рождения:"), 2, 0)
+        group2_layout.addWidget(self.birth_date_input, 2, 1)
+        
+        group2.setLayout(group2_layout)
+        layout.addWidget(group2)
+        
+        # Группа 3: Призыв
+        group3 = QGroupBox("Призыв")
+        group3.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        group3_layout = QGridLayout()
+        group3_layout.setSpacing(8)
+        
+        self.drafted_by_commissariat_input = QLineEdit()
+        group3_layout.addWidget(QLabel("Каким комиссариатом призван:"), 0, 0)
+        group3_layout.addWidget(self.drafted_by_commissariat_input, 0, 1, 1, 3)
+        
+        self.draft_date_input = QDateEdit()
+        self.draft_date_input.setCalendarPopup(True)
+        self.draft_date_input.setDate(QDate.currentDate())
+        group3_layout.addWidget(QLabel("Дата призыва:"), 1, 0)
+        group3_layout.addWidget(self.draft_date_input, 1, 1)
+        
+        self.povsk_input = QLineEdit()
+        group3_layout.addWidget(QLabel("ПВО/ПВС:"), 1, 2)
+        group3_layout.addWidget(self.povsk_input, 1, 3)
+        
+        self.selection_date_input = QDateEdit()
+        self.selection_date_input.setCalendarPopup(True)
+        self.selection_date_input.setDate(QDate.currentDate())
+        group3_layout.addWidget(QLabel("Дата отбора:"), 2, 0)
+        group3_layout.addWidget(self.selection_date_input, 2, 1)
+        
+        group3.setLayout(group3_layout)
+        layout.addWidget(group3)
+        
+        # Группа 4: Паспортные данные
+        group4 = QGroupBox("Паспортные данные")
+        group4.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        group4_layout = QGridLayout()
+        group4_layout.setSpacing(8)
+        
+        self.passport_series_input = QLineEdit()
+        group4_layout.addWidget(QLabel("Серия паспорта:"), 0, 0)
+        group4_layout.addWidget(self.passport_series_input, 0, 1)
+        
+        self.passport_number_input = QLineEdit()
+        group4_layout.addWidget(QLabel("Номер паспорта:"), 0, 2)
+        group4_layout.addWidget(self.passport_number_input, 0, 3)
+        
+        self.passport_issue_date_input = QDateEdit()
+        self.passport_issue_date_input.setCalendarPopup(True)
+        self.passport_issue_date_input.setDate(QDate.currentDate())
+        group4_layout.addWidget(QLabel("Дата выдачи:"), 1, 0)
+        group4_layout.addWidget(self.passport_issue_date_input, 1, 1)
+        
+        self.passport_issued_by_input = QLineEdit()
+        group4_layout.addWidget(QLabel("Кем выдан:"), 1, 2)
+        group4_layout.addWidget(self.passport_issued_by_input, 1, 3)
+        
+        group4.setLayout(group4_layout)
+        layout.addWidget(group4)
+        
+        # Группа 5: Военный билет
+        group5 = QGroupBox("Военный билет")
+        group5.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        group5_layout = QGridLayout()
+        group5_layout.setSpacing(8)
+        
+        self.military_id_series_input = QLineEdit()
+        group5_layout.addWidget(QLabel("Серия:"), 0, 0)
+        group5_layout.addWidget(self.military_id_series_input, 0, 1)
+        
+        self.military_id_number_input = QLineEdit()
+        group5_layout.addWidget(QLabel("Номер:"), 0, 2)
+        group5_layout.addWidget(self.military_id_number_input, 0, 3)
+        
+        self.military_id_issue_date_input = QDateEdit()
+        self.military_id_issue_date_input.setCalendarPopup(True)
+        self.military_id_issue_date_input.setDate(QDate.currentDate())
+        group5_layout.addWidget(QLabel("Дата выдачи:"), 1, 0)
+        group5_layout.addWidget(self.military_id_issue_date_input, 1, 1)
+        
+        self.military_id_issued_by_input = QLineEdit()
+        group5_layout.addWidget(QLabel("Кем выдан:"), 1, 2)
+        group5_layout.addWidget(self.military_id_issued_by_input, 1, 3)
+        
+        group5.setLayout(group5_layout)
+        layout.addWidget(group5)
+        
+        # Группа 6: Дополнительно
+        group6 = QGroupBox("Дополнительная информация")
+        group6.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        group6_layout = QGridLayout()
+        group6_layout.setSpacing(8)
+        
+        self.education_input = QLineEdit()
+        group6_layout.addWidget(QLabel("Образование:"), 0, 0)
+        group6_layout.addWidget(self.education_input, 0, 1, 1, 3)
+        
+        self.criminal_record_input = QTextEdit()
+        self.criminal_record_input.setMaximumHeight(60)
+        group6_layout.addWidget(QLabel("Судимость:"), 1, 0)
+        group6_layout.addWidget(self.criminal_record_input, 1, 1, 1, 3)
+        
+        self.appearance_features_input = QTextEdit()
+        self.appearance_features_input.setMaximumHeight(60)
+        group6_layout.addWidget(QLabel("Особенности внешности:"), 2, 0)
+        group6_layout.addWidget(self.appearance_features_input, 2, 1, 1, 3)
+        
+        self.personal_marks_input = QTextEdit()
+        self.personal_marks_input.setMaximumHeight(60)
+        group6_layout.addWidget(QLabel("Личные приметы:"), 3, 0)
+        group6_layout.addWidget(self.personal_marks_input, 3, 1, 1, 3)
+        
+        self.military_contacts_input = QLineEdit()
+        group6_layout.addWidget(QLabel("Контакты военнослужащего:"), 4, 0)
+        group6_layout.addWidget(self.military_contacts_input, 4, 1, 1, 3)
+        
+        self.relatives_info_input = QTextEdit()
+        self.relatives_info_input.setMaximumHeight(60)
+        group6_layout.addWidget(QLabel("Сведения о родных:"), 5, 0)
+        group6_layout.addWidget(self.relatives_info_input, 5, 1, 1, 3)
+        
+        group6.setLayout(group6_layout)
+        layout.addWidget(group6)
+        
+        layout.addStretch()
+        scroll.setWidget(container)
+        
+        main_layout = QVBoxLayout(self)
+        main_layout.addWidget(scroll)
+    
+    def load_combo_data(self):
+        """Загрузка данных для ComboBox"""
+        # Категории
+        query = QSqlQuery(self.db)
+        query.exec("SELECT id, name FROM krd.categories ORDER BY name")
+        while query.next():
+            self.category_combo.addItem(query.value(1), query.value(0))
+        
+        # Звания
+        query.exec("SELECT id, name FROM krd.ranks ORDER BY name")
+        while query.next():
+            self.rank_combo.addItem(query.value(1), query.value(0))
+    
+    def validate_required_fields(self):
+        """Проверка обязательных полей"""
         if not self.surname_input.text().strip():
-            QMessageBox.warning(self, "Ошибка", "Пожалуйста, введите фамилию")
-            self.surname_input.setFocus()
             return False
-        
         if not self.name_input.text().strip():
-            QMessageBox.warning(self, "Ошибка", "Пожалуйста, введите имя")
-            self.name_input.setFocus()
             return False
-        
         if not self.patronymic_input.text().strip():
-            QMessageBox.warning(self, "Ошибка", "Пожалуйста, введите отчество")
-            self.patronymic_input.setFocus()
             return False
-        
         return True
+    
+    def get_data(self):
+        """Получение данных из формы"""
+        return {
+            'surname': self.surname_input.text().strip(),
+            'name': self.name_input.text().strip(),
+            'patronymic': self.patronymic_input.text().strip(),
+            'birth_date': self.birth_date_input.date(),
+            'birth_place_town': self.birth_place_town_input.text().strip(),
+            'birth_place_district': self.birth_place_district_input.text().strip(),
+            'birth_place_region': self.birth_place_region_input.text().strip(),
+            'birth_place_country': self.birth_place_country_input.text().strip(),
+            'tab_number': self.tab_number_input.text().strip(),
+            'personal_number': self.personal_number_input.text().strip(),
+            'category_id': self.category_combo.currentData(),
+            'rank_id': self.rank_combo.currentData(),
+            'drafted_by_commissariat': self.drafted_by_commissariat_input.text().strip(),
+            'draft_date': self.draft_date_input.date(),
+            'povsk': self.povsk_input.text().strip(),
+            'selection_date': self.selection_date_input.date(),
+            'education': self.education_input.text().strip(),
+            'criminal_record': self.criminal_record_input.toPlainText(),
+            'passport_series': self.passport_series_input.text().strip(),
+            'passport_number': self.passport_number_input.text().strip(),
+            'passport_issue_date': self.passport_issue_date_input.date(),
+            'passport_issued_by': self.passport_issued_by_input.text().strip(),
+            'military_id_series': self.military_id_series_input.text().strip(),
+            'military_id_number': self.military_id_number_input.text().strip(),
+            'military_id_issue_date': self.military_id_issue_date_input.date(),
+            'military_id_issued_by': self.military_id_issued_by_input.text().strip(),
+            'appearance_features': self.appearance_features_input.toPlainText(),
+            'personal_marks': self.personal_marks_input.toPlainText(),
+            'military_contacts': self.military_contacts_input.text().strip(),
+            'relatives_info': self.relatives_info_input.toPlainText(),
+            'photo_civilian': QByteArray(),
+            'photo_military_headgear': QByteArray(),
+            'photo_military_no_headgear': QByteArray(),
+            'photo_distinctive_marks': QByteArray()
+        }
+
+
+class AddressesTabForAdd(QWidget):
+    """Вкладка адресов для добавления"""
+    
+    def __init__(self, db_connection):
+        super().__init__()
+        self.db = db_connection
+        self.addresses = []
+        self.init_ui()
+    
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        info_label = QLabel("💡 Добавьте адреса проживания военнослужащего")
+        info_label.setStyleSheet("QLabel { color: #666; padding: 8px; background-color: #f0f0f0; border-radius: 5px; }")
+        layout.addWidget(info_label)
+        
+        # Кнопка добавления
+        add_btn = QPushButton("➕ Добавить адрес")
+        add_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                font-weight: bold;
+                padding: 10px 20px;
+                border-radius: 5px;
+            }
+        """)
+        add_btn.clicked.connect(self.add_address)
+        layout.addWidget(add_btn)
+        
+        # Список адресов
+        self.addresses_list = QVBoxLayout()
+        layout.addLayout(self.addresses_list)
+        layout.addStretch()
+    
+    def add_address(self):
+        """Добавление адреса"""
+        addr_widget = AddressWidgetForAdd(self.db, len(self.addresses) + 1)
+        self.addresses_list.addWidget(addr_widget)
+        self.addresses.append(addr_widget)
+    
+    def get_data(self):
+        """Получение всех адресов"""
+        data = []
+        for addr_widget in self.addresses:
+            addr_data = addr_widget.get_data()
+            if addr_data.get('town'):  # Только если заполнен населенный пункт
+                data.append(addr_data)
+        return data
+
+
+class AddressWidgetForAdd(QGroupBox):
+    """Виджет одного адреса"""
+    
+    def __init__(self, db_connection, index):
+        super().__init__(f"Адрес #{index}")
+        self.db = db_connection
+        self.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        
+        layout = QGridLayout()
+        layout.setSpacing(8)
+        
+        self.region_input = QLineEdit()
+        self.region_input.setPlaceholderText("Субъект РФ")
+        layout.addWidget(QLabel("Субъект РФ:"), 0, 0)
+        layout.addWidget(self.region_input, 0, 1)
+        
+        self.district_input = QLineEdit()
+        self.district_input.setPlaceholderText("Район")
+        layout.addWidget(QLabel("Район:"), 0, 2)
+        layout.addWidget(self.district_input, 0, 3)
+        
+        self.town_input = QLineEdit()
+        self.town_input.setPlaceholderText("Населенный пункт")
+        layout.addWidget(QLabel("Населенный пункт *:"), 1, 0)
+        layout.addWidget(self.town_input, 1, 1)
+        
+        self.street_input = QLineEdit()
+        self.street_input.setPlaceholderText("Улица")
+        layout.addWidget(QLabel("Улица:"), 1, 2)
+        layout.addWidget(self.street_input, 1, 3)
+        
+        self.house_input = QLineEdit()
+        self.house_input.setPlaceholderText("Дом")
+        layout.addWidget(QLabel("Дом:"), 2, 0)
+        layout.addWidget(self.house_input, 2, 1)
+        
+        self.apartment_input = QLineEdit()
+        self.apartment_input.setPlaceholderText("Квартира")
+        layout.addWidget(QLabel("Квартира:"), 2, 2)
+        layout.addWidget(self.apartment_input, 2, 3)
+        
+        self.setLayout(layout)
+    
+    def get_data(self):
+        """Получение данных адреса"""
+        return {
+            'region': self.region_input.text().strip(),
+            'district': self.district_input.text().strip(),
+            'town': self.town_input.text().strip(),
+            'street': self.street_input.text().strip(),
+            'house': self.house_input.text().strip(),
+            'apartment': self.apartment_input.text().strip()
+        }
+
+
+# Аналогично создаются ServicePlacesTabForAdd, IncomingOrdersTabForAdd, SochEpisodesTabForAdd
+# (для краткости не показаны, но структура аналогична AddressesTabForAdd)
+
+class ServicePlacesTabForAdd(QWidget):
+    """Вкладка мест службы для добавления"""
+    def __init__(self, db_connection):
+        super().__init__()
+        self.db = db_connection
+        self.service_places = []
+        self.init_ui()
+    
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        info_label = QLabel("💡 Добавьте места службы военнослужащего")
+        info_label.setStyleSheet("QLabel { color: #666; padding: 8px; background-color: #f0f0f0; border-radius: 5px; }")
+        layout.addWidget(info_label)
+        
+        add_btn = QPushButton("➕ Добавить место службы")
+        add_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                font-weight: bold;
+                padding: 10px 20px;
+                border-radius: 5px;
+            }
+        """)
+        add_btn.clicked.connect(self.add_service_place)
+        layout.addWidget(add_btn)
+        
+        self.service_places_list = QVBoxLayout()
+        layout.addLayout(self.service_places_list)
+        layout.addStretch()
+    
+    def add_service_place(self):
+        sp_widget = ServicePlaceWidgetForAdd(self.db, len(self.service_places) + 1)
+        self.service_places_list.addWidget(sp_widget)
+        self.service_places.append(sp_widget)
+    
+    def get_data(self):
+        data = []
+        for sp_widget in self.service_places:
+            sp_data = sp_widget.get_data()
+            if sp_data.get('place_name'):
+                data.append(sp_data)
+        return data
+
+
+class ServicePlaceWidgetForAdd(QGroupBox):
+    """Виджет одного места службы"""
+    def __init__(self, db_connection, index):
+        super().__init__(f"Место службы #{index}")
+        self.db = db_connection
+        self.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        
+        layout = QGridLayout()
+        layout.setSpacing(8)
+        
+        self.place_name_input = QLineEdit()
+        self.place_name_input.setPlaceholderText("Наименование места службы")
+        layout.addWidget(QLabel("Наименование *:"), 0, 0)
+        layout.addWidget(self.place_name_input, 0, 1, 1, 3)
+        
+        self.commanders_input = QTextEdit()
+        self.commanders_input.setMaximumHeight(60)
+        layout.addWidget(QLabel("Командиры:"), 1, 0)
+        layout.addWidget(self.commanders_input, 1, 1, 1, 3)
+        
+        self.place_contacts_input = QLineEdit()
+        self.place_contacts_input.setPlaceholderText("Телефон, email")
+        layout.addWidget(QLabel("Контакты:"), 2, 0)
+        layout.addWidget(self.place_contacts_input, 2, 1, 1, 3)
+        
+        self.setLayout(layout)
+    
+    def get_data(self):
+        return {
+            'place_name': self.place_name_input.text().strip(),
+            'commanders': self.commanders_input.toPlainText(),
+            'place_contacts': self.place_contacts_input.text().strip()
+        }
+
+
+class IncomingOrdersTabForAdd(QWidget):
+    """Вкладка входящих поручений для добавления"""
+    def __init__(self, db_connection):
+        super().__init__()
+        self.db = db_connection
+        self.incoming_orders = []
+        self.init_ui()
+    
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        info_label = QLabel("💡 Добавьте входящие поручения по КРД")
+        info_label.setStyleSheet("QLabel { color: #666; padding: 8px; background-color: #f0f0f0; border-radius: 5px; }")
+        layout.addWidget(info_label)
+        
+        add_btn = QPushButton("➕ Добавить поручение")
+        add_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                font-weight: bold;
+                padding: 10px 20px;
+                border-radius: 5px;
+            }
+        """)
+        add_btn.clicked.connect(self.add_order)
+        layout.addWidget(add_btn)
+        
+        self.orders_list = QVBoxLayout()
+        layout.addLayout(self.orders_list)
+        layout.addStretch()
+    
+    def add_order(self):
+        order_widget = IncomingOrderWidgetForAdd(self.db, len(self.incoming_orders) + 1)
+        self.orders_list.addWidget(order_widget)
+        self.incoming_orders.append(order_widget)
+    
+    def get_data(self):
+        data = []
+        for order_widget in self.incoming_orders:
+            order_data = order_widget.get_data()
+            if order_data.get('initiator_full_name'):
+                data.append(order_data)
+        return data
+
+
+class IncomingOrderWidgetForAdd(QGroupBox):
+    """Виджет одного поручения"""
+    def __init__(self, db_connection, index):
+        super().__init__(f"Поручение #{index}")
+        self.db = db_connection
+        self.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        
+        layout = QGridLayout()
+        layout.setSpacing(8)
+        
+        self.initiator_full_name_input = QLineEdit()
+        self.initiator_full_name_input.setPlaceholderText("Наименование инициатора")
+        layout.addWidget(QLabel("Инициатор *:"), 0, 0)
+        layout.addWidget(self.initiator_full_name_input, 0, 1, 1, 3)
+        
+        self.order_number_input = QLineEdit()
+        self.order_number_input.setPlaceholderText("Номер поручения")
+        layout.addWidget(QLabel("Номер поручения *:"), 1, 0)
+        layout.addWidget(self.order_number_input, 1, 1)
+        
+        self.order_date_input = QDateEdit()
+        self.order_date_input.setCalendarPopup(True)
+        self.order_date_input.setDate(QDate.currentDate())
+        layout.addWidget(QLabel("Дата поручения:"), 1, 2)
+        layout.addWidget(self.order_date_input, 1, 3)
+        
+        self.setLayout(layout)
+    
+    def get_data(self):
+        return {
+            'initiator_full_name': self.initiator_full_name_input.text().strip(),
+            'order_number': self.order_number_input.text().strip(),
+            'order_date': self.order_date_input.date()
+        }
+
+
+class SochEpisodesTabForAdd(QWidget):
+    """Вкладка эпизодов СОЧ для добавления"""
+    def __init__(self, db_connection):
+        super().__init__()
+        self.db = db_connection
+        self.soch_episodes = []
+        self.init_ui()
+    
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+        layout.setContentsMargins(10, 10, 10, 10)
+        
+        info_label = QLabel("💡 Добавьте эпизоды самовольного оставления части")
+        info_label.setStyleSheet("QLabel { color: #666; padding: 8px; background-color: #f0f0f0; border-radius: 5px; }")
+        layout.addWidget(info_label)
+        
+        add_btn = QPushButton("➕ Добавить эпизод СОЧ")
+        add_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                font-weight: bold;
+                padding: 10px 20px;
+                border-radius: 5px;
+            }
+        """)
+        add_btn.clicked.connect(self.add_episode)
+        layout.addWidget(add_btn)
+        
+        self.episodes_list = QVBoxLayout()
+        layout.addLayout(self.episodes_list)
+        layout.addStretch()
+    
+    def add_episode(self):
+        episode_widget = SochEpisodeWidgetForAdd(self.db, len(self.soch_episodes) + 1)
+        self.episodes_list.addWidget(episode_widget)
+        self.soch_episodes.append(episode_widget)
+    
+    def get_data(self):
+        data = []
+        for episode_widget in self.soch_episodes:
+            episode_data = episode_widget.get_data()
+            if episode_data.get('soch_date'):
+                data.append(episode_data)
+        return data
+
+
+class SochEpisodeWidgetForAdd(QGroupBox):
+    """Виджет одного эпизода СОЧ"""
+    def __init__(self, db_connection, index):
+        super().__init__(f"Эпизод СОЧ #{index}")
+        self.db = db_connection
+        self.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        
+        layout = QGridLayout()
+        layout.setSpacing(8)
+        
+        self.soch_date_input = QDateEdit()
+        self.soch_date_input.setCalendarPopup(True)
+        self.soch_date_input.setDate(QDate.currentDate())
+        layout.addWidget(QLabel("Дата СОЧ *:"), 0, 0)
+        layout.addWidget(self.soch_date_input, 0, 1)
+        
+        self.soch_location_input = QLineEdit()
+        self.soch_location_input.setPlaceholderText("Место СОЧ")
+        layout.addWidget(QLabel("Место СОЧ:"), 0, 2)
+        layout.addWidget(self.soch_location_input, 0, 3)
+        
+        self.reasons_input = QTextEdit()
+        self.reasons_input.setMaximumHeight(60)
+        layout.addWidget(QLabel("Причины:"), 1, 0)
+        layout.addWidget(self.reasons_input, 1, 1, 1, 3)
+        
+        self.setLayout(layout)
+    
+    def get_data(self):
+        return {
+            'soch_date': self.soch_date_input.date(),
+            'soch_location': self.soch_location_input.text().strip(),
+            'reasons': self.reasons_input.toPlainText()
+        }
 
 ========================================
 📄 FILE: ./address_dialog.py
@@ -2388,8 +3089,8 @@ class AutocompleteHelper:
 """
 Виджет для управления составными полями (Composite Fields)
 ✅ Динамическая загрузка колонок, поддержка русских описаний, прокрутка, безопасное управление layout
+✅ ДОБАВЛЕНО: SearchableComboBox для поиска полей
 """
-
 import json
 import traceback
 from PyQt6.QtWidgets import (
@@ -2398,9 +3099,9 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
+from searchable_combo import SearchableComboBox  # ✅ ИМПОРТ НОВОГО КЛАССА
 
 # === СПРАВОЧНИК: DB колонка → Русское описание ===
-# ✅ Основан на реальной схеме БД из schema_only.sql
 COLUMN_DESCRIPTIONS = {
     # ========================
     # СОЦИАЛЬНО-ДЕМОГРАФИЧЕСКИЕ ДАННЫЕ (social_data) - 38 полей
@@ -2444,7 +3145,6 @@ COLUMN_DESCRIPTIONS = {
     "photo_military_headgear": "Фото в форме с головным убором",
     "photo_military_no_headgear": "Фото в форме без головного убора",
     "photo_distinctive_marks": "Фото отличительных примет",
-    
     # ========================
     # АДРЕСА ПРОЖИВАНИЯ (addresses) - 13 полей
     # ========================
@@ -2459,7 +3159,6 @@ COLUMN_DESCRIPTIONS = {
     "room": "📍 Номер комнаты",
     "check_date": "📅 Дата адресной проверки",
     "check_result": "✅ Результат проверки",
-    
     # ========================
     # МЕСТА СЛУЖБЫ (service_places) - 18 полей
     # ========================
@@ -2479,7 +3178,6 @@ COLUMN_DESCRIPTIONS = {
     "postal_apartment": "📮 Квартира почтового адреса",
     "postal_room": "📮 Комната почтового адреса",
     "place_contacts": "📞 Контакты места службы",
-    
     # ========================
     # ЭПИЗОДЫ СОЧ (soch_episodes) - 22 поля
     # ========================
@@ -2503,7 +3201,6 @@ COLUMN_DESCRIPTIONS = {
     "notification_recipient": "📬 Адресат уведомления",
     "notification_date": "📅 Дата уведомления",
     "notification_number": "📬 Номер уведомления",
-    
     # ========================
     # ВХОДЯЩИЕ ПОРУЧЕНИЯ (incoming_orders) - 22 поля
     # ========================
@@ -2517,7 +3214,6 @@ COLUMN_DESCRIPTIONS = {
     "initiator_contacts": "📩 Контакты инициатора",
     "our_response_date": "📩 Дата ответа",
     "our_response_number": "📩 Исходящий номер ответа",
-    
     # ========================
     # ИСХОДЯЩИЕ ЗАПРОСЫ (outgoing_requests) - 23 поля
     # ========================
@@ -2545,57 +3241,90 @@ class CompositeFieldWidget:
             parent.db_columns = {}
     
     def _create_column_combo(self, selected_column=None, table_name=None):
-        """
-        Создание ComboBox с русскими описаниями колонок и прокруткой
-        
-        ✅ ИСПРАВЛЕНО: Теперь показывает ВСЕ колонки из ВСЕХ таблиц
-        """
-        combo = QComboBox()
-        combo.setEditable(False)
-        combo.setMaxVisibleItems(50)
-        combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        combo.view().setMinimumHeight(400)
-        combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
-        combo.setMinimumWidth(350)
-        combo.setMaximumWidth(600)
-        
-        all_columns = []
-        seen = set()
-        
-        # ✅ ИСПРАВЛЕНО: Всегда берём ВСЕ таблицы (игнорируем table_name)
-        # Раньше было: target_tables = {table_name} если передан table_name
-        # Теперь: target_tables = ВСЕ таблицы всегда
-        target_tables = self.parent.db_columns.keys()
-        
-        print(f"🔍 [COMBO] Загрузка колонок из таблиц: {list(target_tables)}")
-        
-        for tbl in target_tables:
-            columns = self.parent.db_columns.get(tbl, [])
-            print(f"   📊 Таблица {tbl}: {len(columns)} колонок")
+        """Создание ComboBox с русскими описаниями колонок и поиском"""
+        try:
+            print(f"\n{'='*60}")
+            print(f"🔧 СОЗДАНИЕ COMBOBOX ДЛЯ СОСТАВНОГО ПОЛЯ")
+            print(f"{'='*60}")
             
-            for col in columns:
-                if col in seen:
-                    continue
-                seen.add(col)
-                # ✅ Показываем ВСЕ колонки. Если есть описание - берём его, иначе техническое имя
-                desc = COLUMN_DESCRIPTIONS.get(col, col)
-                all_columns.append((col, desc))
-        
-        all_columns.sort(key=lambda x: x[1])
-        
-        for col_name, col_desc in all_columns:
-            combo.addItem(col_desc, col_name)
+            combo = SearchableComboBox()
             
-        print(f"✅ [COMBO] Загружено: {combo.count()} столбцов (ВСЕ таблицы)")
-        
-        if selected_column:
-            idx = combo.findData(selected_column.strip())
-            if idx >= 0:
-                combo.setCurrentIndex(idx)
+            if combo is None:
+                print("❌ ОШИБКА: Не удалось создать SearchableComboBox!")
+                return None
+            
+            print(f"✅ SearchableComboBox создан: {combo}")
+            print(f"   Тип: {type(combo).__name__}")
+            print(f"   Редактируемый: {combo.isEditable()}")
+            
+            combo.setMaxVisibleItems(50)
+            combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            combo.view().setMinimumHeight(400)
+            combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+            combo.setMinimumWidth(350)
+            combo.setMaximumWidth(600)
+            
+            # ✅ ИСПРАВЛЕНО: completer() — это метод в PyQt6!
+            completer = combo.completer()
+            if completer:
+                print(f"✅ Completer настроен")
+                print(f"   CaseSensitivity: {completer.caseSensitivity()}")
+                print(f"   FilterMode: {completer.filterMode()}")
+                print(f"   CompletionMode: {completer.completionMode()}")
             else:
-                print(f"⚠️ Колонка '{selected_column}' не найдена в списке!")
-                
-        return combo
+                print("❌ ОШИБКА: Completer не создан!")
+            
+            all_columns = []
+            seen = set()
+            
+            target_tables = self.parent.db_columns.keys()
+            print(f"🔍 Загрузка колонок из таблиц: {list(target_tables)}")
+            
+            for tbl in target_tables:
+                columns = self.parent.db_columns.get(tbl, [])
+                print(f"   📊 Таблица {tbl}: {len(columns)} колонок")
+                for col in columns:
+                    if col in seen:
+                        continue
+                    seen.add(col)
+                    desc = COLUMN_DESCRIPTIONS.get(col, col)
+                    all_columns.append((col, desc))
+            
+            all_columns.sort(key=lambda x: x[1])
+            
+            print(f"\n📊 Добавление {len(all_columns)} колонок в ComboBox...")
+            
+            for col_name, col_desc in all_columns:
+                combo.addItem(col_desc, col_name)
+            
+            print(f"✅ [COMBO] Загружено: {combo.count()} столбцов (ВСЕ таблицы)")
+            
+            if selected_column:
+                idx = combo.findData(selected_column.strip())
+                if idx >= 0:
+                    combo.setCurrentIndex(idx)
+                    print(f"✅ Выбран элемент: {combo.currentText()} (data={combo.currentData()})")
+                else:
+                    print(f"⚠️ Колонка '{selected_column}' не найдена в списке!")
+            
+            if combo.count() == 0:
+                print("❌ ОШИБКА: ComboBox пуст!")
+            else:
+                print(f"✅ ComboBox готов к использованию")
+                print(f"   Всего элементов: {combo.count()}")
+            
+            print(f"{'='*60}\n")
+            return combo
+            
+        except Exception as e:
+            print(f"❌ КРИТИЧЕСКАЯ ОШИБКА при создании ComboBox: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            print("⚠️ Создаем fallback ComboBox...")
+            combo = QComboBox()
+            combo.addItem("Ошибка загрузки", None)
+            return combo
     
     def create_composite_field_row(self, row, field_name, db_columns_json, table_name, mapping_table):
         """Создание строки для составного сопоставления (при загрузке из БД)"""
@@ -2649,7 +3378,7 @@ class CompositeFieldWidget:
         num_label.setObjectName(f"num_{row}_{idx}")
         col_layout.addWidget(num_label)
         
-        # ✅ ComboBox с колонками (теперь показывает ВСЕ таблицы)
+        # ✅ ComboBox с колонками (теперь показывает ВСЕ таблицы с поиском)
         col_combo = self._create_column_combo(
             selected_column=col_info.get('column', ''),
             table_name=None  # ← Игнорируем table_name, показываем все таблицы
@@ -2673,8 +3402,16 @@ class CompositeFieldWidget:
         remove_btn = QPushButton("×")
         remove_btn.setFixedSize(26, 26)
         remove_btn.setStyleSheet("""
-            QPushButton { background-color: #ff6b6b; color: white; border-radius: 13px; font-weight: bold; font-size: 16px; }
-            QPushButton:hover { background-color: #ff5252; }
+            QPushButton { 
+                background-color: #ff6b6b; 
+                color: white; 
+                border-radius: 13px; 
+                font-weight: bold; 
+                font-size: 16px; 
+            }
+            QPushButton:hover { 
+                background-color: #ff5252; 
+            }
         """)
         remove_btn.clicked.connect(
             lambda checked=False, r=row, i=idx, w=col_widget: self._remove_composite_column(r, i, w)
@@ -2708,9 +3445,11 @@ class CompositeFieldWidget:
         num_idx = 1
         for i in range(layout.count()):
             item = layout.itemAt(i)
-            if not item: continue
+            if not item:
+                continue
             w = item.widget()
-            if not w: continue
+            if not w:
+                continue
             # Проверяем, является ли виджет контейнером столбца (есть вложенный layout с номером)
             if w.layout() and w.layout().count() > 0:
                 num_label = w.layout().itemAt(0).widget()
@@ -2729,13 +3468,22 @@ class CompositeFieldWidget:
         add_col_btn = QPushButton("+ Добавить столбец")
         add_col_btn.setFixedSize(140, 28)
         add_col_btn.setStyleSheet("""
-            QPushButton { background-color: #4CAF50; color: white; border-radius: 6px; font-weight: bold; font-size: 11px; }
-            QPushButton:hover { background-color: #45a049; }
-            QPushButton:pressed { background-color: #3d8b40; }
+            QPushButton { 
+                background-color: #4CAF50; 
+                color: white; 
+                border-radius: 6px; 
+                font-weight: bold; 
+                font-size: 11px; 
+            }
+            QPushButton:hover { 
+                background-color: #45a049; 
+            }
+            QPushButton:pressed { 
+                background-color: #3d8b40; 
+            }
         """)
         add_col_btn.clicked.connect(lambda checked=False, r=row: self.add_composite_column(r, table_name))
         add_btn_layout.addWidget(add_col_btn)
-        
         layout.addWidget(add_btn_container)
         layout.addStretch()
     
@@ -2755,13 +3503,11 @@ class CompositeFieldWidget:
         
         # Безопасное получение имени таблицы
         tbl_name = table_name or getattr(self.parent, 'current_table_name', 'social_data')
-        
         col_widget = self._create_composite_column_widget(row, current_idx, col_info, tbl_name)
         
         # Вставляем ПЕРЕД кнопкой добавления
         button_container_idx = -2
         layout.insertWidget(button_container_idx, col_widget)
-        
         self._update_column_numbers(layout)
         self.parent.mapping_table.resizeRowToContents(row)
     
@@ -2787,7 +3533,6 @@ class CompositeFieldWidget:
         col_info = {'column': '', 'separator': ', '}
         col_widget = self._create_composite_column_widget(row, 0, col_info, tbl_name)
         composite_layout.addWidget(col_widget)
-        
         self._add_add_column_button(composite_layout, row, tbl_name)
         
         mapping_table.setCellWidget(row, 1, composite_widget)
@@ -2799,7 +3544,7 @@ class CompositeFieldWidget:
         """Создание метки типа сопоставления"""
         type_label = QLabel(text)
         type_label.setStyleSheet(
-            "color: #4CAF50; font-weight: bold; font-size: 10px;" if text == "Составное" 
+            "color: #4CAF50; font-weight: bold; font-size: 10px;" if text == "Составное"
             else "color: #666; font-size: 10px;"
         )
         return type_label
@@ -2816,9 +3561,11 @@ class CompositeFieldWidget:
         
         for i in range(layout.count()):
             item = layout.itemAt(i)
-            if not item: continue
+            if not item:
+                continue
             col_widget = item.widget()
-            if not col_widget or not col_widget.layout(): continue
+            if not col_widget or not col_widget.layout():
+                continue
             
             col_combo = None
             sep_input = None
@@ -2835,11 +3582,10 @@ class CompositeFieldWidget:
                 col_name = col_combo.currentData()
                 if not col_name and col_combo.count() > 0:
                     col_name = col_combo.currentText()  # Fallback
-                    
                 separator = sep_input.text()
                 if col_name:
                     db_columns.append({'column': col_name.strip(), 'separator': separator})
-                    
+        
         return db_columns
 
 ========================================
@@ -3040,6 +3786,7 @@ if __name__ == "__main__":
 """
 Модуль для просмотра удаленных записей (только для администраторов)
 ✅ ИСПРАВЛЕНО: Использованы именованные параметры для UNION запроса
+✅ ДОБАВЛЕНО: Окно просмотра записи по двойному клику с кнопкой восстановления
 """
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QGridLayout,
@@ -3051,6 +3798,9 @@ from PyQt6.QtSql import QSqlQueryModel, QSqlQuery
 from PyQt6.QtGui import QFont
 import traceback
 
+# ✅ ИМПОРТ ДИАЛОГА ПРОСМОТРА ЗАПИСЕЙ
+from record_view_dialog import RecordViewDialog
+
 
 class DeletedRecordsWindow(QDialog):
     """
@@ -3060,7 +3810,6 @@ class DeletedRecordsWindow(QDialog):
     def __init__(self, db_connection):
         super().__init__()
         self.db = db_connection
-        
         self.setWindowTitle("Удаленные записи")
         self.resize(1200, 700)
         
@@ -3158,6 +3907,9 @@ class DeletedRecordsWindow(QDialog):
         self.records_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.records_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         
+        # ✅ ДОБАВЛЕНО: Обработка двойного клика
+        self.records_table.doubleClicked.connect(self.on_record_double_clicked)
+        
         # Настройка заголовков
         header = self.records_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
@@ -3168,8 +3920,6 @@ class DeletedRecordsWindow(QDialog):
         
         return group_box
     
-    # В файле deleted_records_window.py, метод load_deleted_records:
-
     def load_deleted_records(self):
         """Загрузка удаленных записей с применением фильтров и обработкой ошибок"""
         record_type = self.record_type_combo.currentData()
@@ -3200,7 +3950,6 @@ class DeletedRecordsWindow(QDialog):
                     raise Exception(f"Ошибка выполнения запроса: {query.lastError().text()}")
                 
                 self.records_model.setQuery(query)
-                # ... rest of the code
 
             elif record_type == "templates":
                 # Загрузка удаленных шаблонов
@@ -3224,7 +3973,6 @@ class DeletedRecordsWindow(QDialog):
                     raise Exception(f"Ошибка выполнения запроса: {query.lastError().text()}")
                 
                 self.records_model.setQuery(query)
-                # ... rest of the code
 
             elif record_type == "requests":
                 # Загрузка удаленных исходящих запросов
@@ -3234,11 +3982,12 @@ class DeletedRecordsWindow(QDialog):
                         o.id as "ID запроса",
                         o.issue_number as "Номер запроса",
                         rt.name as "Тип запроса",
-                        o.recipient_name as "Адресат",
+                        COALESCE(r.name, 'Не указан') as "Адресат",
                         o.issue_date as "Дата запроса",
                         o.deleted_at as "Дата удаления"
                     FROM krd.outgoing_requests o
                     LEFT JOIN krd.request_types rt ON o.request_type_id = rt.id
+                    LEFT JOIN krd.recipients r ON o.recipient_id = r.id
                     WHERE o.is_deleted = TRUE
                     AND o.deleted_at >= :date_from
                     AND o.deleted_at <= :date_to
@@ -3251,10 +4000,9 @@ class DeletedRecordsWindow(QDialog):
                     raise Exception(f"Ошибка выполнения запроса: {query.lastError().text()}")
                 
                 self.records_model.setQuery(query)
-                # ... rest of the code
 
             else:
-                # Загрузка всех удаленных записей
+                # ✅ ИСПРАВЛЕНО: Уникальные имена параметров для каждого SELECT в UNION
                 query = QSqlQuery(self.db)
                 query.prepare("""
                     SELECT
@@ -3266,8 +4014,8 @@ class DeletedRecordsWindow(QDialog):
                     FROM krd.krd k
                     LEFT JOIN krd.social_data s ON k.id = s.krd_id
                     WHERE k.is_deleted = TRUE
-                    AND k.deleted_at >= :date_from
-                    AND k.deleted_at <= :date_to
+                    AND k.deleted_at >= :date_from_1
+                    AND k.deleted_at <= :date_to_1
                     UNION ALL
                     SELECT
                         'Шаблон' as "Тип",
@@ -3277,40 +4025,64 @@ class DeletedRecordsWindow(QDialog):
                         dt.deleted_at as "Дата удаления"
                     FROM krd.document_templates dt
                     WHERE dt.is_deleted = TRUE
-                    AND dt.deleted_at >= :date_from
-                    AND dt.deleted_at <= :date_to
+                    AND dt.deleted_at >= :date_from_2
+                    AND dt.deleted_at <= :date_to_2
                     UNION ALL
                     SELECT
                         'Запрос' as "Тип",
                         o.id::text as "ID записи",
                         o.issue_number as "Идентификатор",
-                        rt.name || ' → ' || o.recipient_name as "Название",
+                        COALESCE(rt.name, 'Не указан') || ' → ' || COALESCE(r.name, 'Не указан') as "Название",
                         o.deleted_at as "Дата удаления"
                     FROM krd.outgoing_requests o
                     LEFT JOIN krd.request_types rt ON o.request_type_id = rt.id
+                    LEFT JOIN krd.recipients r ON o.recipient_id = r.id
                     WHERE o.is_deleted = TRUE
-                    AND o.deleted_at >= :date_from
-                    AND o.deleted_at <= :date_to
+                    AND o.deleted_at >= :date_from_3
+                    AND o.deleted_at <= :date_to_3
                     ORDER BY "Дата удаления" DESC
                 """)
-                query.bindValue(":date_from", date_from)
-                query.bindValue(":date_to", f"{date_to} 23:59:59")
-                query.bindValue(":date_from", date_from)
-                query.bindValue(":date_to", f"{date_to} 23:59:59")
-                query.bindValue(":date_from", date_from)
-                query.bindValue(":date_to", f"{date_to} 23:59:59")
+                # ✅ Уникальные параметры для каждого SELECT
+                query.bindValue(":date_from_1", date_from)
+                query.bindValue(":date_to_1", f"{date_to} 23:59:59")
+                query.bindValue(":date_from_2", date_from)
+                query.bindValue(":date_to_2", f"{date_to} 23:59:59")
+                query.bindValue(":date_from_3", date_from)
+                query.bindValue(":date_to_3", f"{date_to} 23:59:59")
                 
                 if not query.exec():
                     raise Exception(f"Ошибка выполнения запроса: {query.lastError().text()}")
                 
                 self.records_model.setQuery(query)
-                # ... rest of the code
                 
         except Exception as e:
             error_msg = f"Ошибка загрузки удаленных записей:\n{str(e)}\n{traceback.format_exc()}"
             print(error_msg)
             QMessageBox.critical(self, "Критическая ошибка", error_msg)
-          
+    
+    # ✅ ДОБАВЛЕНО: Обработчик двойного клика
+    def on_record_double_clicked(self, index):
+        """Обработка двойного клика по записи - открытие окна просмотра"""
+        row = index.row()
+        
+        # Определяем тип записи из combo или из таблицы
+        record_type = self.record_type_combo.currentData()
+        
+        if record_type == "all":
+            # Для общего списка берем тип из первой колонки
+            record_type_text = self.records_model.data(self.records_model.index(row, 0))
+            record_id = self.records_model.data(self.records_model.index(row, 1))
+        else:
+            # Для фильтрованного списка
+            record_id = self.records_model.data(self.records_model.index(row, 0))
+            record_type_text = record_type
+        
+        if not record_id:
+            return
+        
+        # ✅ ОТКРЫВАЕМ УНИВЕРСАЛЬНОЕ ОКНО ПРОСМОТРА
+        dialog = RecordViewDialog(self.db, record_type_text, record_id, self)
+        dialog.exec()
     
     def on_filter_changed(self):
         """Обработчик изменения фильтров"""
@@ -3722,9 +4494,8 @@ class DocDataRepository:
 
 """
 Движок генерации документов из Word-шаблонов
-✅ БЕЗ жёсткой привязки к именам переменных
-✅ Обрабатывает ВСЕ элементы: тело, таблицы, колонтитулы
-✅ Безопасная замена без потери структуры и стилей шаблона
+✅ С ПОЛНОЙ ДИАГНОСТИКОЙ ТЕКСТА (ДО/ПОСЛЕ)
+✅ ВЫВОДИТ ВЕСЬ ТЕКСТ ШАБЛОНА И ГОТОВОГО ДОКУМЕНТА
 """
 import os
 import tempfile
@@ -3743,14 +4514,59 @@ class DocGenerationEngine:
         self.audit_logger = audit_logger
         self.tables_with_selection = {"addresses", "service_places", "soch_episodes"}
         self.db_columns_map = {}
-        # Regex для поиска любых переменных вида {{имя}}
         self.placeholder_pattern = re.compile(r'\{\{([^{}]+)\}\}')
+        self.debug_mode = True  # ✅ ВКЛЮЧИТЬ ДИАГНОСТИКУ
 
     def set_columns_map(self, cols_map):
         self.db_columns_map = cols_map
 
+    def _log(self, message, level="INFO"):
+        """Вспомогательный метод для логирования"""
+        if self.debug_mode:
+            prefix = {
+                "INFO": "📝",
+                "WARN": "⚠️",
+                "ERROR": "❌",
+                "SUCCESS": "✅",
+                "DATA": "📊",
+                "TEXT": "📄"
+            }.get(level, "•")
+            print(f"{prefix} [{level}] {message}")
+
+    def _extract_all_text(self, doc):
+        """Извлекает ВЕСЬ текст из документа (абзацы + таблицы + колонтитулы)"""
+        all_text = []
+        
+        # Основной текст
+        for i, para in enumerate(doc.paragraphs):
+            if para.text.strip():
+                all_text.append(f"[Абзац {i}] {para.text}")
+        
+        # Таблицы
+        for i, table in enumerate(doc.tables):
+            for j, row in enumerate(table.rows):
+                for k, cell in enumerate(row.cells):
+                    for para in cell.paragraphs:
+                        if para.text.strip():
+                            all_text.append(f"[Таблица {i}, Ячейка {j},{k}] {para.text}")
+        
+        # Колонтитулы
+        for i, section in enumerate(doc.sections):
+            for para in section.header.paragraphs:
+                if para.text.strip():
+                    all_text.append(f"[Шапка {i}] {para.text}")
+            for para in section.footer.paragraphs:
+                if para.text.strip():
+                    all_text.append(f"[Подвал {i}] {para.text}")
+        
+        return all_text
+
     def build_context(self, template_id, selections):
-        """Сбор контекста из field_mappings. Динамический, без хардкода."""
+        """Сбор контекста с диагностикой"""
+        self._log("=" * 80, "INFO")
+        self._log(f"НАЧАЛО СБОРКИ КОНТЕКСТА (template_id={template_id}, krd_id={self.krd_id})", "INFO")
+        self._log("=" * 80, "INFO")
+        
         context = {}
         query = QSqlQuery(self.db)
         query.prepare("""
@@ -3761,9 +4577,10 @@ class DocGenerationEngine:
         query.addBindValue(template_id)
         
         if not query.exec():
-            print(f"❌ Ошибка загрузки маппингов: {query.lastError().text()}")
+            self._log(f"Ошибка загрузки маппингов: {query.lastError().text()}", "ERROR")
             return context
 
+        mappings_count = 0
         while query.next():
             field_name = query.value(0).strip('{} ')
             db_column = query.value(1)
@@ -3774,18 +4591,29 @@ class DocGenerationEngine:
             try:
                 if is_composite and db_columns_json:
                     value = self._get_composite_value(table_name, db_columns_json, selections)
+                    source = f"COMPOSITE({table_name})"
                 else:
                     selected_id = selections.get(table_name)
                     if selected_id and table_name in self.tables_with_selection:
                         value = self._get_value_from_record(table_name, db_column, selected_id)
+                        source = f"{table_name}.id={selected_id}"
                     else:
-                        # Если таблица не в selections, берем из social_data по krd_id
                         value = self._get_value_from_social_data(db_column)
+                        source = "social_data"
                 
-                if value is not None:
+                if value is not None and value != "":
                     context[field_name] = value
+                    self._log(f"{{{field_name}}} = '{value}' (источник: {source})", "DATA")
+                    mappings_count += 1
+                else:
+                    self._log(f"{{{field_name}}} = ПУСТО (источник: {source})", "WARN")
             except Exception as e:
-                print(f"   ⚠️ Ошибка получения {{{{{field_name}}}}}: {e}")
+                self._log(f"Ошибка получения {{{field_name}}}: {e}", "ERROR")
+        
+        self._log("=" * 80, "INFO")
+        self._log(f"КОНТЕКСТ СОБРАН: {mappings_count} переменных из {query.size()}", "SUCCESS")
+        self._log(f"ВСЕГО переменных в контексте: {len(context)}", "DATA")
+        self._log("=" * 80, "INFO")
         return context
 
     def _get_composite_value(self, table_hint, db_columns_json, selections):
@@ -3806,7 +4634,7 @@ class DocGenerationEngine:
             if parts and parts[-1] in [', ', ' ', '; ', ': ', ' - ']: parts.pop()
             return ''.join(parts) if parts else None
         except Exception as e:
-            print(f"❌ Ошибка составного поля: {e}")
+            self._log(f"Ошибка составного поля: {e}", "ERROR")
             return None
 
     def _get_table_by_column(self, col):
@@ -3817,7 +4645,6 @@ class DocGenerationEngine:
     def _get_value_from_record(self, table, col, rid):
         if not re.match(r'^\w+$', table) or not re.match(r'^\w+$', col): return ""
         q = QSqlQuery(self.db)
-        # В оригинале использовалась логика join_col, здесь оставлено id для consistency с selections
         q.prepare(f"SELECT {col} FROM krd.{table} WHERE id = ?")
         q.addBindValue(rid)
         if q.exec() and q.next(): return self._format_value(q.value(0))
@@ -3839,45 +4666,184 @@ class DocGenerationEngine:
         return str(val)
 
     def apply_to_docx(self, template_bytes, context):
-        """Применение контекста к шаблону DOCX."""
+        """Применение контекста к шаблону DOCX с ПОЛНОЙ диагностикой текста"""
+        self._log("=" * 80, "INFO")
+        self._log("НАЧАЛО ГЕНЕРАЦИИ ДОКУМЕНТА", "INFO")
+        self._log("=" * 80, "INFO")
+        
         with tempfile.NamedTemporaryFile(delete=False, suffix='.docx') as tmp:
             tmp.write(template_bytes)
             template_path = tmp.name
-            
+        
         try:
+            self._log(f"Загрузка шаблона: {len(template_bytes)} байт", "DATA")
             doc = Document(template_path)
-            replacements = 0
             
-            # 1. Основной текст
+            # ═══════════════════════════════════════════════════════════════
+            # ✅ 1. ВЫВОД ПОЛНОГО ТЕКСТА ШАБЛОНА (ДО ГЕНЕРАЦИИ)
+            # ═══════════════════════════════════════════════════════════════
+            self._log("\n" + "=" * 80, "TEXT")
+            self._log("📄 ТЕКСТ ШАБЛОНА (ДО ГЕНЕРАЦИИ)", "TEXT")
+            self._log("=" * 80, "TEXT")
+            
+            template_text_lines = self._extract_all_text(doc)
+            for line in template_text_lines:
+                self._log(line, "TEXT")
+            
+            if not template_text_lines:
+                self._log("⚠️ ШАБЛОН ПУСТОЙ ИЛИ НЕ СОДЕРЖИТ ТЕКСТА!", "ERROR")
+            
+            self._log(f"\nВСЕГО строк текста в шаблоне: {len(template_text_lines)}", "DATA")
+            self._log("=" * 80, "TEXT")
+            
+            # 🔍 Поиск переменных в шаблоне
+            template_vars = set()
+            self._log("\n🔍 ПОИСК ПЕРЕМЕННЫХ В ШАБЛОНЕ:", "INFO")
+            
             for paragraph in doc.paragraphs:
-                replacements += self._replace_in_paragraph(paragraph, context)
-                
-            # 2. Таблицы
+                found = self.placeholder_pattern.findall(paragraph.text)
+                if found:
+                    template_vars.update(found)
+            
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
                         for paragraph in cell.paragraphs:
-                            replacements += self._replace_in_paragraph(paragraph, context)
-                            
-            # 3. КОЛОНТИТУЛЫ (Шапка и Подвал)
+                            found = self.placeholder_pattern.findall(paragraph.text)
+                            if found:
+                                template_vars.update(found)
+            
             for section in doc.sections:
                 for paragraph in section.header.paragraphs:
-                    replacements += self._replace_in_paragraph(paragraph, context)
+                    found = self.placeholder_pattern.findall(paragraph.text)
+                    if found:
+                        template_vars.update(found)
                 for paragraph in section.footer.paragraphs:
-                    replacements += self._replace_in_paragraph(paragraph, context)
-                    
+                    found = self.placeholder_pattern.findall(paragraph.text)
+                    if found:
+                        template_vars.update(found)
+            
+            self._log(f"ВСЕГО найдено переменных в шаблоне: {len(template_vars)}", "SUCCESS")
+            self._log(f"Список: {', '.join(sorted(template_vars))}", "DATA")
+            
+            # 🔍 Проверка соответствия
+            context_vars = set(context.keys())
+            missing_in_context = template_vars - context_vars
+            unused_in_template = context_vars - template_vars
+            
+            if missing_in_context:
+                self._log(f"\n⚠️ ПЕРЕМЕННЫЕ В ШАБЛОНЕ, НО НЕТ В КОНТЕКСТЕ ({len(missing_in_context)}):", "WARN")
+                for var in sorted(missing_in_context):
+                    self._log(f"   {{{var}}}", "WARN")
+            
+            if unused_in_template:
+                self._log(f"\n⚠️ ПЕРЕМЕННЫЕ В КОНТЕКСТЕ, НО НЕТ В ШАБЛОНЕ ({len(unused_in_template)}):", "WARN")
+                for var in sorted(unused_in_template):
+                    self._log(f"   {{{var}}}", "WARN")
+            
+            # 🔄 Замена переменных
+            self._log("\n🔄 ЗАМЕНА ПЕРЕМЕННЫХ:", "INFO")
+            replacements = 0
+            replacement_stats = {}
+            
+            for paragraph in doc.paragraphs:
+                count = self._replace_in_paragraph(paragraph, context, replacement_stats)
+                replacements += count
+                
+            for table in doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
+                            count = self._replace_in_paragraph(paragraph, context, replacement_stats)
+                            replacements += count
+                            
+            for section in doc.sections:
+                for paragraph in section.header.paragraphs:
+                    count = self._replace_in_paragraph(paragraph, context, replacement_stats)
+                    replacements += count
+                for paragraph in section.footer.paragraphs:
+                    count = self._replace_in_paragraph(paragraph, context, replacement_stats)
+                    replacements += count
+            
+            self._log(f"\nВСЕГО заменено: {replacements}", "SUCCESS")
+            
+            if replacement_stats:
+                self._log("\n📊 СТАТИСТИКА ЗАМЕН ПО ПЕРЕМЕННЫМ:", "DATA")
+                for var, count in sorted(replacement_stats.items(), key=lambda x: x[1], reverse=True):
+                    self._log(f"   {{{var}}}: {count} раз(а)", "DATA")
+            
+            # 💾 Сохранение
             with tempfile.NamedTemporaryFile(delete=False, suffix='.docx') as out_file:
                 doc.save(out_file.name)
-                return out_file.name, replacements
+                output_path = out_file.name
+            
+            output_size = os.path.getsize(output_path)
+            self._log(f"\n💾 СОХРАНЕНИЕ РЕЗУЛЬТАТА:", "SUCCESS")
+            self._log(f"  Путь: {output_path}", "DATA")
+            self._log(f"  Размер: {output_size} байт", "DATA")
+            
+            # ═══════════════════════════════════════════════════════════════
+            # ✅ 2. ВЫВОД ПОЛНОГО ТЕКСТА ГОТОВОГО ДОКУМЕНТА (ПОСЛЕ ГЕНЕРАЦИИ)
+            # ═══════════════════════════════════════════════════════════════
+            self._log("\n" + "=" * 80, "TEXT")
+            self._log("📄 ТЕКСТ ГОТОВОГО ДОКУМЕНТА (ПОСЛЕ ГЕНЕРАЦИИ)", "TEXT")
+            self._log("=" * 80, "TEXT")
+            
+            result_doc = Document(output_path)
+            result_text_lines = self._extract_all_text(result_doc)
+            for line in result_text_lines:
+                self._log(line, "TEXT")
+            
+            if not result_text_lines:
+                self._log("⚠️ ГОТОВЫЙ ДОКУМЕНТ ПУСТОЙ!", "ERROR")
+            
+            self._log(f"\nВСЕГО строк текста в готовом документе: {len(result_text_lines)}", "DATA")
+            self._log("=" * 80, "TEXT")
+            
+            # 🔍 Проверка оставшихся переменных
+            remaining_vars = set()
+            for paragraph in result_doc.paragraphs:
+                found = self.placeholder_pattern.findall(paragraph.text)
+                if found:
+                    remaining_vars.update(found)
+            
+            for table in result_doc.tables:
+                for row in table.rows:
+                    for cell in row.cells:
+                        for paragraph in cell.paragraphs:
+                            found = self.placeholder_pattern.findall(paragraph.text)
+                            if found:
+                                remaining_vars.update(found)
+            
+            if remaining_vars:
+                self._log(f"\n⚠️ В ИТОГОВОМ ДОКУМЕНТЕ ОСТАЛИСЬ ПЕРЕМЕННЫЕ ({len(remaining_vars)}):", "WARN")
+                for var in sorted(remaining_vars):
+                    self._log(f"   {{{var}}}", "WARN")
+            else:
+                self._log("\n✅ Все переменные заменены успешно", "SUCCESS")
+            
+            # ═══════════════════════════════════════════════════════════════
+            # ✅ 3. СРАВНЕНИЕ ДО/ПОСЛЕ
+            # ═══════════════════════════════════════════════════════════════
+            self._log("\n" + "=" * 80, "INFO")
+            self._log("📊 СРАВНЕНИЕ ДО/ПОСЛЕ", "INFO")
+            self._log("=" * 80, "INFO")
+            self._log(f"Строк в шаблоне: {len(template_text_lines)}", "DATA")
+            self._log(f"Строк в готовом документе: {len(result_text_lines)}", "DATA")
+            self._log(f"Заменено переменных: {replacements}", "DATA")
+            self._log(f"Осталось переменных: {len(remaining_vars)}", "DATA")
+            self._log("=" * 80, "INFO")
+            self._log("ГЕНЕРАЦИЯ ЗАВЕРШЕНА", "SUCCESS")
+            self._log("=" * 80, "INFO")
+            
+            return output_path, replacements
+            
         finally:
             if os.path.exists(template_path):
                 os.unlink(template_path)
 
-    def _replace_in_paragraph(self, paragraph, context):
-        """
-        ✅ БЕЗОПАСНАЯ замена переменных с сохранением стилей и структуры runs.
-        Точно повторяет рабочую логику из оригинального класса.
-        """
+    def _replace_in_paragraph(self, paragraph, context, stats_dict=None):
+        """Замена с диагностикой"""
         original_text = paragraph.text
         if not original_text:
             return 0
@@ -3885,7 +4851,6 @@ class DocGenerationEngine:
         new_text = original_text
         replacements = 0
         
-        # Находим и заменяем все плейсхолдеры
         for var_name, value in context.items():
             placeholder = f"{{{{{var_name}}}}}"
             if placeholder in new_text:
@@ -3893,34 +4858,35 @@ class DocGenerationEngine:
                 replacements += count
                 new_text = new_text.replace(placeholder, str(value))
                 
-        # Если были замены, аккуратно обновляем XML-структуру
-        if replacements > 0 and new_text != original_text:
+                if stats_dict is not None:
+                    stats_dict[var_name] = stats_dict.get(var_name, 0) + count
+        
+        if replacements > 0:
+            self._log(f"  Замена в абзаце: {replacements} переменных", "DATA")
+            self._log(f"    ДО:  '{original_text[:200]}{'...' if len(original_text) > 200 else ''}'", "DATA")
+            self._log(f"    ПОСЛЕ: '{new_text[:200]}{'...' if len(new_text) > 200 else ''}'", "DATA")
+            
+            if new_text == original_text:
+                self._log(f"    ⚠️ ВНИМАНИЕ: Текст НЕ изменился!", "ERROR")
+            
             if paragraph.runs:
-                # Берем первый run и заменяем его текст целиком
                 first_run = paragraph.runs[0]
-                
-                # Сохраняем оригинальное форматирование
                 saved_style = {
                     'bold': first_run.bold,
                     'italic': first_run.italic,
                     'underline': first_run.underline,
                     'font_name': first_run.font.name if first_run.font else None,
-                    'font_size': first_run.font.size if first_run.font else None,
-                    'font_color': first_run.font.color.rgb if first_run.font and first_run.font.color else None
+                    'font_size': first_run.font.size.pt if first_run.font and first_run.font.size else None,
                 }
                 
                 first_run.text = new_text
-                
-                # Восстанавливаем форматирование (python-docx иногда сбрасывает его при замене .text)
                 first_run.bold = saved_style['bold']
                 first_run.italic = saved_style['italic']
                 first_run.underline = saved_style['underline']
                 if first_run.font:
                     if saved_style['font_name']: first_run.font.name = saved_style['font_name']
-                    if saved_style['font_size']: first_run.font.size = saved_style['font_size']
-                    if saved_style['font_color']: first_run.font.color.rgb = saved_style['font_color']
+                    if saved_style['font_size']: first_run.font.size = Pt(saved_style['font_size'])
                 
-                # Удаляем остальные runs, чтобы не дублировать текст и не ломать XML
                 for i in range(len(paragraph.runs) - 1, 0, -1):
                     run = paragraph.runs[i]
                     r_elem = run._element
@@ -3930,12 +4896,11 @@ class DocGenerationEngine:
                         except Exception:
                             pass
             else:
-                # Если runs нет (пустой абзац или специфичный XML), создаем новый
                 paragraph.clear()
                 run = paragraph.add_run(new_text)
                 run.font.size = Pt(14)
                 run.font.name = 'Times New Roman'
-                
+        
         return replacements
 
     def save_to_database(self, request_type_id, recipient_id, issue_number, document_bytes):
@@ -7154,6 +8119,9 @@ if __name__ == "__main__":
 Модуль для главного окна приложения
 Содержит класс MainWindow для отображения данных КРД и информации о пользователе
 С функцией выгрузки данных в Excel, поиском в реальном времени и сортировкой по столбцам
+✅ ИСПРАВЛЕНО: Корректные импорты для отдельных файлов модулей
+✅ ДОБАВЛЕНО: Интеграция с системой тем оформления
+✅ ИСПРАВЛЕНО: Мягкое удаление КРД (UPDATE вместо DELETE)
 """
 
 import sys
@@ -7176,7 +8144,7 @@ from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.cell.cell import MergedCell
 
-# === ИМПОРТЫ ПРИЛОЖЕНИЯ ===
+# === ИМПОРТЫ ПРИЛОЖЕНИЯ (отдельные файлы) ===
 from add_krd_window import AddKrdWindow
 from audit_logger import AuditLogger
 from export_helper import KrdExcelExporter
@@ -7328,6 +8296,15 @@ class MainWindow(QMainWindow):
         initiator_types_action.triggered.connect(lambda: self.open_reference_editor("initiator_types"))
         ref_menu.addAction(initiator_types_action)
         
+        # === Меню "Настройки" ===
+        settings_menu = menu_bar.addMenu("⚙️ Настройки")
+        
+        # Тема оформления
+        theme_action = QAction("🎨 Оформление", self)
+        theme_action.setShortcut("Ctrl+T")
+        theme_action.triggered.connect(self.open_theme_settings)
+        settings_menu.addAction(theme_action)
+        
         # Меню "Отчеты" (только для администраторов)
         if self.user_info.get('role') == 'admin':
             reports_menu = menu_bar.addMenu("📊 Отчеты")
@@ -7342,6 +8319,12 @@ class MainWindow(QMainWindow):
             audit_action = QAction("Аудит действий пользователей", self)
             audit_action.triggered.connect(self.open_user_audit_window)
             reports_menu.addAction(audit_action)
+            
+            reports_menu.addSeparator()
+            
+            deleted_records_action = QAction("📁 Удаленные записи", self)
+            deleted_records_action.triggered.connect(self.open_deleted_records_window)
+            reports_menu.addAction(deleted_records_action)
         
         # Меню "Справка"
         help_menu = menu_bar.addMenu("Справка")
@@ -7371,7 +8354,7 @@ class MainWindow(QMainWindow):
         # === РАЗДЕЛИТЕЛЬ ===
         toolbar.addSeparator()
         
-        # === КНОПКИ ОТЧЕТОВ И СПРАВОЧНИКОВ (в одной группе) ===
+        # === КНОПКИ ОТЧЕТОВ И СПРАВОЧНИКОВ ===
         
         # Кнопка массового экспорта по всем КРД
         generate_all_action = QAction("📥 Отчеты по всем КРД", self)
@@ -7385,13 +8368,15 @@ class MainWindow(QMainWindow):
         ref_action.triggered.connect(self.open_reference_editor)
         toolbar.addAction(ref_action)
         
+        # === Кнопка темы оформления ===
+        theme_action = QAction("🎨 Тема", self)
+        theme_action.setToolTip("Сменить тему оформления")
+        theme_action.triggered.connect(self.open_theme_settings)
+        toolbar.addAction(theme_action)
+        
         # === Административные функции (только для администраторов) ===
         if self.user_info.get('role') == 'admin':
             toolbar.addSeparator()
-            
-            deleted_records_action = QAction("📁 Удаленные записи", self)
-            deleted_records_action.triggered.connect(self.open_deleted_records_window)
-            toolbar.addAction(deleted_records_action)
             
             user_mgmt_action = QAction("👥 Управление пользователями", self)
             user_mgmt_action.triggered.connect(self.open_user_management)
@@ -7400,13 +8385,15 @@ class MainWindow(QMainWindow):
             audit_action = QAction("📋 Аудит пользователей", self)
             audit_action.triggered.connect(self.open_user_audit_window)
             toolbar.addAction(audit_action)
-            
-
     
     def create_status_bar(self):
         """Создание строки состояния"""
         status_bar = self.statusBar()
-        status_bar.showMessage(f"Пользователь: {self.user_info['username']} | Роль: {self.user_info['role']}")
+        status_bar.showMessage(
+            f"Пользователь: {self.user_info['username']} | "
+            f"Роль: {self.user_info['role']} | "
+            f"Тема: {self.user_info.get('theme', 'Светлая')}"
+        )
     
     def create_user_info_section(self):
         """Создание секции с информацией о пользователе"""
@@ -7668,13 +8655,13 @@ class MainWindow(QMainWindow):
         menu.exec(self.krd_table_view.mapToGlobal(position))
     
     # ========================
-    # === НОВЫЕ МЕТОДЫ ДЛЯ СПРАВОЧНИКОВ (ДОСТУПНО ВСЕМ) ===
+    # === МЕТОДЫ ДЛЯ СПРАВОЧНИКОВ ===
     # ========================
     
     def open_reference_editor(self, initial_table=None):
         """
         Открытие редактора справочников
-        ✅ ДОСТУПНО ВСЕМ ПОЛЬЗОВАТЕЛЯМ (не только администраторам)
+        ✅ ДОСТУПНО ВСЕМ ПОЛЬЗОВАТЕЛЯМ
         
         Args:
             initial_table: Имя таблицы для открытия (опционально)
@@ -7688,6 +8675,19 @@ class MainWindow(QMainWindow):
         except Exception as e:
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Ошибка при открытии редактора справочников:\n{str(e)}")
+    
+    # ========================
+    # === МЕТОДЫ ДЛЯ НАСТРОЕК ===
+    # ========================
+    
+    def open_theme_settings(self):
+        """Открытие диалога настроек темы"""
+        try:
+            from theme_settings_dialog import open_theme_settings
+            open_theme_settings(self)
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Ошибка при открытии настроек темы:\n{str(e)}")
     
     # ========================
     # === МЕТОДЫ ДЛЯ ГЕНЕРАЦИИ ОТЧЕТОВ ===
@@ -7779,11 +8779,11 @@ class MainWindow(QMainWindow):
         dialog.exec()
     
     # ========================
-    # === СУЩЕСТВУЮЩИЕ МЕТОДЫ ===
+    # === МЕТОДЫ УПРАВЛЕНИЯ КРД ===
     # ========================
     
     def delete_selected_krd(self):
-        """Удаление выбранной записи КРД с подтверждением"""
+        """Мягкое удаление выбранной записи КРД (помечает как удалённую, не удаляет из БД)"""
         selection_model = self.krd_table_view.selectionModel()
         if not selection_model.hasSelection():
             QMessageBox.warning(self, "Внимание", "Выберите КРД для удаления")
@@ -7810,13 +8810,15 @@ class MainWindow(QMainWindow):
             f"Вы действительно хотите удалить КРД?\n\n"
             f"Номер КРД: {krd_number}\n"
             f"Военнослужащий: {full_name}\n\n"
-            f"⚠️ Внимание: Все связанные данные будут удалены безвозвратно!",
+            f"⚠️ Внимание: Запись будет скрыта из списка, но сохранена в базе данных.\n"
+            f"Восстановить можно через меню '📁 Удаленные записи' (только для администраторов).",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
             QMessageBox.StandardButton.No
         )
         
         if reply == QMessageBox.StandardButton.Yes:
             try:
+                # ✅ СОХРАНЯЕМ СТАРЫЕ ДАННЫЕ ДЛЯ АУДИТА
                 query_data = QSqlQuery(self.db)
                 query_data.prepare("SELECT s.* FROM krd.social_data s WHERE s.krd_id = ?")
                 query_data.addBindValue(krd_id)
@@ -7831,19 +8833,37 @@ class MainWindow(QMainWindow):
                 if not self.db.transaction():
                     raise Exception(f"Не удалось начать транзакцию: {self.db.lastError().text()}")
                 
+                # ✅ ИСПРАВЛЕНО: МЯГКОЕ УДАЛЕНИЕ (UPDATE вместо DELETE)
                 query = QSqlQuery(self.db)
-                query.prepare("DELETE FROM krd.krd WHERE id = ?")
-                query.addBindValue(krd_id)
+                query.prepare("""
+                    UPDATE krd.krd 
+                    SET is_deleted = TRUE, 
+                        deleted_at = CURRENT_TIMESTAMP,
+                        deleted_by = :user_id
+                    WHERE id = :id
+                """)
+                query.bindValue(":user_id", self.user_info.get('id'))
+                query.bindValue(":id", krd_id)
                 
                 if not query.exec():
                     raise Exception(f"Ошибка при удалении КРД: {query.lastError().text()}")
                 
+                if query.numRowsAffected() == 0:
+                    raise Exception("Запись не найдена или уже удалена")
+                
                 if not self.db.commit():
                     raise Exception(f"Ошибка при коммите транзакции: {self.db.lastError().text()}")
                 
+                # ✅ ЛОГИРОВАНИЕ МЯГКОГО УДАЛЕНИЯ
                 self.audit_logger.log_krd_delete(krd_id, old_data)
                 
-                QMessageBox.information(self, "Успех", f"КРД №{krd_number} успешно удален!")
+                QMessageBox.information(
+                    self, 
+                    "Успех", 
+                    f"✅ КРД №{krd_number} успешно скрыт!\n\n"
+                    f"Запись сохранена в базе данных.\n"
+                    f"Восстановить можно через меню администратора '📁 Удаленные записи'."
+                )
                 self.load_krd_data()
                 
             except Exception as e:
@@ -7855,6 +8875,23 @@ class MainWindow(QMainWindow):
         krd_add_window = AddKrdWindow(self.db)
         if krd_add_window.exec() == QDialog.DialogCode.Accepted:
             self.load_krd_data()
+    
+    def on_krd_double_clicked(self, index):
+        """Обработка двойного клика по строке в таблице КРД"""
+        krd_id = self.table_model_krd.data(self.table_model_krd.index(index.row(), 0))
+
+        if krd_id:
+            self.audit_logger.log_krd_view(int(krd_id))
+            
+            from krd_details_window import KrdDetailsWindow
+            details_window = KrdDetailsWindow(int(krd_id), self.db, self.audit_logger)
+
+            if details_window.exec() == QDialog.DialogCode.Accepted:
+                self.load_krd_data()
+    
+    # ========================
+    # === АДМИНИСТРАТИВНЫЕ МЕТОДЫ ===
+    # ========================
     
     def open_user_management(self):
         """Открытие окна управления пользователями"""
@@ -7876,18 +8913,23 @@ class MainWindow(QMainWindow):
         dialog.setLayout(layout)
         dialog.exec()
     
-    def on_krd_double_clicked(self, index):
-        """Обработка двойного клика по строке в таблице КРД"""
-        krd_id = self.table_model_krd.data(self.table_model_krd.index(index.row(), 0))
-
-        if krd_id:
-            self.audit_logger.log_krd_view(int(krd_id))
-            
-            from krd_details_window import KrdDetailsWindow
-            details_window = KrdDetailsWindow(int(krd_id), self.db, self.audit_logger)
-
-            if details_window.exec() == QDialog.DialogCode.Accepted:
-                self.load_krd_data()
+    def open_user_audit_window(self):
+        """Открытие окна аудита действий пользователей"""
+        from user_audit_window import UserAuditWindow
+        
+        audit_window = UserAuditWindow(self.db, self.user_info.get('id'))
+        audit_window.exec()
+    
+    def open_deleted_records_window(self):
+        """Открытие окна удаленных записей"""
+        from deleted_records_window import DeletedRecordsWindow
+        
+        deleted_window = DeletedRecordsWindow(self.db)
+        deleted_window.exec()
+    
+    # ========================
+    # === ПРОЧИЕ МЕТОДЫ ===
+    # ========================
     
     def show_about_dialog(self):
         """Показ диалога "О программе" """
@@ -7904,20 +8946,6 @@ class MainWindow(QMainWindow):
         """Обработчик закрытия окна"""
         self.audit_logger.log_user_logout()
         super().closeEvent(event)
-    
-    def open_user_audit_window(self):
-        """Открытие окна аудита действий пользователей"""
-        from user_audit_window import UserAuditWindow
-        
-        audit_window = UserAuditWindow(self.db, self.user_info.get('id'))
-        audit_window.exec()
-    
-    def open_deleted_records_window(self):
-        """Открытие окна удаленных записей"""
-        from deleted_records_window import DeletedRecordsWindow
-        
-        deleted_window = DeletedRecordsWindow(self.db)
-        deleted_window.exec()
 
 
 def main():
@@ -7956,8 +8984,8 @@ if __name__ == "__main__":
 
 """
 Диалог для редактирования сопоставлений полей шаблона с данными из БД
+✅ ДОБАВЛЕНО: SearchableComboBox для поиска полей
 """
-
 import os
 import tempfile
 import json
@@ -7973,7 +9001,7 @@ from PyQt6.QtGui import QFont
 from docx import Document
 from composite_field_widget import CompositeFieldWidget
 from field_mapping_manager import FieldMappingManager
-
+from searchable_combo import SearchableComboBox  # ✅ ИМПОРТ НОВОГО КЛАССА
 
 # === СПРАВОЧНИК: DB колонка → Русское описание ===
 COLUMN_DESCRIPTIONS = {
@@ -8011,7 +9039,6 @@ COLUMN_DESCRIPTIONS = {
     "federal_search_info": "Сведения о федеральном розыске",
     "military_contacts": "Контакты военнослужащего",
     "relatives_info": "Сведения о близких родственниках",
-    
     # addresses
     "region": "📍 Субъект РФ (область, край, республика)",
     "district": "📍 Административный район",
@@ -8024,7 +9051,6 @@ COLUMN_DESCRIPTIONS = {
     "room": "📍 Номер комнаты",
     "check_date": "📅 Дата адресной проверки",
     "check_result": "✅ Результат проверки",
-    
     # service_places
     "place_name": "🎖️ Наименование места службы",
     "military_unit_id": "🎖️ ID военного управления",
@@ -8042,7 +9068,6 @@ COLUMN_DESCRIPTIONS = {
     "postal_apartment": "📮 Квартира почтового адреса",
     "postal_room": "📮 Комната почтового адреса",
     "place_contacts": "📞 Контакты места службы",
-    
     # soch_episodes
     "soch_date": "⚠️ Дата СОЧ",
     "soch_location": "⚠️ Место СОЧ",
@@ -8181,6 +9206,7 @@ class MappingEditorDialog(QDialog):
         
         # Кнопки сохранения и закрытия
         button_box = QDialogButtonBox()
+        
         save_btn = QPushButton("💾 Сохранить сопоставления")
         save_btn.setStyleSheet("""
             QPushButton {
@@ -8215,8 +9241,8 @@ class MappingEditorDialog(QDialog):
         
         button_box.addButton(save_btn, QDialogButtonBox.ButtonRole.AcceptRole)
         button_box.addButton(cancel_btn, QDialogButtonBox.ButtonRole.RejectRole)
-        
         layout.addWidget(button_box)
+        
         self.setLayout(layout)
         
         # Загрузка данных
@@ -8240,6 +9266,7 @@ class MappingEditorDialog(QDialog):
         var_combo.addItems(self.template_variables)
         self.mapping_table.setCellWidget(row, 0, var_combo)
         
+        # ✅ ИСПОЛЬЗУЕМ SearchableComboBox
         col_combo = self._create_db_column_combo()
         self.mapping_table.setCellWidget(row, 1, col_combo)
         
@@ -8284,6 +9311,7 @@ class MappingEditorDialog(QDialog):
         var_combo.setCurrentText(field_name)
         self.mapping_table.setCellWidget(row, 0, var_combo)
         
+        # ✅ ИСПОЛЬЗУЕМ SearchableComboBox
         col_combo = self._create_db_column_combo(db_column)
         self.mapping_table.setCellWidget(row, 1, col_combo)
         
@@ -8304,35 +9332,79 @@ class MappingEditorDialog(QDialog):
         self.mapping_table.setRowCount(0)
         self.mapping_manager.load_field_mappings(template_id)
     
-    # ==============================================
-    
     def _create_db_column_combo(self, selected_column=None):
         """Создание ComboBox с русскими описаниями полей БД"""
-        combo = QComboBox()
-        combo.setEditable(False)
-        combo.setMaxVisibleItems(50)
-        combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        combo.view().setMinimumHeight(400)
-        combo.setMinimumWidth(350)
-        combo.setMaximumWidth(600)
-        
-        all_columns = []
-        for table_name, columns in self.db_columns.items():
-            for col in columns:
-                if col in COLUMN_DESCRIPTIONS:
-                    all_columns.append((col, COLUMN_DESCRIPTIONS[col]))
-        
-        all_columns.sort(key=lambda x: x[1])
-        
-        for col_name, col_description in all_columns:
-            combo.addItem(col_description, col_name)
-        
-        if selected_column:
-            index = combo.findData(selected_column)
-            if index >= 0:
-                combo.setCurrentIndex(index)
-        
-        return combo
+        try:
+            print(f"\n{'='*60}")
+            print(f"🔧 СОЗДАНИЕ COMBOBOX ДЛЯ ПОЛЯ БД")
+            print(f"{'='*60}")
+            
+            combo = SearchableComboBox()
+            
+            if combo is None:
+                print("❌ ОШИБКА: Не удалось создать SearchableComboBox!")
+                return None
+            
+            print(f"✅ SearchableComboBox создан: {combo}")
+            print(f"   Тип: {type(combo).__name__}")
+            print(f"   Редактируемый: {combo.isEditable()}")
+            
+            combo.setMaxVisibleItems(50)
+            combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            combo.view().setMinimumHeight(400)
+            combo.setMinimumWidth(350)
+            combo.setMaximumWidth(600)
+            
+            # ✅ ИСПРАВЛЕНО: completer() — это метод в PyQt6!
+            completer = combo.completer()
+            if completer:
+                print(f"✅ Completer настроен")
+                print(f"   CaseSensitivity: {completer.caseSensitivity()}")
+                print(f"   FilterMode: {completer.filterMode()}")
+                print(f"   CompletionMode: {completer.completionMode()}")
+            else:
+                print("❌ ОШИБКА: Completer не создан!")
+            
+            all_columns = []
+            for table_name, columns in self.db_columns.items():
+                for col in columns:
+                    if col in COLUMN_DESCRIPTIONS:
+                        all_columns.append((col, COLUMN_DESCRIPTIONS[col]))
+            
+            all_columns.sort(key=lambda x: x[1])
+            
+            print(f"\n📊 Загрузка {len(all_columns)} колонок...")
+            
+            for col_name, col_description in all_columns:
+                combo.addItem(col_description, col_name)
+            
+            print(f"✅ Добавлено элементов: {combo.count()}")
+            
+            if selected_column:
+                index = combo.findData(selected_column)
+                if index >= 0:
+                    combo.setCurrentIndex(index)
+                    print(f"✅ Выбран элемент: {combo.currentText()} (data={combo.currentData()})")
+                else:
+                    print(f"⚠️ Предупреждение: Колонка '{selected_column}' не найдена")
+            
+            if combo.count() == 0:
+                print("❌ ОШИБКА: ComboBox пуст!")
+            else:
+                print(f"✅ ComboBox готов к использованию")
+            
+            print(f"{'='*60}\n")
+            return combo
+            
+        except Exception as e:
+            print(f"❌ КРИТИЧЕСКАЯ ОШИБКА при создании ComboBox: {e}")
+            import traceback
+            traceback.print_exc()
+            
+            print("⚠️ Создаем fallback ComboBox...")
+            combo = QComboBox()
+            combo.addItem("Ошибка загрузки", None)
+            return combo
     
     def load_template_variables(self, template_id):
         """Загрузка переменных из шаблона"""
@@ -8977,6 +10049,407 @@ class RecipientWidget(QWidget):
 
     def current_id(self):
         return self.combo.currentData()
+
+========================================
+📄 FILE: ./record_view_dialog.py
+========================================
+
+"""
+Диалог просмотра записей с возможностью восстановления
+✅ Вынесен в отдельный модуль для переиспользования
+✅ Поддерживает КРД, Шаблоны и Запросы
+✅ ИСПРАВЛЕНО: Корректная работа с QGridLayout
+"""
+from PyQt6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QGridLayout,
+    QLabel, QPushButton, QTextEdit, QLineEdit,
+    QMessageBox, QScrollArea, QWidget, QFrame
+)
+from PyQt6.QtCore import Qt
+from PyQt6.QtSql import QSqlQuery
+from PyQt6.QtGui import QFont
+import traceback
+
+
+class RecordViewDialog(QDialog):
+    """
+    Универсальный диалог просмотра записей
+    Поддерживает: krd, templates, requests
+    """
+    
+    def __init__(self, db, record_type, record_id, parent=None):
+        super().__init__(parent)
+        self.db = db
+        self.record_type = record_type
+        self.record_id = record_id
+        self.record_data = {}
+        
+        self.setWindowTitle("📋 Просмотр записи")
+        self.setMinimumSize(800, 650)
+        self.setModal(True)
+        
+        self.init_ui()
+        self.load_record_data()
+    
+    def init_ui(self):
+        """Инициализация интерфейса"""
+        main_layout = QVBoxLayout()
+        main_layout.setSpacing(15)
+        main_layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Заголовок
+        title_label = QLabel("📋 Информация о записи")
+        title_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        main_layout.addWidget(title_label)
+        
+        # Область прокрутки
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QScrollArea.Shape.NoFrame)
+        
+        container = QWidget()
+        self.content_layout = QVBoxLayout(container)
+        self.content_layout.setSpacing(10)
+        
+        scroll.setWidget(container)
+        main_layout.addWidget(scroll, 1)
+        
+        # Разделитель
+        separator = QFrame()
+        separator.setFrameShape(QFrame.Shape.HLine)
+        separator.setFrameShadow(QFrame.Shadow.Sunken)
+        main_layout.addWidget(separator)
+        
+        # Кнопки
+        button_layout = QHBoxLayout()
+        
+        self.restore_btn = QPushButton("♻️ Восстановить запись")
+        self.restore_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                font-weight: bold;
+                padding: 10px 20px;
+                border-radius: 5px;
+                min-width: 150px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        self.restore_btn.clicked.connect(self.restore_record)
+        button_layout.addWidget(self.restore_btn)
+        
+        button_layout.addStretch()
+        
+        close_btn = QPushButton("Закрыть")
+        close_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #2196F3;
+                color: white;
+                font-weight: bold;
+                padding: 10px 20px;
+                border-radius: 5px;
+                min-width: 100px;
+            }
+            QPushButton:hover {
+                background-color: #1976D2;
+            }
+        """)
+        close_btn.clicked.connect(self.accept)
+        button_layout.addWidget(close_btn)
+        
+        main_layout.addLayout(button_layout)
+        self.setLayout(main_layout)
+    
+    def _add_field(self, layout, label_text, value, multiline=False, row=None):
+        """
+        Добавление поля в форму
+        ✅ ИСПРАВЛЕНО: Поддержка как QVBoxLayout, так и QGridLayout
+        """
+        field_layout = QHBoxLayout()
+        
+        label = QLabel(f"{label_text}:")
+        label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        label.setMinimumWidth(200)
+        field_layout.addWidget(label)
+        
+        if multiline:
+            value_widget = QTextEdit()
+            value_widget.setPlainText(str(value) if value else "")
+            value_widget.setReadOnly(True)
+            value_widget.setMaximumHeight(80)
+            value_widget.setStyleSheet("""
+                QTextEdit {
+                    background-color: #f5f5f5;
+                    border: 1px solid #ddd;
+                    border-radius: 3px;
+                    padding: 5px;
+                }
+            """)
+        else:
+            value_widget = QLineEdit()
+            value_widget.setText(str(value) if value else "")
+            value_widget.setReadOnly(True)
+            value_widget.setStyleSheet("""
+                QLineEdit {
+                    background-color: #f5f5f5;
+                    border: 1px solid #ddd;
+                    border-radius: 3px;
+                    padding: 5px;
+                }
+            """)
+        
+        field_layout.addWidget(value_widget, 1)
+        
+        # ✅ ИСПРАВЛЕНО: Проверяем тип layout
+        if isinstance(layout, QGridLayout) and row is not None:
+            layout.addLayout(field_layout, row, 0)
+        else:
+            layout.addLayout(field_layout)
+    
+    def load_record_data(self):
+        """Загрузка данных записи в зависимости от типа"""
+        try:
+            if self.record_type in ["krd", "КРД"]:
+                self._load_krd_data()
+            elif self.record_type in ["templates", "Шаблон"]:
+                self._load_template_data()
+            elif self.record_type in ["requests", "Запрос"]:
+                self._load_request_data()
+            else:
+                QMessageBox.warning(self, "Ошибка", f"Неизвестный тип записи: {self.record_type}")
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Ошибка загрузки данных:\n{str(e)}")
+    
+    def _load_krd_data(self):
+        """Загрузка данных КРД"""
+        self.setWindowTitle(f"📋 Просмотр КРД-{self.record_id}")
+        
+        query = QSqlQuery(self.db)
+        query.prepare("""
+            SELECT 
+                k.id,
+                CONCAT('КРД-', k.id),
+                COALESCE(s.surname, ''),
+                COALESCE(s.name, ''),
+                COALESCE(s.patronymic, ''),
+                s.birth_date,
+                s.birth_place_town,
+                s.personal_number,
+                s.tab_number,
+                COALESCE(c.name, ''),
+                COALESCE(r.name, ''),
+                k.deleted_at,
+                COALESCE(u.username, 'Неизвестно')
+            FROM krd.krd k
+            LEFT JOIN krd.social_data s ON k.id = s.krd_id
+            LEFT JOIN krd.categories c ON s.category_id = c.id
+            LEFT JOIN krd.ranks r ON s.rank_id = r.id
+            LEFT JOIN krd.users u ON k.deleted_by = u.id
+            WHERE k.id = ?
+        """)
+        query.addBindValue(self.record_id)
+        
+        if not query.exec() or not query.next():
+            raise Exception("Запись КРД не найдена")
+        
+        # Группа: Основная информация
+        group1 = QGroupBox("📋 Основная информация")
+        group1.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        layout1 = QVBoxLayout()  # ✅ ИСПРАВЛЕНО: Используем QVBoxLayout
+        group1.setLayout(layout1)
+        
+        row = 0
+        self._add_field(layout1, "ID КРД", query.value(0), row=row)
+        self._add_field(layout1, "Номер КРД", query.value(1), row=row)
+        self._add_field(layout1, "Фамилия", query.value(2), row=row)
+        self._add_field(layout1, "Имя", query.value(3), row=row)
+        self._add_field(layout1, "Отчество", query.value(4), row=row)
+        self._add_field(layout1, "Дата рождения", query.value(5), row=row)
+        self._add_field(layout1, "Место рождения", query.value(6), row=row)
+        self._add_field(layout1, "Личный номер", query.value(7), row=row)
+        self._add_field(layout1, "Табельный номер", query.value(8), row=row)
+        self._add_field(layout1, "Категория", query.value(9), row=row)
+        self._add_field(layout1, "Звание", query.value(10), row=row)
+        
+        self.content_layout.addWidget(group1)
+        
+        # Группа: Информация об удалении
+        group2 = QGroupBox("🗑️ Информация об удалении")
+        group2.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        layout2 = QVBoxLayout()  # ✅ ИСПРАВЛЕНО: Используем QVBoxLayout
+        group2.setLayout(layout2)
+        
+        self._add_field(layout2, "Дата удаления", query.value(11), row=row)
+        self._add_field(layout2, "Удалил пользователь", query.value(12), row=row)
+        
+        self.content_layout.addWidget(group2)
+        self.content_layout.addStretch()
+    
+    def _load_template_data(self):
+        """Загрузка данных шаблона"""
+        self.setWindowTitle(f"📋 Просмотр шаблона (ID={self.record_id})")
+        
+        query = QSqlQuery(self.db)
+        query.prepare("""
+            SELECT 
+                id,
+                name,
+                COALESCE(description, ''),
+                created_at,
+                updated_at,
+                deleted_at,
+                COALESCE(u.username, 'Неизвестно'),
+                LENGTH(template_data)
+            FROM krd.document_templates
+            LEFT JOIN krd.users u ON deleted_by = u.id
+            WHERE id = ?
+        """)
+        query.addBindValue(self.record_id)
+        
+        if not query.exec() or not query.next():
+            raise Exception("Шаблон не найден")
+        
+        # Группа: Основная информация
+        group1 = QGroupBox("📄 Информация о шаблоне")
+        group1.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        layout1 = QVBoxLayout()  # ✅ ИСПРАВЛЕНО: Используем QVBoxLayout
+        group1.setLayout(layout1)
+        
+        self._add_field(layout1, "ID шаблона", query.value(0), row=0)
+        self._add_field(layout1, "Название", query.value(1), row=0)
+        self._add_field(layout1, "Описание", query.value(2), multiline=True, row=0)
+        self._add_field(layout1, "Дата создания", query.value(3), row=0)
+        self._add_field(layout1, "Дата обновления", query.value(4), row=0)
+        self._add_field(layout1, "Размер файла", f"{query.value(7)} байт", row=0)
+        
+        self.content_layout.addWidget(group1)
+        
+        # Группа: Информация об удалении
+        group2 = QGroupBox("🗑️ Информация об удалении")
+        group2.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        layout2 = QVBoxLayout()  # ✅ ИСПРАВЛЕНО: Используем QVBoxLayout
+        group2.setLayout(layout2)
+        
+        self._add_field(layout2, "Дата удаления", query.value(5), row=0)
+        self._add_field(layout2, "Удалил пользователь", query.value(6), row=0)
+        
+        self.content_layout.addWidget(group2)
+        self.content_layout.addStretch()
+    
+    def _load_request_data(self):
+        """Загрузка данных запроса"""
+        self.setWindowTitle(f"📋 Просмотр запроса (ID={self.record_id})")
+        
+        query = QSqlQuery(self.db)
+        query.prepare("""
+            SELECT 
+                o.id,
+                o.issue_number,
+                COALESCE(rt.name, 'Не указан'),
+                COALESCE(r.name, 'Не указан'),
+                o.issue_date,
+                o.request_text,
+                o.signed_by_position,
+                o.deleted_at,
+                COALESCE(u.username, 'Неизвестно'),
+                LENGTH(o.document_data)
+            FROM krd.outgoing_requests o
+            LEFT JOIN krd.request_types rt ON o.request_type_id = rt.id
+            LEFT JOIN krd.recipients r ON o.recipient_id = r.id
+            LEFT JOIN krd.users u ON o.deleted_by = u.id
+            WHERE o.id = ?
+        """)
+        query.addBindValue(self.record_id)
+        
+        if not query.exec() or not query.next():
+            raise Exception("Запрос не найден")
+        
+        # Группа: Основная информация
+        group1 = QGroupBox("📤 Информация о запросе")
+        group1.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        layout1 = QVBoxLayout()  # ✅ ИСПРАВЛЕНО: Используем QVBoxLayout
+        group1.setLayout(layout1)
+        
+        self._add_field(layout1, "ID запроса", query.value(0), row=0)
+        self._add_field(layout1, "Номер запроса", query.value(1), row=0)
+        self._add_field(layout1, "Тип запроса", query.value(2), row=0)
+        self._add_field(layout1, "Адресат", query.value(3), row=0)
+        self._add_field(layout1, "Дата запроса", query.value(4), row=0)
+        self._add_field(layout1, "Текст запроса", query.value(5), multiline=True, row=0)
+        self._add_field(layout1, "Должность подписанта", query.value(6), row=0)
+        self._add_field(layout1, "Размер документа", f"{query.value(9)} байт", row=0)
+        
+        self.content_layout.addWidget(group1)
+        
+        # Группа: Информация об удалении
+        group2 = QGroupBox("🗑️ Информация об удалении")
+        group2.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        layout2 = QVBoxLayout()  # ✅ ИСПРАВЛЕНО: Используем QVBoxLayout
+        group2.setLayout(layout2)
+        
+        self._add_field(layout2, "Дата удаления", query.value(7), row=0)
+        self._add_field(layout2, "Удалил пользователь", query.value(8), row=0)
+        
+        self.content_layout.addWidget(group2)
+        self.content_layout.addStretch()
+    
+    def restore_record(self):
+        """Восстановление записи"""
+        record_name = self.windowTitle().replace("📋 Просмотр ", "")
+        
+        reply = QMessageBox.question(
+            self,
+            "Подтверждение восстановления",
+            f"Вы действительно хотите восстановить запись?\n\n{record_name}",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                if self.record_type in ["krd", "КРД"]:
+                    table = "krd.krd"
+                elif self.record_type in ["templates", "Шаблон"]:
+                    table = "krd.document_templates"
+                elif self.record_type in ["requests", "Запрос"]:
+                    table = "krd.outgoing_requests"
+                else:
+                    QMessageBox.warning(self, "Ошибка", "Неизвестный тип записи")
+                    return
+                
+                query = QSqlQuery(self.db)
+                query.prepare(f"""
+                    UPDATE {table}
+                    SET is_deleted = FALSE,
+                        deleted_at = NULL,
+                        deleted_by = NULL
+                    WHERE id = ?
+                """)
+                query.addBindValue(self.record_id)
+                
+                if query.exec() and query.numRowsAffected() > 0:
+                    QMessageBox.information(
+                        self,
+                        "Успех",
+                        f"Запись \"{record_name}\" успешно восстановлена!"
+                    )
+                    self.accept()
+                    # Обновляем список в родительском окне
+                    if self.parent() and hasattr(self.parent(), 'load_deleted_records'):
+                        self.parent().load_deleted_records()
+                else:
+                    raise Exception("Запись не найдена или уже восстановлена")
+            
+            except Exception as e:
+                traceback.print_exc()
+                QMessageBox.critical(
+                    self,
+                    "Ошибка",
+                    f"Ошибка при восстановлении записи:\n{str(e)}"
+                )
 
 ========================================
 📄 FILE: ./reference_editor_dialog.py
@@ -10311,6 +11784,41 @@ def main():
 
 if __name__ == "__main__":
     main()
+
+========================================
+📄 FILE: ./searchable_combo.py
+========================================
+
+# searchable_combo.py
+"""
+ComboBox с функцией поиска/фильтрации элементов
+✅ ИСПРАВЛЕНО: Все 3 критические ошибки устранены
+"""
+from PyQt6.QtWidgets import QComboBox, QCompleter
+from PyQt6.QtCore import Qt
+
+class SearchableComboBox(QComboBox):
+    """ComboBox с функцией поиска/фильтрации элементов"""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+        # Делаем поле редактируемым
+        self.setEditable(True)
+        self.setInsertPolicy(QComboBox.InsertPolicy.NoInsert)
+        self.setPlaceholderText("🔍 Поиск поля...")
+        
+        # ✅ ИСПРАВЛЕНИЕ 1: Передаём модель комбобокса в QCompleter
+        self.setCompleter(QCompleter(self.model(), self))
+        
+        # ✅ ИСПРАВЛЕНИЕ 2: Используем метод completer(), не переопределяем атрибут
+        completer = self.completer()
+        if completer:
+            completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+            completer.setFilterMode(Qt.MatchFlag.MatchContains)
+            # ✅ ИСПРАВЛЕНИЕ 3: Режим PopupCompletion обязателен для фильтрации
+            completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+        
+        # ❌ УДАЛЕНО: Ручное подключение textEdited (QCompleter делает это сам)
 
 ========================================
 📄 FILE: ./service_place_dialog.py
@@ -12707,6 +14215,1273 @@ class TemplateManager:
                 self.load_templates()
 
 ========================================
+📄 FILE: ./theme_editor_dialog.py
+========================================
+
+"""
+Диалог для создания и редактирования пользовательских тем
+"""
+from PyQt6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QGridLayout,
+    QCheckBox, QLabel, QPushButton, QListWidget, QListWidgetItem,
+    QMessageBox, QLineEdit, QTextEdit, QDialogButtonBox,
+    QTabWidget, QWidget, QTreeWidget, QTreeWidgetItem,
+    QSplitter, QComboBox
+)
+from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QFont
+from user_theme_manager import UserThemeManager
+import json
+
+class ThemeEditorDialog(QDialog):
+    """Диалог редактора тем"""
+    
+    def __init__(self, db_connection, user_id, parent=None):
+        super().__init__(parent)
+        self.db = db_connection
+        self.user_id = user_id
+        self.theme_manager = UserThemeManager(db_connection)
+        self.current_config = self.theme_manager.get_default_config()
+        
+        self.setWindowTitle("🎨 Редактор пользовательской темы")
+        self.setMinimumSize(1000, 700)
+        
+        self.init_ui()
+        self.load_themes_list()
+    
+    def init_ui(self):
+        """Инициализация интерфейса"""
+        layout = QVBoxLayout()
+        layout.setSpacing(15)
+        
+        # === Верхняя панель с информацией ===
+        info_group = QGroupBox("📋 Информация о теме")
+        info_layout = QGridLayout()
+        
+        info_layout.addWidget(QLabel("Название темы:"), 0, 0)
+        self.theme_name_input = QLineEdit()
+        self.theme_name_input.setPlaceholderText("Например: Моя рабочая тема")
+        info_layout.addWidget(self.theme_name_input, 0, 1)
+        
+        info_layout.addWidget(QLabel("Описание:"), 1, 0)
+        self.theme_desc_input = QTextEdit()
+        self.theme_desc_input.setMaximumHeight(60)
+        self.theme_desc_input.setPlaceholderText("Описание темы...")
+        info_layout.addWidget(self.theme_desc_input, 1, 1)
+        
+        info_group.setLayout(info_layout)
+        layout.addWidget(info_group)
+        
+        # === Вкладки с настройками ===
+        tabs = QTabWidget()
+        
+        # Вкладка 1: Социально-демографические данные
+        tabs.addTab(self.create_social_data_tab(), "👤 Социальные данные")
+        
+        # Вкладка 2: Адреса
+        tabs.addTab(self.create_addresses_tab(), "📍 Адреса")
+        
+        # Вкладка 3: UI настройки
+        tabs.addTab(self.create_ui_settings_tab(), "⚙️ Интерфейс")
+        
+        # Вкладка 4: Список тем
+        tabs.addTab(self.create_themes_list_tab(), "📁 Мои темы")
+        
+        layout.addWidget(tabs)
+        
+        # === Кнопки ===
+        button_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Save |
+            QDialogButtonBox.StandardButton.Cancel
+        )
+        
+        save_btn = button_box.button(QDialogButtonBox.StandardButton.Save)
+        save_btn.setText("💾 Сохранить тему")
+        save_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                font-weight: bold;
+                padding: 10px 20px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        
+        save_btn.clicked.connect(self.save_theme)
+        button_box.rejected.connect(self.reject)
+        
+        layout.addWidget(button_box)
+        self.setLayout(layout)
+    
+    def create_social_data_tab(self):
+        """Вкладка настройки социальных данных"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Список всех доступных полей
+        all_fields = [
+            ("surname", "Фамилия *"),
+            ("name", "Имя *"),
+            ("patronymic", "Отчество *"),
+            ("birth_date", "Дата рождения"),
+            ("birth_place_town", "Город рождения"),
+            ("birth_place_region", "Регион рождения"),
+            ("tab_number", "Табельный номер"),
+            ("personal_number", "Личный номер"),
+            ("category_id", "Категория"),
+            ("rank_id", "Звание"),
+            ("drafted_by_commissariat", "Военкомат"),
+            ("draft_date", "Дата призыва"),
+            ("povsk", "ПОВСК"),
+            ("education", "Образование"),
+            ("passport_series", "Серия паспорта"),
+            ("passport_number", "Номер паспорта"),
+            ("military_id_series", "Серия военного"),
+            ("military_id_number", "Номер военного"),
+            ("appearance_features", "Особенности внешности"),
+            ("personal_marks", "Приметы"),
+            ("military_contacts", "Контакты"),
+            ("relatives_info", "Родственники")
+        ]
+        
+        # Splitter для двух списков
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        
+        # Доступные поля
+        available_group = QGroupBox("📦 Доступные поля")
+        available_layout = QVBoxLayout()
+        self.available_fields_list = QListWidget()
+        for field_id, field_name in all_fields:
+            item = QListWidgetItem(field_name)
+            item.setData(Qt.ItemDataRole.UserRole, field_id)
+            self.available_fields_list.addItem(item)
+        available_layout.addWidget(self.available_fields_list)
+        available_group.setLayout(available_layout)
+        splitter.addWidget(available_group)
+        
+        # Выбранные поля
+        selected_group = QGroupBox("✅ Выбранные поля (перетаскивайте для изменения порядка)")
+        selected_layout = QVBoxLayout()
+        self.selected_fields_list = QListWidget()
+        self.selected_fields_list.setDragDropMode(QListWidget.DragDropMode.InternalMove)
+        selected_layout.addWidget(self.selected_fields_list)
+        
+        # Кнопки управления
+        btn_layout = QHBoxLayout()
+        add_btn = QPushButton("➕ Добавить")
+        add_btn.clicked.connect(self.add_field)
+        btn_layout.addWidget(add_btn)
+        
+        remove_btn = QPushButton("➖ Убрать")
+        remove_btn.clicked.connect(self.remove_field)
+        btn_layout.addWidget(remove_btn)
+        
+        selected_layout.addLayout(btn_layout)
+        selected_group.setLayout(selected_layout)
+        splitter.addWidget(selected_group)
+        
+        splitter.setSizes([300, 500])
+        layout.addWidget(splitter)
+        
+        # Загружаем текущие настройки
+        self.load_current_fields()
+        
+        return widget
+    
+    def create_addresses_tab(self):
+        """Вкладка настройки адресов"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        info_label = QLabel("📍 Настройка полей для адресов проживания")
+        info_label.setStyleSheet("QLabel { padding: 10px; background-color: #f0f0f0; border-radius: 5px; }")
+        layout.addWidget(info_label)
+        
+        # Чекбоксы для полей адресов
+        address_fields = [
+            ("region", "Субъект РФ"),
+            ("district", "Район"),
+            ("town", "Населенный пункт"),
+            ("street", "Улица"),
+            ("house", "Дом"),
+            ("building", "Корпус"),
+            ("apartment", "Квартира"),
+            ("check_date", "Дата проверки"),
+            ("check_result", "Результат проверки")
+        ]
+        
+        self.address_checkboxes = {}
+        for field_id, field_name in address_fields:
+            cb = QCheckBox(field_name)
+            cb.setChecked(True)  # По умолчанию все включено
+            cb.setData(field_id)
+            self.address_checkboxes[field_id] = cb
+            layout.addWidget(cb)
+        
+        layout.addStretch()
+        return widget
+    
+    def create_ui_settings_tab(self):
+        """Вкладка настроек интерфейса"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        # Тема оформления
+        theme_group = QGroupBox("🎨 Тема оформления")
+        theme_layout = QVBoxLayout()
+        
+        self.theme_combo = QComboBox()
+        self.theme_combo.addItem("Светлая", "light")
+        self.theme_combo.addItem("Тёмная", "dark")
+        self.theme_combo.addItem("Системная", "system")
+        theme_layout.addWidget(QLabel("Цветовая схема:"))
+        theme_layout.addWidget(self.theme_combo)
+        
+        theme_group.setLayout(theme_layout)
+        layout.addWidget(theme_group)
+        
+        # Дополнительные настройки
+        settings_group = QGroupBox("⚙️ Дополнительные настройки")
+        settings_layout = QVBoxLayout()
+        
+        self.compact_mode_cb = QCheckBox("Компактный режим (уменьшенные отступы)")
+        self.compact_mode_cb.setChecked(False)
+        settings_layout.addWidget(self.compact_mode_cb)
+        
+        self.show_hints_cb = QCheckBox("Показывать подсказки")
+        self.show_hints_cb.setChecked(True)
+        settings_layout.addWidget(self.show_hints_cb)
+        
+        self.auto_save_cb = QCheckBox("Автосохранение при закрытии окна")
+        self.auto_save_cb.setChecked(True)
+        settings_layout.addWidget(self.auto_save_cb)
+        
+        settings_group.setLayout(settings_layout)
+        layout.addWidget(settings_group)
+        
+        layout.addStretch()
+        return widget
+    
+    def create_themes_list_tab(self):
+        """Вкладка со списком сохраненных тем"""
+        widget = QWidget()
+        layout = QVBoxLayout(widget)
+        
+        self.themes_list = QListWidget()
+        self.themes_list.itemDoubleClicked.connect(self.load_theme_for_edit)
+        layout.addWidget(self.themes_list)
+        
+        # Кнопки
+        btn_layout = QHBoxLayout()
+        
+        load_btn = QPushButton("📂 Загрузить тему")
+        load_btn.clicked.connect(self.load_theme_for_edit)
+        btn_layout.addWidget(load_btn)
+        
+        delete_btn = QPushButton("🗑️ Удалить тему")
+        delete_btn.setStyleSheet("QPushButton { background-color: #f44336; color: white; }")
+        delete_btn.clicked.connect(self.delete_selected_theme)
+        btn_layout.addWidget(delete_btn)
+        
+        activate_btn = QPushButton("✅ Активировать")
+        activate_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; }")
+        activate_btn.clicked.connect(self.activate_selected_theme)
+        btn_layout.addWidget(activate_btn)
+        
+        layout.addLayout(btn_layout)
+        
+        return widget
+    
+    def load_current_fields(self):
+        """Загрузка текущих выбранных полей"""
+        self.selected_fields_list.clear()
+        visible_fields = self.current_config['social_data']['visible_fields']
+        
+        all_fields = {
+            "surname": "Фамилия *",
+            "name": "Имя *",
+            "patronymic": "Отчество *",
+            "birth_date": "Дата рождения",
+            # ... остальные поля
+        }
+        
+        for field_id in visible_fields:
+            if field_id in all_fields:
+                item = QListWidgetItem(all_fields[field_id])
+                item.setData(Qt.ItemDataRole.UserRole, field_id)
+                self.selected_fields_list.addItem(item)
+    
+    def add_field(self):
+        """Добавление поля из доступных в выбранные"""
+        current_item = self.available_fields_list.currentItem()
+        if current_item:
+            field_id = current_item.data(Qt.ItemDataRole.UserRole)
+            field_name = current_item.text()
+            
+            item = QListWidgetItem(field_name)
+            item.setData(Qt.ItemDataRole.UserRole, field_id)
+            self.selected_fields_list.addItem(item)
+    
+    def remove_field(self):
+        """Удаление поля из выбранных"""
+        current_item = self.selected_fields_list.currentItem()
+        if current_item:
+            self.selected_fields_list.takeItem(self.selected_fields_list.row(current_item))
+    
+    def load_themes_list(self):
+        """Загрузка списка тем"""
+        self.themes_list.clear()
+        themes = self.theme_manager.get_user_themes(self.user_id)
+        
+        for theme in themes:
+            active_mark = " ✅" if theme['is_active'] else ""
+            default_mark = " ⭐" if theme['is_default'] else ""
+            item_text = f"{theme['name']}{active_mark}{default_mark}"
+            
+            item = QListWidgetItem(item_text)
+            item.setData(Qt.ItemDataRole.UserRole, theme['id'])
+            self.themes_list.addItem(item)
+    
+    def load_theme_for_edit(self, item=None):
+        """Загрузка темы для редактирования"""
+        if not item:
+            item = self.themes_list.currentItem()
+        
+        if not item:
+            QMessageBox.warning(self, "Внимание", "Выберите тему для загрузки")
+            return
+        
+        theme_id = item.data(Qt.ItemDataRole.UserRole)
+        themes = self.theme_manager.get_user_themes(self.user_id)
+        
+        for theme in themes:
+            if theme['id'] == theme_id:
+                self.theme_name_input.setText(theme['name'])
+                self.theme_desc_input.setPlainText(theme['description'])
+                self.current_config = theme['config']
+                self.load_current_fields()
+                QMessageBox.information(self, "Успех", f"Тема '{theme['name']}' загружена")
+                return
+    
+    def delete_selected_theme(self):
+        """Удаление выбранной темы"""
+        item = self.themes_list.currentItem()
+        if not item:
+            QMessageBox.warning(self, "Внимание", "Выберите тему для удаления")
+            return
+        
+        theme_id = item.data(Qt.ItemDataRole.UserRole)
+        theme_name = item.text()
+        
+        reply = QMessageBox.question(
+            self, "Подтверждение",
+            f"Удалить тему '{theme_name}'?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            if self.theme_manager.delete_theme(theme_id, self.user_id):
+                self.load_themes_list()
+                QMessageBox.information(self, "Успех", "Тема удалена")
+    
+    def activate_selected_theme(self):
+        """Активация выбранной темы"""
+        item = self.themes_list.currentItem()
+        if not item:
+            QMessageBox.warning(self, "Внимание", "Выберите тему для активации")
+            return
+        
+        theme_id = item.data(Qt.ItemDataRole.UserRole)
+        
+        if self.theme_manager.activate_theme(theme_id, self.user_id):
+            self.load_themes_list()
+            QMessageBox.information(self, "Успех", "Тема активирована")
+    
+    def save_theme(self):
+        """Сохранение темы"""
+        theme_name = self.theme_name_input.text().strip()
+        if not theme_name:
+            QMessageBox.warning(self, "Ошибка", "Введите название темы")
+            return
+        
+        # Собираем конфигурацию из UI
+        config = self.current_config.copy()
+        
+        # Социальные данные - выбранные поля
+        selected_fields = []
+        for i in range(self.selected_fields_list.count()):
+            item = self.selected_fields_list.item(i)
+            field_id = item.data(Qt.ItemDataRole.UserRole)
+            selected_fields.append(field_id)
+        
+        config['social_data']['visible_fields'] = selected_fields
+        config['social_data']['field_order'] = selected_fields
+        
+        # Адреса
+        address_fields = []
+        for field_id, cb in self.address_checkboxes.items():
+            if cb.isChecked():
+                address_fields.append(field_id)
+        config['addresses']['visible_fields'] = address_fields
+        
+        # UI настройки
+        config['ui_settings']['theme'] = self.theme_combo.currentData()
+        config['ui_settings']['compact_mode'] = self.compact_mode_cb.isChecked()
+        config['ui_settings']['show_hints'] = self.show_hints_cb.isChecked()
+        config['ui_settings']['auto_save'] = self.auto_save_cb.isChecked()
+        
+        description = self.theme_desc_input.toPlainText().strip()
+        
+        # Сохраняем
+        theme_id = self.theme_manager.create_theme(
+            self.user_id, theme_name, config, description
+        )
+        
+        if theme_id:
+            QMessageBox.information(
+                self, "Успех",
+                f"Тема '{theme_name}' сохранена!\n\n"
+                f"Теперь вы можете активировать её во вкладке 'Мои темы'"
+            )
+            self.load_themes_list()
+        else:
+            QMessageBox.critical(self, "Ошибка", "Не удалось сохранить тему")
+
+========================================
+📄 FILE: ./theme_manager.py
+========================================
+
+# theme_manager.py
+"""
+Менеджер тем оформления для всего приложения
+✅ Поддержка нескольких тем
+✅ Сохранение настроек пользователя
+✅ Динамическое применение тем
+"""
+from PyQt6.QtWidgets import QApplication
+from PyQt6.QtCore import QSettings, QObject, pyqtSignal
+from PyQt6.QtGui import QColor, QPalette
+import json
+import os
+
+class ThemeManager(QObject):
+    """Управление темами оформления приложения"""
+    
+    theme_changed = pyqtSignal(str)  # Сигнал при смене темы
+    
+    # === ПРЕДУСТАНОВЛЕННЫЕ ТЕМЫ ===
+    THEMES = {
+        "dark": {
+            "name": "Тёмная",
+            "icon": "🌙",
+            "colors": {
+                "bg_primary": "#1e1e1e",
+                "bg_secondary": "#2d2d2d",
+                "bg_tertiary": "#3d3d3d",
+                "text_primary": "#ffffff",
+                "text_secondary": "#b0b0b0",
+                "accent": "#4CAF50",
+                "accent_hover": "#45a049",
+                "danger": "#f44336",
+                "warning": "#ff9800",
+                "info": "#2196F3",
+                "border": "#404040",
+                "input_bg": "#2d2d2d",
+                "input_border": "#404040",
+                "tab_active": "#3d3d3d",
+                "tab_inactive": "#2d2d2d",
+                "tab_hover": "#333333",
+                "header_bg": "#1a1a1a",
+                "success": "#4CAF50",
+            }
+        },
+        "light": {
+            "name": "Светлая",
+            "icon": "☀️",
+            "colors": {
+                "bg_primary": "#ffffff",
+                "bg_secondary": "#f5f5f5",
+                "bg_tertiary": "#e0e0e0",
+                "text_primary": "#1a1a1a",
+                "text_secondary": "#666666",
+                "accent": "#2196F3",
+                "accent_hover": "#1976D2",
+                "danger": "#f44336",
+                "warning": "#ff9800",
+                "info": "#2196F3",
+                "border": "#e0e0e0",
+                "input_bg": "#ffffff",
+                "input_border": "#cccccc",
+                "tab_active": "#ffffff",
+                "tab_inactive": "#f5f5f5",
+                "tab_hover": "#e8e8e8",
+                "header_bg": "#f0f0f0",
+                "success": "#4CAF50",
+            }
+        },
+        "blue": {
+            "name": "Синяя",
+            "icon": "💙",
+            "colors": {
+                "bg_primary": "#0d1b2a",
+                "bg_secondary": "#1b263b",
+                "bg_tertiary": "#415a77",
+                "text_primary": "#e0e1dd",
+                "text_secondary": "#a0a0a0",
+                "accent": "#0077b6",
+                "accent_hover": "#0096c7",
+                "danger": "#e63946",
+                "warning": "#ffb703",
+                "info": "#48cae4",
+                "border": "#415a77",
+                "input_bg": "#1b263b",
+                "input_border": "#415a77",
+                "tab_active": "#415a77",
+                "tab_inactive": "#1b263b",
+                "tab_hover": "#2d3f5a",
+                "header_bg": "#0a1628",
+                "success": "#2ec4b6",
+            }
+        },
+        "green": {
+            "name": "Зелёная",
+            "icon": "💚",
+            "colors": {
+                "bg_primary": "#1a2e1a",
+                "bg_secondary": "#2d4a2d",
+                "bg_tertiary": "#4a6b4a",
+                "text_primary": "#e8f5e9",
+                "text_secondary": "#a5d6a7",
+                "accent": "#4CAF50",
+                "accent_hover": "#66bb6a",
+                "danger": "#ef5350",
+                "warning": "#ffa726",
+                "info": "#42a5f5",
+                "border": "#4a6b4a",
+                "input_bg": "#2d4a2d",
+                "input_border": "#4a6b4a",
+                "tab_active": "#4a6b4a",
+                "tab_inactive": "#2d4a2d",
+                "tab_hover": "#3d5a3d",
+                "header_bg": "#142414",
+                "success": "#66bb6a",
+            }
+        },
+        "purple": {
+            "name": "Фиолетовая",
+            "icon": "💜",
+            "colors": {
+                "bg_primary": "#1a1a2e",
+                "bg_secondary": "#16213e",
+                "bg_tertiary": "#0f3460",
+                "text_primary": "#e94560",
+                "text_secondary": "#a0a0a0",
+                "accent": "#e94560",
+                "accent_hover": "#ff6b6b",
+                "danger": "#ff6b6b",
+                "warning": "#feca57",
+                "info": "#54a0ff",
+                "border": "#0f3460",
+                "input_bg": "#16213e",
+                "input_border": "#0f3460",
+                "tab_active": "#0f3460",
+                "tab_inactive": "#16213e",
+                "tab_hover": "#1a2744",
+                "header_bg": "#0f1a2e",
+                "success": "#00d2d3",
+            }
+        },
+        "system": {
+            "name": "Системная",
+            "icon": "🖥️",
+            "colors": None  # Использует системные цвета
+        }
+    }
+    
+    def __init__(self):
+        super().__init__()
+        self.settings = QSettings("KRD", "ARM_Settings")
+        self.current_theme = self.settings.value("theme/current", "dark")
+        
+    def get_theme(self, theme_name="dark"):
+        """Получить настройки темы"""
+        return self.THEMES.get(theme_name, self.THEMES["dark"])
+    
+    def get_color(self, color_name, theme_name=None):
+        """Получить конкретный цвет из темы"""
+        if theme_name is None:
+            theme_name = self.current_theme
+            
+        theme = self.get_theme(theme_name)
+        if theme_name == "system" or theme["colors"] is None:
+            # Для системной темы возвращаем None (использовать системные цвета)
+            return None
+            
+        return theme["colors"].get(color_name, "#000000")
+    
+    def get_all_colors(self, theme_name=None):
+        """Получить все цвета темы"""
+        if theme_name is None:
+            theme_name = self.current_theme
+            
+        theme = self.get_theme(theme_name)
+        return theme["colors"]
+    
+    def set_theme(self, theme_name):
+        """Установить тему и сохранить настройки"""
+        if theme_name in self.THEMES:
+            self.current_theme = theme_name
+            self.settings.setValue("theme/current", theme_name)
+            self.theme_changed.emit(theme_name)
+            return True
+        return False
+    
+    def get_available_themes(self):
+        """Получить список доступных тем"""
+        return [
+            {
+                "id": key,
+                "name": f"{data['icon']} {data['name']}",
+                "icon": data["icon"]
+            }
+            for key, data in self.THEMES.items()
+        ]
+    
+    def apply_stylesheet(self, app):
+        """Применить таблицу стилей для всего приложения"""
+        if self.current_theme == "system":
+            app.setStyleSheet("")  # Системная тема
+            return
+        
+        colors = self.get_all_colors()
+        if not colors:
+            return
+        
+        stylesheet = self._generate_stylesheet(colors)
+        app.setStyleSheet(stylesheet)
+    
+    def _generate_stylesheet(self, colors):
+        """Генерация CSS stylesheet на основе цветов темы"""
+        return f"""
+        /* === ОБЩИЕ СТИЛИ === */
+        QWidget {{
+            background-color: {colors['bg_primary']};
+            color: {colors['text_primary']};
+            font-family: 'Segoe UI', Arial, sans-serif;
+            font-size: 13px;
+        }}
+        
+        /* === ВКЛАДКИ === */
+        QTabWidget::pane {{
+            border: 1px solid {colors['border']};
+            background-color: {colors['bg_secondary']};
+            border-radius: 5px;
+        }}
+        
+        QTabBar::tab {{
+            background-color: {colors['tab_inactive']};
+            color: {colors['text_secondary']};
+            padding: 10px 20px;
+            margin-right: 2px;
+            border-top-left-radius: 5px;
+            border-top-right-radius: 5px;
+            border: 1px solid {colors['border']};
+            border-bottom: none;
+            min-width: 120px;
+        }}
+        
+        QTabBar::tab:selected {{
+            background-color: {colors['tab_active']};
+            color: {colors['text_primary']};
+            font-weight: bold;
+            border-bottom: 2px solid {colors['accent']};
+        }}
+        
+        QTabBar::tab:hover:!selected {{
+            background-color: {colors['tab_hover']};
+        }}
+        
+        /* === КНОПКИ === */
+        QPushButton {{
+            background-color: {colors['accent']};
+            color: white;
+            border: none;
+            padding: 10px 20px;
+            border-radius: 5px;
+            font-weight: bold;
+            min-height: 16px;
+        }}
+        
+        QPushButton:hover {{
+            background-color: {colors['accent_hover']};
+        }}
+        
+        QPushButton:pressed {{
+            background-color: {colors['accent']};
+        }}
+        
+        QPushButton:disabled {{
+            background-color: {colors['bg_tertiary']};
+            color: {colors['text_secondary']};
+        }}
+        
+        /* === КНОПКИ ОПАСНЫХ ДЕЙСТВИЙ === */
+        QPushButton#dangerButton {{
+            background-color: {colors['danger']};
+        }}
+        
+        QPushButton#dangerButton:hover {{
+            background-color: #d32f2f;
+        }}
+        
+        /* === КНОПКИ УСПЕХА === */
+        QPushButton#successButton {{
+            background-color: {colors['success']};
+        }}
+        
+        QPushButton#successButton:hover {{
+            background-color: #43a047;
+        }}
+        
+        /* === ПОЛЯ ВВОДА === */
+        QLineEdit, QTextEdit, QPlainTextEdit {{
+            background-color: {colors['input_bg']};
+            color: {colors['text_primary']};
+            border: 1px solid {colors['input_border']};
+            border-radius: 3px;
+            padding: 5px 10px;
+        }}
+        
+        QLineEdit:focus, QTextEdit:focus, QPlainTextEdit:focus {{
+            border: 2px solid {colors['accent']};
+        }}
+        
+        /* === ВЫПАДАЮЩИЕ СПИСКИ === */
+        QComboBox {{
+            background-color: {colors['input_bg']};
+            color: {colors['text_primary']};
+            border: 1px solid {colors['input_border']};
+            border-radius: 3px;
+            padding: 5px 10px;
+            min-height: 16px;
+        }}
+        
+        QComboBox:hover {{
+            border: 1px solid {colors['accent']};
+        }}
+        
+        QComboBox::drop-down {{
+            border: none;
+            width: 20px;
+        }}
+        
+        QComboBox::down-arrow {{
+            image: none;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-top: 5px solid {colors['text_primary']};
+            margin-right: 5px;
+        }}
+        
+        QComboBox QAbstractItemView {{
+            background-color: {colors['bg_secondary']};
+            color: {colors['text_primary']};
+            border: 1px solid {colors['border']};
+            selection-background-color: {colors['accent']};
+        }}
+        
+        /* === ГРУППЫ === */
+        QGroupBox {{
+            border: 1px solid {colors['border']};
+            border-radius: 5px;
+            margin-top: 10px;
+            padding-top: 10px;
+            font-weight: bold;
+            background-color: {colors['bg_secondary']};
+        }}
+        
+        QGroupBox::title {{
+            subcontrol-origin: margin;
+            left: 10px;
+            padding: 0 5px;
+            color: {colors['accent']};
+        }}
+        
+        /* === ТАБЛИЦЫ === */
+        QTableView, QTableWidget {{
+            background-color: {colors['bg_primary']};
+            color: {colors['text_primary']};
+            border: 1px solid {colors['border']};
+            border-radius: 3px;
+            gridline-color: {colors['border']};
+        }}
+        
+        QTableView::item, QTableWidget::item {{
+            padding: 5px;
+            border: none;
+        }}
+        
+        QTableView::item:selected, QTableWidget::item:selected {{
+            background-color: {colors['accent']};
+            color: white;
+        }}
+        
+        QHeaderView::section {{
+            background-color: {colors['header_bg']};
+            color: {colors['text_primary']};
+            padding: 8px;
+            border: none;
+            border-bottom: 2px solid {colors['border']};
+            font-weight: bold;
+        }}
+        
+        /* === СКРОЛЛБАРЫ === */
+        QScrollBar:vertical {{
+            background-color: {colors['bg_secondary']};
+            width: 12px;
+            border-radius: 6px;
+        }}
+        
+        QScrollBar::handle:vertical {{
+            background-color: {colors['bg_tertiary']};
+            border-radius: 6px;
+            min-height: 20px;
+        }}
+        
+        QScrollBar::handle:vertical:hover {{
+            background-color: {colors['accent']};
+        }}
+        
+        QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+            height: 0px;
+        }}
+        
+        QScrollBar:horizontal {{
+            background-color: {colors['bg_secondary']};
+            height: 12px;
+            border-radius: 6px;
+        }}
+        
+        QScrollBar::handle:horizontal {{
+            background-color: {colors['bg_tertiary']};
+            border-radius: 6px;
+            min-width: 20px;
+        }}
+        
+        QScrollBar::handle:horizontal:hover {{
+            background-color: {colors['accent']};
+        }}
+        
+        QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+            width: 0px;
+        }}
+        
+        /* === ДИАЛОГИ === */
+        QDialog {{
+            background-color: {colors['bg_primary']};
+        }}
+        
+        /* === СООБЩЕНИЯ === */
+        QMessageBox {{
+            background-color: {colors['bg_primary']};
+        }}
+        
+        /* === ПРОГРЕСС БАРЫ === */
+        QProgressBar {{
+            background-color: {colors['bg_tertiary']};
+            border: none;
+            border-radius: 5px;
+            height: 20px;
+            text-align: center;
+            color: {colors['text_primary']};
+        }}
+        
+        QProgressBar::chunk {{
+            background-color: {colors['accent']};
+            border-radius: 5px;
+        }}
+        
+        /* === ЧЕКБОКСЫ И РАДИОКНОПКИ === */
+        QCheckBox, QRadioButton {{
+            color: {colors['text_primary']};
+            spacing: 5px;
+        }}
+        
+        QCheckBox::indicator, QRadioButton::indicator {{
+            width: 18px;
+            height: 18px;
+            border-radius: 3px;
+            border: 2px solid {colors['input_border']};
+            background-color: {colors['input_bg']};
+        }}
+        
+        QCheckBox::indicator:checked, QRadioButton::indicator:checked {{
+            background-color: {colors['accent']};
+            border: 2px solid {colors['accent']};
+        }}
+        
+        /* === СПИСКИ === */
+        QListWidget, QTreeWidget {{
+            background-color: {colors['bg_primary']};
+            color: {colors['text_primary']};
+            border: 1px solid {colors['border']};
+            border-radius: 3px;
+        }}
+        
+        QListWidget::item:selected, QTreeWidget::item:selected {{
+            background-color: {colors['accent']};
+            color: white;
+        }}
+        
+        QListWidget::item:hover, QTreeWidget::item:hover {{
+            background-color: {colors['tab_hover']};
+        }}
+        
+        /* === МЕНЮ === */
+        QMenuBar {{
+            background-color: {colors['header_bg']};
+            color: {colors['text_primary']};
+            padding: 5px;
+        }}
+        
+        QMenuBar::item:selected {{
+            background-color: {colors['accent']};
+            color: white;
+        }}
+        
+        QMenu {{
+            background-color: {colors['bg_secondary']};
+            color: {colors['text_primary']};
+            border: 1px solid {colors['border']};
+            border-radius: 5px;
+            padding: 5px;
+        }}
+        
+        QMenu::item:selected {{
+            background-color: {colors['accent']};
+            color: white;
+        }}
+        
+        /* === ИНСТРУМЕНТАЛЬНЫЕ ПАНЕЛИ === */
+        QToolBar {{
+            background-color: {colors['header_bg']};
+            border: none;
+            padding: 5px;
+            spacing: 5px;
+        }}
+        
+        QToolBar::separator {{
+            background-color: {colors['border']};
+            width: 1px;
+            margin: 5px;
+        }}
+        
+        /* === СТАТУС БАР === */
+        QStatusBar {{
+            background-color: {colors['header_bg']};
+            color: {colors['text_secondary']};
+            border-top: 1px solid {colors['border']};
+        }}
+        
+        /* === ИНФОРМАЦИОННЫЕ ПАНЕЛИ === */
+        QLabel#infoLabel {{
+            background-color: {colors['info']};
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+        }}
+        
+        QLabel#successLabel {{
+            background-color: {colors['success']};
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+        }}
+        
+        QLabel#warningLabel {{
+            background-color: {colors['warning']};
+            color: white;
+            padding: 10px;
+            border-radius: 5px;
+        }}
+        
+        QLabel#dangerLabel {{
+            background-color: {colors['danger']};
+            color: white;
+            padding: 10px;
+                border-radius: 5px;
+        }}
+        
+        /* === РАЗДЕЛИТЕЛИ === */
+        QFrame {{
+            background-color: {colors['border']};
+        }}
+        
+        QFrame[frameShape="4"] {{  /* HLine */
+            max-height: 1px;
+        }}
+        
+        QFrame[frameShape="5"] {{  /* VLine */
+            max-width: 1px;
+        }}
+        
+        /* === КАЛЕНДАРИ === */
+        QCalendarWidget {{
+            background-color: {colors['bg_primary']};
+            color: {colors['text_primary']};
+        }}
+        
+        QCalendarWidget QToolButton {{
+            background-color: {colors['accent']};
+            color: white;
+            border-radius: 3px;
+            padding: 5px;
+        }}
+        
+        QCalendarWidget QMenu {{
+            background-color: {colors['bg_secondary']};
+            color: {colors['text_primary']};
+        }}
+        
+        /* === СПИНБОКСЫ === */
+        QSpinBox, QDoubleSpinBox, QDateTimeEdit, QDateEdit, QTimeEdit {{
+            background-color: {colors['input_bg']};
+            color: {colors['text_primary']};
+            border: 1px solid {colors['input_border']};
+            border-radius: 3px;
+            padding: 5px;
+        }}
+        
+        QSpinBox::up-button, QDoubleSpinBox::up-button,
+        QDateTimeEdit::up-button, QDateEdit::up-button, QTimeEdit::up-button {{
+            background-color: {colors['bg_tertiary']};
+            border: none;
+            border-top-right-radius: 3px;
+            width: 15px;
+        }}
+        
+        QSpinBox::down-button, QDoubleSpinBox::down-button,
+        QDateTimeEdit::down-button, QDateEdit::down-button, QTimeEdit::down-button {{
+            background-color: {colors['bg_tertiary']};
+            border: none;
+            border-bottom-right-radius: 3px;
+            width: 15px;
+        }}
+        
+        QSpinBox::up-button:hover, QDoubleSpinBox::up-button:hover,
+        QDateTimeEdit::up-button:hover, QDateEdit::up-button:hover, QTimeEdit::up-button:hover {{
+            background-color: {colors['accent']};
+        }}
+        
+        QSpinBox::down-button:hover, QDoubleSpinBox::down-button:hover,
+        QDateTimeEdit::down-button:hover, QDateEdit::down-button:hover, QTimeEdit::down-button:hover {{
+            background-color: {colors['accent']};
+        }}
+        """
+
+
+# Глобальный экземпляр менеджера тем
+theme_manager = ThemeManager()
+
+========================================
+📄 FILE: ./theme_settings_dialog.py
+========================================
+
+"""
+Диалог настройки темы оформления
+✅ Исправлено: функция open_theme_settings для импорта из main_window
+"""
+from PyQt6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QGridLayout,
+    QLabel, QPushButton, QComboBox, QMessageBox, QFrame, QApplication
+)
+from PyQt6.QtCore import Qt, QSettings
+from PyQt6.QtGui import QFont
+
+
+class ThemeSettingsDialog(QDialog):
+    """Диалог настройки темы оформления"""
+    
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("⚙️ Настройки оформления")
+        self.setMinimumSize(500, 400)
+        self.setModal(True)
+        
+        self.settings = QSettings("KRD", "ARM_Settings")
+        
+        self.init_ui()
+        self.load_current_theme()
+    
+    def init_ui(self):
+        """Инициализация интерфейса"""
+        layout = QVBoxLayout()
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+        
+        # Заголовок
+        title_label = QLabel("🎨 Настройки темы оформления")
+        title_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
+        layout.addWidget(title_label)
+        
+        info_label = QLabel("Выберите тему оформления для приложения. Изменения применятся после перезапуска.")
+        info_label.setStyleSheet("QLabel { color: #666; padding: 8px; background-color: #f0f0f0; border-radius: 5px; }")
+        info_label.setWordWrap(True)
+        layout.addWidget(info_label)
+        
+        # Выбор темы
+        theme_group = QGroupBox("Тема оформления")
+        theme_layout = QGridLayout()
+        
+        theme_layout.addWidget(QLabel("Выберите тему:"), 0, 0)
+        
+        self.theme_combo = QComboBox()
+        self.theme_combo.setMinimumWidth(300)
+        self.theme_combo.addItem("☀️ Светлая", "light")
+        self.theme_combo.addItem("🌙 Тёмная", "dark")
+        self.theme_combo.addItem("💙 Синяя", "blue")
+        self.theme_combo.addItem("💚 Зелёная", "green")
+        self.theme_combo.addItem("💜 Фиолетовая", "purple")
+        self.theme_combo.addItem("🖥️ Системная", "system")
+        
+        theme_layout.addWidget(self.theme_combo, 0, 1)
+        
+        # Предпросмотр цветов
+        self.color_preview = QFrame()
+        self.color_preview.setFixedSize(400, 80)
+        self.color_preview.setStyleSheet("background-color: #ffffff; border: 1px solid #ccc; border-radius: 5px;")
+        theme_layout.addWidget(self.color_preview, 1, 0, 1, 2)
+        
+        self.theme_combo.currentIndexChanged.connect(self.on_theme_changed)
+        
+        theme_group.setLayout(theme_layout)
+        layout.addWidget(theme_group)
+        
+        # Кнопки
+        button_layout = QHBoxLayout()
+        button_layout.addStretch()
+        
+        apply_btn = QPushButton("💾 Применить")
+        apply_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                font-weight: bold;
+                padding: 10px 20px;
+                border-radius: 5px;
+            }
+            QPushButton:hover {
+                background-color: #45a049;
+            }
+        """)
+        apply_btn.clicked.connect(self.apply_theme)
+        button_layout.addWidget(apply_btn)
+        
+        cancel_btn = QPushButton("❌ Отмена")
+        cancel_btn.clicked.connect(self.reject)
+        button_layout.addWidget(cancel_btn)
+        
+        layout.addLayout(button_layout)
+        self.setLayout(layout)
+    
+    def load_current_theme(self):
+        """Загрузка текущей темы"""
+        current_theme = self.settings.value("theme/current", "light")
+        index = self.theme_combo.findData(current_theme)
+        if index >= 0:
+            self.theme_combo.setCurrentIndex(index)
+        self.update_color_preview(current_theme)
+    
+    def on_theme_changed(self):
+        """Обработчик смены темы"""
+        theme_id = self.theme_combo.currentData()
+        self.update_color_preview(theme_id)
+    
+    def update_color_preview(self, theme_id):
+        """Обновление предпросмотра цветов"""
+        colors = self.get_theme_colors(theme_id)
+        if colors:
+            self.color_preview.setStyleSheet(f"""
+                QFrame {{
+                    background: qlineargradient(
+                        x1:0, y1:0, x2:1, y2:0,
+                        stop:0 {colors['bg_primary']},
+                        stop:0.5 {colors['bg_secondary']},
+                        stop:1 {colors['accent']}
+                    );
+                    border: 1px solid {colors['border']};
+                    border-radius: 5px;
+                }}
+            """)
+    
+    def get_theme_colors(self, theme_id):
+        """Получение цветов темы"""
+        themes = {
+            "light": {
+                "bg_primary": "#FFFFFF",
+                "bg_secondary": "#F5F5F5",
+                "accent": "#2196F3",
+                "border": "#CCCCCC"
+            },
+            "dark": {
+                "bg_primary": "#1E1E1E",
+                "bg_secondary": "#2D2D2D",
+                "accent": "#4CAF50",
+                "border": "#404040"
+            },
+            "blue": {
+                "bg_primary": "#0D1B2A",
+                "bg_secondary": "#1B263B",
+                "accent": "#0077B6",
+                "border": "#415A77"
+            },
+            "green": {
+                "bg_primary": "#1A2E1A",
+                "bg_secondary": "#2D4A2D",
+                "accent": "#4CAF50",
+                "border": "#4A6B4A"
+            },
+            "purple": {
+                "bg_primary": "#1A1A2E",
+                "bg_secondary": "#16213E",
+                "accent": "#E94560",
+                "border": "#0F3460"
+            },
+            "system": {
+                "bg_primary": "#F0F0F0",
+                "bg_secondary": "#E0E0E0",
+                "accent": "#0078D4",
+                "border": "#CCCCCC"
+            }
+        }
+        return themes.get(theme_id)
+    
+    def apply_theme(self):
+        """Применение темы"""
+        theme_id = self.theme_combo.currentData()
+        self.settings.setValue("theme/current", theme_id)
+        
+        QMessageBox.information(
+            self,
+            "Успех",
+            f"✅ Тема сохранена!\n\n"
+            f"Тема: {self.theme_combo.currentText()}\n\n"
+            f"⚠️ Для применения темы необходимо перезапустить приложение."
+        )
+        self.accept()
+
+
+def open_theme_settings(parent=None):
+    """
+    ✅ Функция для импорта из main_window.py
+    Открывает диалог настроек темы
+    """
+    dialog = ThemeSettingsDialog(parent)
+    dialog.exec()
+
+========================================
 📄 FILE: ./user_add_dialog.py
 ========================================
 
@@ -13650,6 +16425,289 @@ class UserEditDialog(QDialog):
             
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка при сохранении:\n{str(e)}")
+
+========================================
+📄 FILE: ./user_theme_manager.py
+========================================
+
+"""
+Менеджер пользовательских тем и конфигураций
+"""
+from PyQt6.QtSql import QSqlQuery
+from PyQt6.QtWidgets import QMessageBox
+import json
+from typing import Dict, List, Optional
+
+class UserThemeManager:
+    """Управление пользовательскими темами интерфейса"""
+    
+    def __init__(self, db_connection):
+        self.db = db_connection
+    
+    def get_default_config(self) -> Dict:
+        """Конфигурация по умолчанию"""
+        return {
+            "social_data": {
+                "visible_fields": [
+                    "surname", "name", "patronymic", "birth_date",
+                    "tab_number", "personal_number", "category_id", "rank_id",
+                    "drafted_by_commissariat", "draft_date", "povsk",
+                    "education", "passport_series", "passport_number",
+                    "military_id_series", "military_id_number",
+                    "appearance_features", "personal_marks",
+                    "military_contacts", "relatives_info"
+                ],
+                "field_order": [
+                    "surname", "name", "patronymic", "birth_date",
+                    "tab_number", "personal_number", "category_id", "rank_id",
+                    "drafted_by_commissariat", "draft_date", "povsk",
+                    "education", "passport_series", "passport_number",
+                    "military_id_series", "military_id_number",
+                    "appearance_features", "personal_marks",
+                    "military_contacts", "relatives_info"
+                ],
+                "required_fields": ["surname", "name", "patronymic"],
+                "groups": {
+                    "Основные данные": ["surname", "name", "patronymic", "birth_date"],
+                    "Военная информация": ["tab_number", "personal_number", "category_id", "rank_id"],
+                    "Призыв": ["drafted_by_commissariat", "draft_date", "povsk"],
+                    "Документы": ["passport_series", "passport_number", "military_id_series", "military_id_number"],
+                    "Дополнительно": ["education", "appearance_features", "personal_marks", "military_contacts", "relatives_info"]
+                }
+            },
+            "addresses": {
+                "visible_fields": [
+                    "region", "district", "town", "street",
+                    "house", "apartment", "check_date", "check_result"
+                ],
+                "field_order": [
+                    "region", "district", "town", "street",
+                    "house", "building", "apartment", "check_date", "check_result"
+                ]
+            },
+            "ui_settings": {
+                "theme": "light",
+                "compact_mode": False,
+                "show_hints": True,
+                "auto_save": True
+            }
+        }
+    
+    def create_theme(self, user_id: int, theme_name: str, config: Dict, 
+                    description: str = "", is_default: bool = False) -> Optional[int]:
+        """
+        Создание новой темы
+        Returns: ID созданной темы или None
+        """
+        try:
+            query = QSqlQuery(self.db)
+            
+            # Если это тема по умолчанию, сбрасываем другие
+            if is_default:
+                query.prepare("UPDATE krd.user_themes SET is_default = FALSE WHERE user_id = ?")
+                query.addBindValue(user_id)
+                query.exec()
+            
+            # Создаем новую тему
+            query.prepare("""
+                INSERT INTO krd.user_themes 
+                (user_id, theme_name, description, config_json, is_default, created_by)
+                VALUES (?, ?, ?, ?, ?, ?)
+                RETURNING id
+            """)
+            query.addBindValue(user_id)
+            query.addBindValue(theme_name)
+            query.addBindValue(description)
+            query.addBindValue(json.dumps(config, ensure_ascii=False))
+            query.addBindValue(is_default)
+            query.addBindValue(user_id)
+            
+            if query.exec() and query.next():
+                theme_id = query.value(0)
+                print(f"✅ Тема '{theme_name}' создана с ID={theme_id}")
+                return theme_id
+            else:
+                print(f"❌ Ошибка создания темы: {query.lastError().text()}")
+                return None
+                
+        except Exception as e:
+            print(f"❌ Исключение при создании темы: {e}")
+            return None
+    
+    def update_theme(self, theme_id: int, config: Dict, theme_name: str = None) -> bool:
+        """Обновление темы"""
+        try:
+            query = QSqlQuery(self.db)
+            
+            if theme_name:
+                query.prepare("""
+                    UPDATE krd.user_themes 
+                    SET config_json = ?, theme_name = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """)
+                query.addBindValue(json.dumps(config, ensure_ascii=False))
+                query.addBindValue(theme_name)
+                query.addBindValue(theme_id)
+            else:
+                query.prepare("""
+                    UPDATE krd.user_themes 
+                    SET config_json = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ?
+                """)
+                query.addBindValue(json.dumps(config, ensure_ascii=False))
+                query.addBindValue(theme_id)
+            
+            if query.exec():
+                print(f"✅ Тема ID={theme_id} обновлена")
+                return True
+            else:
+                print(f"❌ Ошибка обновления темы: {query.lastError().text()}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Исключение при обновлении темы: {e}")
+            return False
+    
+    def get_user_themes(self, user_id: int) -> List[Dict]:
+        """Получение всех тем пользователя"""
+        themes = []
+        try:
+            query = QSqlQuery(self.db)
+            query.prepare("""
+                SELECT id, theme_name, description, config_json, 
+                       is_active, is_default, created_at
+                FROM krd.user_themes
+                WHERE user_id = ?
+                ORDER BY is_default DESC, created_at DESC
+            """)
+            query.addBindValue(user_id)
+            
+            if query.exec():
+                while query.next():
+                    themes.append({
+                        'id': query.value('id'),
+                        'name': query.value('theme_name'),
+                        'description': query.value('description') or '',
+                        'config': json.loads(query.value('config_json')),
+                        'is_active': query.value('is_active'),
+                        'is_default': query.value('is_default'),
+                        'created_at': query.value('created_at')
+                    })
+            
+            print(f"✅ Загружено {len(themes)} тем для пользователя {user_id}")
+            
+        except Exception as e:
+            print(f"❌ Ошибка загрузки тем: {e}")
+        
+        return themes
+    
+    def get_active_theme(self, user_id: int) -> Optional[Dict]:
+        """Получение активной темы пользователя"""
+        try:
+            query = QSqlQuery(self.db)
+            query.prepare("""
+                SELECT id, theme_name, config_json
+                FROM krd.user_themes
+                WHERE user_id = ? AND is_active = TRUE
+                LIMIT 1
+            """)
+            query.addBindValue(user_id)
+            
+            if query.exec() and query.next():
+                return {
+                    'id': query.value('id'),
+                    'name': query.value('theme_name'),
+                    'config': json.loads(query.value('config_json'))
+                }
+            
+            # Если нет активной, пробуем получить тему по умолчанию
+            return self.get_default_theme(user_id)
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения активной темы: {e}")
+            return None
+    
+    def get_default_theme(self, user_id: int) -> Optional[Dict]:
+        """Получение темы по умолчанию"""
+        try:
+            query = QSqlQuery(self.db)
+            query.prepare("""
+                SELECT id, theme_name, config_json
+                FROM krd.user_themes
+                WHERE user_id = ? AND is_default = TRUE
+                LIMIT 1
+            """)
+            query.addBindValue(user_id)
+            
+            if query.exec() and query.next():
+                return {
+                    'id': query.value('id'),
+                    'name': query.value('theme_name'),
+                    'config': json.loads(query.value('config_json'))
+                }
+            
+            # Возвращаем стандартную конфигурацию
+            return {
+                'id': None,
+                'name': 'Стандартная',
+                'config': self.get_default_config()
+            }
+            
+        except Exception as e:
+            print(f"❌ Ошибка получения темы по умолчанию: {e}")
+            return None
+    
+    def activate_theme(self, theme_id: int, user_id: int) -> bool:
+        """Активация темы"""
+        try:
+            query = QSqlQuery(self.db)
+            
+            # Деактивируем все темы пользователя
+            query.prepare("UPDATE krd.user_themes SET is_active = FALSE WHERE user_id = ?")
+            query.addBindValue(user_id)
+            query.exec()
+            
+            # Активируем нужную
+            query.prepare("""
+                UPDATE krd.user_themes 
+                SET is_active = TRUE, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND user_id = ?
+            """)
+            query.addBindValue(theme_id)
+            query.addBindValue(user_id)
+            
+            if query.exec():
+                print(f"✅ Тема ID={theme_id} активирована")
+                return True
+            else:
+                print(f"❌ Ошибка активации темы: {query.lastError().text()}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Исключение при активации темы: {e}")
+            return False
+    
+    def delete_theme(self, theme_id: int, user_id: int) -> bool:
+        """Удаление темы"""
+        try:
+            query = QSqlQuery(self.db)
+            query.prepare("""
+                DELETE FROM krd.user_themes
+                WHERE id = ? AND user_id = ?
+            """)
+            query.addBindValue(theme_id)
+            query.addBindValue(user_id)
+            
+            if query.exec():
+                print(f"✅ Тема ID={theme_id} удалена")
+                return True
+            else:
+                print(f"❌ Ошибка удаления темы: {query.lastError().text()}")
+                return False
+                
+        except Exception as e:
+            print(f"❌ Исключение при удалении темы: {e}")
+            return False
 
 ========================================
 📄 FILE: ./Готовые шаблоны для программы/generation_tamplate.py

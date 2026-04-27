@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict MivC1m5oBzKSx4HsNE0254MY04HbBx5FGds5XEhhKq2ihJtgrBFynCWh098Jxin
+\restrict ulNjv2jhqaHAnQqGT6zdRBMsXJ6m2CQgrVvXp6nkiljkpmdwaB4Ydo6uecRq3Ih
 
 -- Dumped from database version 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)
 -- Dumped by pg_dump version 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)
@@ -1558,6 +1558,125 @@ ALTER SEQUENCE krd.user_sessions_id_seq OWNED BY krd.user_sessions.id;
 
 
 --
+-- Name: user_settings; Type: TABLE; Schema: krd; Owner: postgres
+--
+
+CREATE TABLE krd.user_settings (
+    id integer NOT NULL,
+    user_id integer NOT NULL,
+    theme_name character varying(50) DEFAULT 'light'::character varying,
+    config_json jsonb DEFAULT '{}'::jsonb,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+ALTER TABLE krd.user_settings OWNER TO postgres;
+
+--
+-- Name: TABLE user_settings; Type: COMMENT; Schema: krd; Owner: postgres
+--
+
+COMMENT ON TABLE krd.user_settings IS 'Настройки оформления пользователей';
+
+
+--
+-- Name: COLUMN user_settings.config_json; Type: COMMENT; Schema: krd; Owner: postgres
+--
+
+COMMENT ON COLUMN krd.user_settings.config_json IS 'JSON с настройками: {"theme": "light", "colors": {...}}';
+
+
+--
+-- Name: user_settings_id_seq; Type: SEQUENCE; Schema: krd; Owner: postgres
+--
+
+CREATE SEQUENCE krd.user_settings_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE krd.user_settings_id_seq OWNER TO postgres;
+
+--
+-- Name: user_settings_id_seq; Type: SEQUENCE OWNED BY; Schema: krd; Owner: postgres
+--
+
+ALTER SEQUENCE krd.user_settings_id_seq OWNED BY krd.user_settings.id;
+
+
+--
+-- Name: user_themes; Type: TABLE; Schema: krd; Owner: postgres
+--
+
+CREATE TABLE krd.user_themes (
+    id integer NOT NULL,
+    user_id integer,
+    theme_name character varying(100) NOT NULL,
+    description text,
+    config_json jsonb NOT NULL,
+    is_active boolean DEFAULT false,
+    is_default boolean DEFAULT false,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
+    created_by integer
+);
+
+
+ALTER TABLE krd.user_themes OWNER TO postgres;
+
+--
+-- Name: TABLE user_themes; Type: COMMENT; Schema: krd; Owner: postgres
+--
+
+COMMENT ON TABLE krd.user_themes IS 'Пользовательские темы оформления и конфигурации интерфейса';
+
+
+--
+-- Name: COLUMN user_themes.config_json; Type: COMMENT; Schema: krd; Owner: postgres
+--
+
+COMMENT ON COLUMN krd.user_themes.config_json IS 'JSON конфигурация: {
+    "social_data": {
+        "visible_fields": ["surname", "name", "patronymic", ...],
+        "field_order": ["surname", "name", ...],
+        "required_fields": ["surname", "name", "patronymic"]
+    },
+    "addresses": {...},
+    "ui_settings": {
+        "theme": "light/dark",
+        "compact_mode": true/false
+    }
+}';
+
+
+--
+-- Name: user_themes_id_seq; Type: SEQUENCE; Schema: krd; Owner: postgres
+--
+
+CREATE SEQUENCE krd.user_themes_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+ALTER SEQUENCE krd.user_themes_id_seq OWNER TO postgres;
+
+--
+-- Name: user_themes_id_seq; Type: SEQUENCE OWNED BY; Schema: krd; Owner: postgres
+--
+
+ALTER SEQUENCE krd.user_themes_id_seq OWNED BY krd.user_themes.id;
+
+
+--
 -- Name: users; Type: TABLE; Schema: krd; Owner: postgres
 --
 
@@ -1760,6 +1879,20 @@ ALTER TABLE ONLY krd.user_sessions ALTER COLUMN id SET DEFAULT nextval('krd.user
 
 
 --
+-- Name: user_settings id; Type: DEFAULT; Schema: krd; Owner: postgres
+--
+
+ALTER TABLE ONLY krd.user_settings ALTER COLUMN id SET DEFAULT nextval('krd.user_settings_id_seq'::regclass);
+
+
+--
+-- Name: user_themes id; Type: DEFAULT; Schema: krd; Owner: postgres
+--
+
+ALTER TABLE ONLY krd.user_themes ALTER COLUMN id SET DEFAULT nextval('krd.user_themes_id_seq'::regclass);
+
+
+--
 -- Name: users id; Type: DEFAULT; Schema: krd; Owner: postgres
 --
 
@@ -1959,6 +2092,30 @@ ALTER TABLE ONLY krd.user_sessions
 
 
 --
+-- Name: user_settings user_settings_pkey; Type: CONSTRAINT; Schema: krd; Owner: postgres
+--
+
+ALTER TABLE ONLY krd.user_settings
+    ADD CONSTRAINT user_settings_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: user_settings user_settings_user_id_key; Type: CONSTRAINT; Schema: krd; Owner: postgres
+--
+
+ALTER TABLE ONLY krd.user_settings
+    ADD CONSTRAINT user_settings_user_id_key UNIQUE (user_id);
+
+
+--
+-- Name: user_themes user_themes_pkey; Type: CONSTRAINT; Schema: krd; Owner: postgres
+--
+
+ALTER TABLE ONLY krd.user_themes
+    ADD CONSTRAINT user_themes_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: users users_pkey; Type: CONSTRAINT; Schema: krd; Owner: postgres
 --
 
@@ -2150,6 +2307,27 @@ CREATE INDEX idx_social_data_surname ON krd.social_data USING btree (surname);
 
 
 --
+-- Name: idx_user_settings_user_id; Type: INDEX; Schema: krd; Owner: postgres
+--
+
+CREATE INDEX idx_user_settings_user_id ON krd.user_settings USING btree (user_id);
+
+
+--
+-- Name: idx_user_themes_active; Type: INDEX; Schema: krd; Owner: postgres
+--
+
+CREATE INDEX idx_user_themes_active ON krd.user_themes USING btree (is_active) WHERE (is_active = true);
+
+
+--
+-- Name: idx_user_themes_user_id; Type: INDEX; Schema: krd; Owner: postgres
+--
+
+CREATE INDEX idx_user_themes_user_id ON krd.user_themes USING btree (user_id);
+
+
+--
 -- Name: idx_users_role_id; Type: INDEX; Schema: krd; Owner: postgres
 --
 
@@ -2321,6 +2499,30 @@ ALTER TABLE ONLY krd.social_data
 
 ALTER TABLE ONLY krd.user_sessions
     ADD CONSTRAINT user_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES krd.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: user_settings user_settings_user_id_fkey; Type: FK CONSTRAINT; Schema: krd; Owner: postgres
+--
+
+ALTER TABLE ONLY krd.user_settings
+    ADD CONSTRAINT user_settings_user_id_fkey FOREIGN KEY (user_id) REFERENCES krd.users(id) ON DELETE CASCADE;
+
+
+--
+-- Name: user_themes user_themes_created_by_fkey; Type: FK CONSTRAINT; Schema: krd; Owner: postgres
+--
+
+ALTER TABLE ONLY krd.user_themes
+    ADD CONSTRAINT user_themes_created_by_fkey FOREIGN KEY (created_by) REFERENCES krd.users(id);
+
+
+--
+-- Name: user_themes user_themes_user_id_fkey; Type: FK CONSTRAINT; Schema: krd; Owner: postgres
+--
+
+ALTER TABLE ONLY krd.user_themes
+    ADD CONSTRAINT user_themes_user_id_fkey FOREIGN KEY (user_id) REFERENCES krd.users(id) ON DELETE CASCADE;
 
 
 --
@@ -2661,6 +2863,34 @@ GRANT SELECT,USAGE ON SEQUENCE krd.user_sessions_id_seq TO arm_user;
 
 
 --
+-- Name: TABLE user_settings; Type: ACL; Schema: krd; Owner: postgres
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE krd.user_settings TO arm_user;
+
+
+--
+-- Name: SEQUENCE user_settings_id_seq; Type: ACL; Schema: krd; Owner: postgres
+--
+
+GRANT SELECT,USAGE ON SEQUENCE krd.user_settings_id_seq TO arm_user;
+
+
+--
+-- Name: TABLE user_themes; Type: ACL; Schema: krd; Owner: postgres
+--
+
+GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE krd.user_themes TO arm_user;
+
+
+--
+-- Name: SEQUENCE user_themes_id_seq; Type: ACL; Schema: krd; Owner: postgres
+--
+
+GRANT SELECT,USAGE ON SEQUENCE krd.user_themes_id_seq TO arm_user;
+
+
+--
 -- Name: TABLE users; Type: ACL; Schema: krd; Owner: postgres
 --
 
@@ -2692,5 +2922,5 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA krd GRANT SELECT,INSERT,DEL
 -- PostgreSQL database dump complete
 --
 
-\unrestrict MivC1m5oBzKSx4HsNE0254MY04HbBx5FGds5XEhhKq2ihJtgrBFynCWh098Jxin
+\unrestrict ulNjv2jhqaHAnQqGT6zdRBMsXJ6m2CQgrVvXp6nkiljkpmdwaB4Ydo6uecRq3Ih
 

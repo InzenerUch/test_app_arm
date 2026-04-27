@@ -1,6 +1,7 @@
 """
 Модуль для просмотра удаленных записей (только для администраторов)
 ✅ ИСПРАВЛЕНО: Использованы именованные параметры для UNION запроса
+✅ ДОБАВЛЕНО: Окно просмотра записи по двойному клику с кнопкой восстановления
 """
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, QGridLayout,
@@ -12,6 +13,9 @@ from PyQt6.QtSql import QSqlQueryModel, QSqlQuery
 from PyQt6.QtGui import QFont
 import traceback
 
+# ✅ ИМПОРТ ДИАЛОГА ПРОСМОТРА ЗАПИСЕЙ
+from record_view_dialog import RecordViewDialog
+
 
 class DeletedRecordsWindow(QDialog):
     """
@@ -21,7 +25,6 @@ class DeletedRecordsWindow(QDialog):
     def __init__(self, db_connection):
         super().__init__()
         self.db = db_connection
-        
         self.setWindowTitle("Удаленные записи")
         self.resize(1200, 700)
         
@@ -119,6 +122,9 @@ class DeletedRecordsWindow(QDialog):
         self.records_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.records_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         
+        # ✅ ДОБАВЛЕНО: Обработка двойного клика
+        self.records_table.doubleClicked.connect(self.on_record_double_clicked)
+        
         # Настройка заголовков
         header = self.records_table.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
@@ -129,8 +135,6 @@ class DeletedRecordsWindow(QDialog):
         
         return group_box
     
-    # В файле deleted_records_window.py, метод load_deleted_records:
-
     def load_deleted_records(self):
         """Загрузка удаленных записей с применением фильтров и обработкой ошибок"""
         record_type = self.record_type_combo.currentData()
@@ -161,7 +165,6 @@ class DeletedRecordsWindow(QDialog):
                     raise Exception(f"Ошибка выполнения запроса: {query.lastError().text()}")
                 
                 self.records_model.setQuery(query)
-                # ... rest of the code
 
             elif record_type == "templates":
                 # Загрузка удаленных шаблонов
@@ -185,7 +188,6 @@ class DeletedRecordsWindow(QDialog):
                     raise Exception(f"Ошибка выполнения запроса: {query.lastError().text()}")
                 
                 self.records_model.setQuery(query)
-                # ... rest of the code
 
             elif record_type == "requests":
                 # Загрузка удаленных исходящих запросов
@@ -195,11 +197,12 @@ class DeletedRecordsWindow(QDialog):
                         o.id as "ID запроса",
                         o.issue_number as "Номер запроса",
                         rt.name as "Тип запроса",
-                        o.recipient_name as "Адресат",
+                        COALESCE(r.name, 'Не указан') as "Адресат",
                         o.issue_date as "Дата запроса",
                         o.deleted_at as "Дата удаления"
                     FROM krd.outgoing_requests o
                     LEFT JOIN krd.request_types rt ON o.request_type_id = rt.id
+                    LEFT JOIN krd.recipients r ON o.recipient_id = r.id
                     WHERE o.is_deleted = TRUE
                     AND o.deleted_at >= :date_from
                     AND o.deleted_at <= :date_to
@@ -212,10 +215,9 @@ class DeletedRecordsWindow(QDialog):
                     raise Exception(f"Ошибка выполнения запроса: {query.lastError().text()}")
                 
                 self.records_model.setQuery(query)
-                # ... rest of the code
 
             else:
-                # Загрузка всех удаленных записей
+                # ✅ ИСПРАВЛЕНО: Уникальные имена параметров для каждого SELECT в UNION
                 query = QSqlQuery(self.db)
                 query.prepare("""
                     SELECT
@@ -227,8 +229,8 @@ class DeletedRecordsWindow(QDialog):
                     FROM krd.krd k
                     LEFT JOIN krd.social_data s ON k.id = s.krd_id
                     WHERE k.is_deleted = TRUE
-                    AND k.deleted_at >= :date_from
-                    AND k.deleted_at <= :date_to
+                    AND k.deleted_at >= :date_from_1
+                    AND k.deleted_at <= :date_to_1
                     UNION ALL
                     SELECT
                         'Шаблон' as "Тип",
@@ -238,40 +240,64 @@ class DeletedRecordsWindow(QDialog):
                         dt.deleted_at as "Дата удаления"
                     FROM krd.document_templates dt
                     WHERE dt.is_deleted = TRUE
-                    AND dt.deleted_at >= :date_from
-                    AND dt.deleted_at <= :date_to
+                    AND dt.deleted_at >= :date_from_2
+                    AND dt.deleted_at <= :date_to_2
                     UNION ALL
                     SELECT
                         'Запрос' as "Тип",
                         o.id::text as "ID записи",
                         o.issue_number as "Идентификатор",
-                        rt.name || ' → ' || o.recipient_name as "Название",
+                        COALESCE(rt.name, 'Не указан') || ' → ' || COALESCE(r.name, 'Не указан') as "Название",
                         o.deleted_at as "Дата удаления"
                     FROM krd.outgoing_requests o
                     LEFT JOIN krd.request_types rt ON o.request_type_id = rt.id
+                    LEFT JOIN krd.recipients r ON o.recipient_id = r.id
                     WHERE o.is_deleted = TRUE
-                    AND o.deleted_at >= :date_from
-                    AND o.deleted_at <= :date_to
+                    AND o.deleted_at >= :date_from_3
+                    AND o.deleted_at <= :date_to_3
                     ORDER BY "Дата удаления" DESC
                 """)
-                query.bindValue(":date_from", date_from)
-                query.bindValue(":date_to", f"{date_to} 23:59:59")
-                query.bindValue(":date_from", date_from)
-                query.bindValue(":date_to", f"{date_to} 23:59:59")
-                query.bindValue(":date_from", date_from)
-                query.bindValue(":date_to", f"{date_to} 23:59:59")
+                # ✅ Уникальные параметры для каждого SELECT
+                query.bindValue(":date_from_1", date_from)
+                query.bindValue(":date_to_1", f"{date_to} 23:59:59")
+                query.bindValue(":date_from_2", date_from)
+                query.bindValue(":date_to_2", f"{date_to} 23:59:59")
+                query.bindValue(":date_from_3", date_from)
+                query.bindValue(":date_to_3", f"{date_to} 23:59:59")
                 
                 if not query.exec():
                     raise Exception(f"Ошибка выполнения запроса: {query.lastError().text()}")
                 
                 self.records_model.setQuery(query)
-                # ... rest of the code
                 
         except Exception as e:
             error_msg = f"Ошибка загрузки удаленных записей:\n{str(e)}\n{traceback.format_exc()}"
             print(error_msg)
             QMessageBox.critical(self, "Критическая ошибка", error_msg)
-          
+    
+    # ✅ ДОБАВЛЕНО: Обработчик двойного клика
+    def on_record_double_clicked(self, index):
+        """Обработка двойного клика по записи - открытие окна просмотра"""
+        row = index.row()
+        
+        # Определяем тип записи из combo или из таблицы
+        record_type = self.record_type_combo.currentData()
+        
+        if record_type == "all":
+            # Для общего списка берем тип из первой колонки
+            record_type_text = self.records_model.data(self.records_model.index(row, 0))
+            record_id = self.records_model.data(self.records_model.index(row, 1))
+        else:
+            # Для фильтрованного списка
+            record_id = self.records_model.data(self.records_model.index(row, 0))
+            record_type_text = record_type
+        
+        if not record_id:
+            return
+        
+        # ✅ ОТКРЫВАЕМ УНИВЕРСАЛЬНОЕ ОКНО ПРОСМОТРА
+        dialog = RecordViewDialog(self.db, record_type_text, record_id, self)
+        dialog.exec()
     
     def on_filter_changed(self):
         """Обработчик изменения фильтров"""
