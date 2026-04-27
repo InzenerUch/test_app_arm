@@ -29,20 +29,9 @@ class SimpleAuthManager:
         self.db = db_connection
     
     def authenticate_user(self, username, password):
-        """
-        Аутентификация пользователя
-        
-        Args:
-            username (str): имя пользователя
-            password (str): пароль
-            
-        Returns:
-            dict or None: информация о пользователе если аутентификация успешна, иначе None
-        """
-        # SQL запрос для получения данных пользователя
         query = QSqlQuery(self.db)
         query.prepare("""
-            SELECT u.id, u.username, u.full_name, r.role_name
+            SELECT u.id, u.username, u.full_name, r.role_name, u.password_hash
             FROM krd.users u
             JOIN krd.user_roles r ON u.role_id = r.id
             WHERE u.username = ? AND u.is_active = TRUE
@@ -50,23 +39,21 @@ class SimpleAuthManager:
         query.addBindValue(username)
         query.exec()
         
-        # Проверяем, найден ли пользователь
         if not query.next():
-            return None  # Пользователь не найден или неактивен
-        
-        # Получаем данные пользователя
+            return None
+            
         user_id = query.value(0)
-        stored_password_hash = query.value(4)  # предполагаем, что хеш пароля в колонке 4
-        user_info = {
-            'id': user_id,
-            'username': query.value(1),
-            'full_name': query.value(2),
-            'role': query.value(3)
-        }
+        stored_hash = query.value(4)  # ✅ Теперь колонка 4 существует
         
-        # Проверяем пароль (в реальном приложении нужно получить хеш пароля)
-        # Для демонстрации возвращаем True, в реальном приложении нужно сравнить хеши
-        return user_info
+        # ✅ Реальная проверка пароля через bcrypt
+        if bcrypt.checkpw(password.encode('utf-8'), stored_hash.encode('utf-8')):
+            return {
+                'id': int(user_id),
+                'username': query.value(1),
+                'full_name': query.value(2),
+                'role': query.value(3)
+            }
+        return None
 
 
 class LoginWindow(QDialog):

@@ -29,6 +29,7 @@ from add_krd_window import AddKrdWindow
 from audit_logger import AuditLogger
 from export_helper import KrdExcelExporter
 from report_config_dialog import ReportConfigDialog
+from theme_manager import ThemeManager
 
 
 class MainWindow(QMainWindow):
@@ -51,6 +52,10 @@ class MainWindow(QMainWindow):
         
         # Инициализация логгера аудита
         self.audit_logger = AuditLogger(self.db, self.user_info)
+        
+        if not hasattr(self, 'theme_manager'):
+            from theme_manager import ThemeManager
+            self.theme_manager = ThemeManager(db_connection, user_info.get('id'))
         
         # Установка основных параметров окна
         self.setWindowTitle("АРМ Сотрудника дознания - Главное окно")
@@ -77,6 +82,8 @@ class MainWindow(QMainWindow):
         self.search_timer = QTimer()
         self.search_timer.setSingleShot(True)
         self.search_timer.timeout.connect(self._perform_search)
+        self.user_id = user_info.get('id')
+     
         
         # Инициализация интерфейса
         self.init_ui()
@@ -130,6 +137,11 @@ class MainWindow(QMainWindow):
         
         # === Меню "Справочники" (ДОСТУПНО ВСЕМ ПОЛЬЗОВАТЕЛЯМ) ===
         ref_menu = menu_bar.addMenu("📚 Справочники")
+        
+        settings_menu = self.menuBar().addMenu("⚙️ Настройки")
+        theme_action = QAction("🎨 Тема оформления", self)
+        theme_action.triggered.connect(self.open_theme_settings)
+        settings_menu.addAction(theme_action)
         
         # Все справочники
         all_refs_action = QAction("📋 Все справочники", self)
@@ -383,6 +395,12 @@ class MainWindow(QMainWindow):
         group_box.setLayout(layout)
         return group_box
     
+    def open_theme_settings(self):
+        from theme_settings_dialog import ThemeSettingsDialog
+        dlg = ThemeSettingsDialog(self.theme_manager, self)
+        if dlg.exec():
+            # При необходимости обновить UI главного окна
+            self.update()
     # === МЕТОД ДЛЯ ОБРАБОТКИ КЛИКА ПО ЗАГОЛОВКУ ===
     def on_sort_indicator_changed(self, logical_index, order):
         """

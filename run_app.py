@@ -36,11 +36,18 @@ def main():
     # Подключение сигнала успешной авторизации к открытию главного окна
     def open_main_window(user_info):
         nonlocal main_window
-        # Создаем главное окно с информацией о пользователе
+        
+        # ✅ ДОБАВЬТЕ ЭТИ СТРОКИ
+        from theme_manager import ThemeManager
+        user_id = user_info.get('id')
+        print(f"🔍 [DEBUG] user_id из user_info: {user_id}")
+        
+        tm = ThemeManager(db, user_id)
+        tm.load_and_apply()  # <-- ЭТОТ ВЫЗОВ ОБЯЗАТЕЛЕН!
+        
         main_window = MainWindow(user_info, db)
+        main_window.theme_manager = tm
         main_window.show()
-
-        # Закрываем окно авторизации
         login_window.close()
 
     login_window.login_successful.connect(open_main_window)
