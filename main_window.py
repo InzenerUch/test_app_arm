@@ -303,48 +303,25 @@ class MainWindow(QMainWindow):
         search_layout = QHBoxLayout()
         
         search_label = QLabel("🔍 Поиск:")
-        search_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
         search_layout.addWidget(search_label)
         
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("Введите фамилию, имя, отчество или номер КРД...")
         self.search_input.setMinimumHeight(35)
-        self.search_input.setStyleSheet("""
-            QLineEdit {
-                padding: 8px;
-                border: 1px solid #ccc;
-                border-radius: 5px;
-                font-size: 13px;
-            }
-            QLineEdit:focus {
-                border: 2px solid #2196F3;
-            }
-        """)
+       
         self.search_input.textChanged.connect(self.on_search_text_changed)
         search_layout.addWidget(self.search_input)
         
         # Кнопка очистки поиска
-        clear_search_btn = QPushButton("✕")
-        clear_search_btn.setMaximumWidth(40)
-        clear_search_btn.setMinimumHeight(35)
-        clear_search_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-                color: white;
-                border-radius: 5px;
-                font-weight: bold;
-            }
-            QPushButton:hover {
-                background-color: #d32f2f;
-            }
-        """)
+        clear_search_btn = QPushButton("Очистить поиск")
+        clear_search_btn.setProperty("role", "danger")
+        clear_search_btn.setStyleSheet("")
         clear_search_btn.clicked.connect(self.clear_search)
         search_layout.addWidget(clear_search_btn)
         
         # Счётчик найденных записей
         self.found_count_label = QLabel("Найдено: 0 записей")
-        self.found_count_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-        self.found_count_label.setStyleSheet("QLabel { color: #2196F3; padding: 5px; }")
+      
         search_layout.addWidget(self.found_count_label)
         
         layout.addLayout(search_layout)
@@ -495,10 +472,10 @@ class MainWindow(QMainWindow):
             count = self.table_model_krd.rowCount()
             if self.search_query:
                 self.found_count_label.setText(f"🔍 Найдено: {count} записей по запросу \"{self.search_query}\"")
-                self.found_count_label.setStyleSheet("QLabel { color: #4CAF50; padding: 5px; font-weight: bold; }")
+           
             else:
                 self.found_count_label.setText(f"📊 Всего записей: {count}")
-                self.found_count_label.setStyleSheet("QLabel { color: #2196F3; padding: 5px; font-weight: bold; }")
+             
         else:
             print(f"⚠️ Ошибка загрузки данных: {query.lastError().text()}")
             self.found_count_label.setText("⚠️ Ошибка загрузки данных")

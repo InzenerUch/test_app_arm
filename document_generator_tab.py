@@ -123,7 +123,7 @@ class DocumentGeneratorTab(QWidget):
 
         btn = QPushButton("📄 Сформировать и сохранить в базу")
         btn.setMinimumHeight(60)
-        btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-weight: bold; font-size: 14px; border-radius: 5px; padding: 20px; } QPushButton:hover { background-color: #45a049; }")
+        btn.setProperty("role", "save")
         btn.clicked.connect(self.generate_and_save_document)
         layout.addWidget(btn)
         layout.addStretch()
@@ -134,12 +134,12 @@ class DocumentGeneratorTab(QWidget):
         lay = QVBoxLayout(widget)
         lay.addWidget(QLabel("📄 Управление шаблонами", font=QFont("Arial", 14, QFont.Weight.Bold)))
         btns = QHBoxLayout()
-        for lbl, fn, style in [("➕ Добавить", lambda: self.tmpl_mgr.add_template_dialog(self), None),
-                               ("✏️ Редактировать", lambda: self.tmpl_mgr.edit_template_dialog(self), None),
-                               ("🗑️ Удалить", lambda: self.tmpl_mgr.delete_selected(self), "background-color:#ff6b6b;color:white;"),
-                               ("🔄 Обновить", self.tmpl_mgr.load_templates, None)]:
+        for lbl, fn, _property in [("➕ Добавить", lambda: self.tmpl_mgr.add_template_dialog(self), "info"),
+                               ("✏️ Редактировать", lambda: self.tmpl_mgr.edit_template_dialog(self), "edit"),
+                               ("🗑️ Удалить", lambda: self.tmpl_mgr.delete_selected(self), "danger"),
+                               ("🔄 Обновить", self.tmpl_mgr.load_templates, "info")]:
             b = QPushButton(lbl)
-            if style: b.setStyleSheet(style)
+            if _property: b.setProperty("role",_property)
             b.clicked.connect(fn)
             btns.addWidget(b)
         lay.addLayout(btns)

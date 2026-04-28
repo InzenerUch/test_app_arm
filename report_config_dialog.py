@@ -102,38 +102,14 @@ class ReportConfigDialog(QDialog):
         add_template_btn = QPushButton("➕ Добавить шаблон")
         add_template_btn.setMinimumHeight(45)
         add_template_btn.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-        add_template_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
-                border-radius: 5px;
-                padding: 10px;
-            }
-            QPushButton:hover {
-                background-color: #1976D2;
-            }
-        """)
+        add_template_btn.setProperty("role", "info")
         add_template_btn.clicked.connect(self.on_add_template)
         btn_layout.addWidget(add_template_btn)
         
         # Кнопка экспорта (ЗЕЛЁНЫЙ)
         self.export_btn = QPushButton("📥 Экспорт всех КРД в Excel")
         self.export_btn.setMinimumHeight(45)
-        self.export_btn.setFont(QFont("Arial", 11, QFont.Weight.Bold))
-        self.export_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                border-radius: 5px;
-                padding: 10px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-            }
-        """)
+        self.export_btn.setProperty("role", "save")
         self.export_btn.clicked.connect(self.on_export)
         self.export_btn.setEnabled(False)
         btn_layout.addWidget(self.export_btn)
@@ -141,17 +117,7 @@ class ReportConfigDialog(QDialog):
         # Кнопка отмены (СЕРЫЙ)
         cancel_btn = QPushButton("Отмена")
         cancel_btn.setMinimumHeight(40)
-        cancel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #9e9e9e;
-                color: white;
-                border-radius: 5px;
-                padding: 10px;
-            }
-            QPushButton:hover {
-                background-color: #757575;
-            }
-        """)
+        cancel_btn.setProperty("role", "danger")
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
         

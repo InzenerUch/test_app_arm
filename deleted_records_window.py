@@ -51,12 +51,13 @@ class DeletedRecordsWindow(QDialog):
         buttons_layout = QHBoxLayout()
         
         restore_button = QPushButton("Восстановить выбранную запись")
-        restore_button.setStyleSheet("background-color: #4CAF50; color: white;")
+        restore_button.setProperty("role","save")
         restore_button.clicked.connect(self.restore_selected_record)
         buttons_layout.addWidget(restore_button)
         
         refresh_button = QPushButton("Обновить")
         refresh_button.clicked.connect(self.load_deleted_records)
+        refresh_button.setProperty("role","info")
         buttons_layout.addWidget(refresh_button)
         
         close_button = QPushButton("Закрыть")

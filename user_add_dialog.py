@@ -102,18 +102,7 @@ class UserAddDialog(QDialog):
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         button_box.button(QDialogButtonBox.StandardButton.Ok).setText("➕ Добавить")
-        button_box.button(QDialogButtonBox.StandardButton.Ok).setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                font-weight: bold;
-                padding: 8px 20px;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-        """)
+        button_box.button(QDialogButtonBox.StandardButton.Ok).setProperty("role", "info")
         button_box.button(QDialogButtonBox.StandardButton.Cancel).setText("Отмена")
         button_box.accepted.connect(self.on_accept)
         button_box.rejected.connect(self.reject)

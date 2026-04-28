@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QLineEdit, QTextEdit, QDateEdit, QComboBox, QLabel, QPushButton, QFileDialog, 
     QMessageBox, QFrame
 )
-from PyQt6.QtCore import Qt, QDate, QByteArray
+from PyQt6.QtCore import Qt, QDate, QByteArray,QTimer
 from PyQt6.QtGui import QPixmap, QFont
 from PyQt6.QtSql import QSqlQuery
 import os
@@ -47,7 +47,7 @@ class SocialDataTab(QWidget):
         # === ВАЖНО: Сначала init_ui(), потом load_data() ===
         self.init_ui()
         self.load_data()
-        
+        self.setup_auto_save()       
         # === НАСТРОЙКА АВТОДОПОЛНЕНИЯ ПОСЛЕ ЗАГРУЗКИ ===
         self.setup_autocomplete_fields()
     
@@ -856,3 +856,53 @@ class SocialDataTab(QWidget):
             except Exception as e:
                 traceback.print_exc()
                 QMessageBox.critical(self, "Ошибка", f"Ошибка сохранения:\n{str(e)}")
+    def setup_auto_save(self):
+        """Настройка мгновенного автосохранения при изменении полей"""
+        self._auto_save_timer = QTimer(self)
+        self._auto_save_timer.setSingleShot(True)
+        self._auto_save_timer.timeout.connect(self._perform_auto_save)
+
+        # Группируем все поля ввода
+        line_edits = [
+            self.surname_input, self.name_input, self.patronymic_input,
+            self.tab_number_input, self.personal_number_input,
+            self.birth_place_town_input, self.birth_place_district_input,
+            self.birth_place_region_input, self.birth_place_country_input,
+            self.drafted_by_commissariat_input, self.povsk_input,
+            self.education_input, self.social_media_account_input,
+            self.bank_card_number_input, self.passport_series_input,
+            self.passport_number_input, self.passport_issued_by_input,
+            self.military_id_series_input, self.military_id_number_input,
+            self.military_id_issued_by_input, self.military_contacts_input
+        ]
+        date_edits = [
+            self.birth_date_input, self.draft_date_input, self.selection_date_input,
+            self.passport_issue_date_input, self.military_id_issue_date_input
+        ]
+        combos = [self.category_combo, self.rank_combo]
+        text_edits = [
+            self.criminal_record_input, self.appearance_features_input,
+            self.personal_marks_input, self.federal_search_info_input,
+            self.relatives_info_input
+        ]
+
+        # Подключаем сигналы изменения
+        for w in line_edits + text_edits:
+            w.textChanged.connect(self._on_field_changed)
+        for w in date_edits:
+            w.dateChanged.connect(self._on_field_changed)
+        for w in combos:
+            w.currentIndexChanged.connect(self._on_field_changed)
+
+    def _on_field_changed(self):
+        """Запуск таймера при изменении любого поля"""
+        self._auto_save_timer.start(400)  # 400мс задержка (защита от спама в БД)
+
+    def _perform_auto_save(self):
+        """Непосредственное сохранение"""
+        try:
+            self.save_data()
+        except ValueError:
+            pass  # Игнорируем ошибки валидации при автосохранении (пользователь ещё не дописал)
+        except Exception as e:
+            print(f"⚠️ Ошибка автосохранения соц. данных: {e}")

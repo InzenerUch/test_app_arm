@@ -212,11 +212,11 @@ class IncomingOrderDialog(QDialog):
         
         save_btn = button_box.button(QDialogButtonBox.StandardButton.Save)
         save_btn.setText("💾 Сохранить")
-        save_btn.setStyleSheet("background-color: #4CAF50; color: white; font-weight: bold; min-width: 100px; padding: 8px;")
+        save_btn.setProperty("role", "save")
         
         cancel_btn = button_box.button(QDialogButtonBox.StandardButton.Cancel)
         cancel_btn.setText("❌ Отмена")
-        cancel_btn.setStyleSheet("min-width: 100px; padding: 8px;")
+        cancel_btn.setProperty("role", "danger")
         
         layout.addWidget(button_box)
     

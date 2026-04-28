@@ -88,37 +88,13 @@ class AddKrdWindow(QDialog):
         
         save_button = QPushButton("💾 Создать КРД")
         save_button.setMinimumHeight(50)
-        save_button.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                font-weight: bold;
-                font-size: 14px;
-                border-radius: 5px;
-                padding: 15px 30px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-        """)
+        save_button.setProperty("role", "save")
         save_button.clicked.connect(self.save_krd)
         button_layout.addWidget(save_button)
         
         cancel_button = QPushButton("❌ Отмена")
         cancel_button.setMinimumHeight(50)
-        cancel_button.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-                color: white;
-                font-weight: bold;
-                font-size: 14px;
-                border-radius: 5px;
-                padding: 15px 30px;
-            }
-            QPushButton:hover {
-                background-color: #da190b;
-            }
-        """)
+        cancel_button.setProperty("role", "danger")
         cancel_button.clicked.connect(self.reject)
         button_layout.addWidget(cancel_button)
         
@@ -956,15 +932,7 @@ class SochEpisodesTabForAdd(QWidget):
         layout.addWidget(info_label)
         
         add_btn = QPushButton("➕ Добавить эпизод СОЧ")
-        add_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                font-weight: bold;
-                padding: 10px 20px;
-                border-radius: 5px;
-            }
-        """)
+        add_btn.setProperty("role", "save")
         add_btn.clicked.connect(self.add_episode)
         layout.addWidget(add_btn)
         

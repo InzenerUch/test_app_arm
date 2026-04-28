@@ -66,36 +66,12 @@ class AddressesTab(QWidget):
         button_layout.addStretch()
         
         add_btn = QPushButton("➕ Добавить адрес")
-        add_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                font-weight: bold;
-                padding: 10px 20px;
-                border-radius: 5px;
-                min-width: 150px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-        """)
+        add_btn.setProperty("role", "info") 
         add_btn.clicked.connect(self.on_add_address)
         button_layout.addWidget(add_btn)
         
         delete_btn = QPushButton("🗑️ Удалить адрес")
-        delete_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-                color: white;
-                font-weight: bold;
-                padding: 10px 20px;
-                border-radius: 5px;
-                min-width: 150px;
-            }
-            QPushButton:hover {
-                background-color: #da190b;
-            }
-        """)
+        delete_btn.setProperty("role", "danger")
         delete_btn.clicked.connect(self.on_delete_address)
         button_layout.addWidget(delete_btn)
         

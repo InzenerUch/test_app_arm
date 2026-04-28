@@ -57,59 +57,20 @@ class AdminUserManagementTab(QWidget):
         
         self.add_user_btn = QPushButton("➕ Добавить пользователя")
         self.add_user_btn.setMinimumHeight(40)
-        self.add_user_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                font-weight: bold;
-                border-radius: 5px;
-                padding: 10px 20px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
-        """)
+        self.add_user_btn.setProperty("role", "info")
         self.add_user_btn.clicked.connect(self.on_add_user)
         toolbar_layout.addWidget(self.add_user_btn)
         
         self.edit_user_btn = QPushButton("✏️ Редактировать")
         self.edit_user_btn.setMinimumHeight(40)
-        self.edit_user_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
-                font-weight: bold;
-                border-radius: 5px;
-                padding: 10px 20px;
-            }
-            QPushButton:hover {
-                background-color: #1976D2;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-            }
-        """)
+        self.edit_user_btn.setProperty("role", "info")
         self.edit_user_btn.clicked.connect(self.on_edit_user)
         self.edit_user_btn.setEnabled(False)
         toolbar_layout.addWidget(self.edit_user_btn)
         
         self.delete_user_btn = QPushButton("⏸️ Деактивировать")
         self.delete_user_btn.setMinimumHeight(40)
-        self.delete_user_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-                color: white;
-                font-weight: bold;
-                border-radius: 5px;
-                padding: 10px 20px;
-            }
-            QPushButton:hover {
-                background-color: #d32f2f;
-            }
-            QPushButton:disabled {
-                background-color: #cccccc;
-            }
-        """)
+        self.delete_user_btn.setProperty("role", "danger")
         self.delete_user_btn.clicked.connect(self.on_toggle_active)
         self.delete_user_btn.setEnabled(False)
         toolbar_layout.addWidget(self.delete_user_btn)
