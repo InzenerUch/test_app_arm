@@ -1,7 +1,7 @@
 """
 Диалог добавления нового пользователя
+✅ ИСПРАВЛЕНО: Все SQL-запросы переведены на именованные параметры (:name) для стабильной работы с PostgreSQL (QPSQL)
 """
-
 import bcrypt
 import re
 from PyQt6.QtWidgets import (
@@ -23,7 +23,6 @@ class UserAddDialog(QDialog):
         self.setWindowTitle("➕ Добавление нового пользователя")
         self.setMinimumSize(500, 600)
         self.setModal(True)
-        
         self.init_ui()
     
     def init_ui(self):
@@ -114,10 +113,8 @@ class UserAddDialog(QDialog):
         """Загрузка доступных ролей"""
         self.role_combo.clear()
         self.role_combo.addItem("— Выберите роль —", None)
-        
         query = QSqlQuery(self.db)
         query.exec("SELECT id, role_name, description FROM krd.user_roles ORDER BY role_name")
-        
         while query.next():
             role_id = query.value(0)
             role_name = query.value(1)
@@ -125,36 +122,27 @@ class UserAddDialog(QDialog):
             self.role_combo.addItem(f"{role_name} ({description})", role_id)
     
     def validate_username(self, username):
-        """Проверка имени пользователя"""
         if len(username) < 3:
             return False, "Имя пользователя должно содержать минимум 3 символа"
-        
         if not re.match(r'^[a-zA-Z0-9_-]+$', username):
             return False, "Имя пользователя может содержать только латинские буквы, цифры, _ и -"
-        
         return True, ""
     
     def validate_password(self, password):
-        """Проверка пароля"""
         if len(password) < 6:
             return False, "Пароль должен содержать минимум 6 символов"
-        
         return True, ""
     
     def validate_email(self, email):
-        """Проверка email"""
         if not email:
-            return True, ""  # Email не обязателен
-        
+            return True, ""
         pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
         if not re.match(pattern, email):
             return False, "Введите корректный email адрес"
-        
         return True, ""
     
     def on_accept(self):
-        """Обработка нажатия OK"""
-        # Сбор данных
+        """Обработка нажатия OK — ✅ ИСПРАВЛЕНО: именованные параметры"""
         username = self.username_input.text().strip()
         password = self.password_input.text()
         password_confirm = self.password_confirm_input.text()
@@ -165,44 +153,36 @@ class UserAddDialog(QDialog):
         
         # Валидация
         errors = []
-        
         if not username:
             errors.append("Введите имя пользователя")
         else:
             valid, msg = self.validate_username(username)
             if not valid:
                 errors.append(msg)
-        
         if not password:
             errors.append("Введите пароль")
         else:
             valid, msg = self.validate_password(password)
             if not valid:
                 errors.append(msg)
-        
         if password != password_confirm:
             errors.append("Пароли не совпадают")
-        
         if not full_name:
             errors.append("Введите ФИО")
-        
         valid, msg = self.validate_email(email)
         if not valid:
             errors.append(msg)
-        
         if role_id is None:
             errors.append("Выберите роль")
-        
         if errors:
             QMessageBox.critical(self, "Ошибка валидации", "\n".join(errors))
             return
         
-        # Проверка на дубликат username
+        # ✅ Проверка на дубликат с именованными параметрами
         check_query = QSqlQuery(self.db)
-        check_query.prepare("SELECT id FROM krd.users WHERE username = ? AND is_deleted = FALSE")
-        check_query.addBindValue(username)
+        check_query.prepare("SELECT id FROM krd.users WHERE username = :username AND is_deleted = FALSE")
+        check_query.bindValue(":username", username)
         check_query.exec()
-        
         if check_query.next():
             QMessageBox.critical(self, "Ошибка", "Пользователь с таким именем уже существует!")
             return
@@ -211,19 +191,21 @@ class UserAddDialog(QDialog):
             # Хеширование пароля
             hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
             
-            # Вставка в БД
+            # ✅ Вставка с именованными параметрами
             insert_query = QSqlQuery(self.db)
             insert_query.prepare("""
                 INSERT INTO krd.users 
                 (username, password_hash, full_name, email, role_id, is_active, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (
+                    :username, :password_hash, :full_name, :email, :role_id, :is_active, CURRENT_TIMESTAMP
+                )
             """)
-            insert_query.addBindValue(username)
-            insert_query.addBindValue(hashed_password.decode('utf-8'))
-            insert_query.addBindValue(full_name)
-            insert_query.addBindValue(email)
-            insert_query.addBindValue(role_id)
-            insert_query.addBindValue(is_active)
+            insert_query.bindValue(":username", username)
+            insert_query.bindValue(":password_hash", hashed_password.decode('utf-8'))
+            insert_query.bindValue(":full_name", full_name)
+            insert_query.bindValue(":email", email)
+            insert_query.bindValue(":role_id", role_id)
+            insert_query.bindValue(":is_active", is_active)
             
             if not insert_query.exec():
                 raise Exception(f"Ошибка БД: {insert_query.lastError().text()}")

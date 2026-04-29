@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict NpeWk93ieUAVA31xEmoEmW632yAgFZusKMpmjSGEffUp6qd5lg5Wp9zmadWAQxi
+\restrict QPJ7lgrwCf2ndvbJqUnhPGK3nKg1eUcn8RLRso7VgCEbyJRhDrbIWbooVQ9BMHI
 
 -- Dumped from database version 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)
 -- Dumped by pg_dump version 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)
@@ -1239,7 +1239,10 @@ CREATE TABLE krd.soch_episodes (
     search_circumstances text,
     notification_recipient character varying(255),
     notification_date date,
-    notification_number character varying(100)
+    notification_number character varying(100),
+    is_deleted boolean DEFAULT false,
+    deleted_at timestamp without time zone,
+    deleted_by integer
 );
 
 
@@ -1689,7 +1692,9 @@ CREATE TABLE krd.users (
     email character varying(100),
     is_active boolean DEFAULT true,
     created_at timestamp without time zone DEFAULT now(),
-    last_login timestamp without time zone
+    last_login timestamp without time zone,
+    is_deleted boolean DEFAULT false,
+    deleted_at timestamp without time zone
 );
 
 
@@ -2462,6 +2467,14 @@ ALTER TABLE ONLY krd.service_places
 
 
 --
+-- Name: soch_episodes soch_episodes_deleted_by_fkey; Type: FK CONSTRAINT; Schema: krd; Owner: postgres
+--
+
+ALTER TABLE ONLY krd.soch_episodes
+    ADD CONSTRAINT soch_episodes_deleted_by_fkey FOREIGN KEY (deleted_by) REFERENCES krd.users(id);
+
+
+--
 -- Name: soch_episodes soch_episodes_krd_id_fkey; Type: FK CONSTRAINT; Schema: krd; Owner: postgres
 --
 
@@ -2922,5 +2935,5 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA krd GRANT SELECT,INSERT,DEL
 -- PostgreSQL database dump complete
 --
 
-\unrestrict NpeWk93ieUAVA31xEmoEmW632yAgFZusKMpmjSGEffUp6qd5lg5Wp9zmadWAQxi
+\unrestrict QPJ7lgrwCf2ndvbJqUnhPGK3nKg1eUcn8RLRso7VgCEbyJRhDrbIWbooVQ9BMHI
 

@@ -190,62 +190,59 @@ class UserAuditWindow(QDialog):
                 self.user_combo.setCurrentIndex(index)
     
     def load_audit_data(self):
-        """Загрузка данных аудита с применением фильтров"""
+        """Загрузка данных аудита с применением фильтров (✅ ИСПРАВЛЕНО: именованные параметры)"""
         # Получаем параметры фильтрации
         user_id = self.user_combo.currentData()
         action_type = self.action_type_combo.currentData()
         date_from = self.date_from.date().toString("yyyy-MM-dd")
         date_to = self.date_to.date().toString("yyyy-MM-dd")
         
-        # Формируем SQL-запрос
-        query_parts = [
-            "SELECT ",
-            "    al.created_at as \"Дата и время\",",
-            "    al.username as \"Пользователь\",",
-            "    al.action_type as \"Тип действия\",",
-            "    al.table_name as \"Таблица\",",
-            "    al.record_id as \"ID записи\",",
-            "    al.krd_id as \"ID КРД\",",
-            "    al.description as \"Описание\"",
-            "FROM krd.audit_log al",
-            "WHERE 1=1"
-        ]
+        # ✅ Формируем SQL-запрос с ИМЕНОВАННЫМИ параметрами
+        query_str = """
+            SELECT 
+                al.created_at as "Дата и время",
+                al.username as "Пользователь",
+                al.action_type as "Тип действия",
+                al.table_name as "Таблица",
+                al.record_id as "ID записи",
+                al.krd_id as "ID КРД",
+                al.description as "Описание"
+            FROM krd.audit_log al
+            WHERE 1=1
+        """
         
-        params = []
+        # ✅ Добавляем условия с именованными параметрами
+        conditions = []
+        params = {}
         
-        # Фильтр по пользователю
         if user_id and user_id > 0:
-            query_parts.append("AND al.user_id = ?")
-            params.append(user_id)
+            conditions.append("AND al.user_id = :user_id")
+            params[":user_id"] = user_id
         
-        # Фильтр по типу действия
         if action_type:
-            query_parts.append("AND al.action_type = ?")
-            params.append(action_type)
+            conditions.append("AND al.action_type = :action_type")
+            params[":action_type"] = action_type
         
-        # Фильтр по дате
-        query_parts.append("AND al.created_at >= ?")
-        params.append(date_from)
+        conditions.append("AND al.created_at >= :date_from")
+        params[":date_from"] = date_from
         
-        query_parts.append("AND al.created_at <= ?")
-        params.append(f"{date_to} 23:59:59")
+        conditions.append("AND al.created_at <= :date_to")
+        params[":date_to"] = f"{date_to} 23:59:59"
         
-        # Сортировка
-        query_parts.append("ORDER BY al.created_at DESC")
+        query_str += " ".join(conditions)
+        query_str += " ORDER BY al.created_at DESC LIMIT 1000"
         
-        # Ограничение количества записей
-        query_parts.append("LIMIT 1000")
-        
-        query_str = " ".join(query_parts)
-        
-        # Выполняем запрос
+        # ✅ Выполняем запрос с именованными параметрами
         query = QSqlQuery(self.db)
         query.prepare(query_str)
         
-        for param in params:
-            query.addBindValue(param)
+        for name, value in params.items():
+            query.bindValue(name, value)
         
         if not query.exec():
+            print(f"❌ Ошибка запроса: {query.lastError().text()}")
+            print(f"📝 SQL: {query_str}")
+            print(f"🔗 Параметры: {params}")
             QMessageBox.critical(
                 self,
                 "Ошибка",
@@ -253,10 +250,8 @@ class UserAuditWindow(QDialog):
             )
             return
         
-        # Устанавливаем результаты в модель
         self.audit_model.setQuery(query)
         
-        # Обновляем заголовок окна
         record_count = self.audit_model.rowCount()
         self.setWindowTitle(f"Аудит действий пользователей - {record_count} записей")
     

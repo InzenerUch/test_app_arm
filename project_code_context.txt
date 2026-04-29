@@ -1528,458 +1528,169 @@ class AddressesTab(QWidget):
 
 """
 Модуль для административной вкладки управления пользователями
-С таблицей пользователей, редактированием и добавлением через диалоги
+✅ УБРАНА КНОПКА ДЕАКТИВАЦИИ (функция перенесена в UserEditDialog)
+✅ ОСТАВЛЕНЫ: Добавление, Редактирование, Поиск, Консольная отладка
 """
-
-import bcrypt
+import logging
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, 
-    QTableView, QMessageBox, QMenu, QAbstractItemView, QHeaderView,
-    QGroupBox, QLineEdit, QFrame,QDialog
+    QTableView, QMessageBox, QAbstractItemView, QHeaderView,
+    QGroupBox, QLineEdit, QFrame, QDialog
 )
-from PyQt6.QtCore import Qt, QPoint
-from PyQt6.QtSql import QSqlQueryModel, QSqlQuery
-from PyQt6.QtGui import QAction, QFont, QContextMenuEvent
+from PyQt6.QtCore import Qt
+from PyQt6.QtSql import QSqlQuery, QSqlQueryModel
+from PyQt6.QtGui import QFont
 
 from user_edit_dialog import UserEditDialog
 from user_add_dialog import UserAddDialog
 
+logger = logging.getLogger(__name__)
 
 class AdminUserManagementTab(QWidget):
-    """
-    Административная вкладка для управления пользователями
-    """
+    """Административная вкладка для управления пользователями"""
     
     def __init__(self, db_connection, current_user_id=None):
         super().__init__()
         self.db = db_connection
         self.current_user_id = current_user_id
         
-        print("🔧 [DEBUG] AdminUserManagementTab инициализирован")
-        print(f"🔧 [DEBUG] current_user_id = {current_user_id}")
-        
+        print(f"\n🔧 [DEBUG] AdminUserManagementTab инициализирован")
         self.init_ui()
         self.load_users()
     
     def init_ui(self):
-        """Инициализация пользовательского интерфейса"""
-        layout = QVBoxLayout()
+        """Инициализация интерфейса"""
+        layout = QVBoxLayout(self)
         layout.setSpacing(15)
         
-        # === Заголовок ===
+        # Заголовок
         title_group = QGroupBox("👥 Управление пользователями системы")
         title_layout = QVBoxLayout(title_group)
-        
-        title_label = QLabel("Администрирование учётных записей пользователей")
-        title_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        title_layout.addWidget(title_label)
-        
-        info_label = QLabel("📌 Здесь вы можете добавлять, редактировать и деактивировать пользователей системы")
-        info_label.setStyleSheet("QLabel { color: #666; padding: 5px; }")
-        title_layout.addWidget(info_label)
-        
+        title_layout.addWidget(QLabel("Администрирование учётных записей пользователей", font=QFont("Arial", 12, QFont.Weight.Bold)))
         layout.addWidget(title_group)
         
-        # === Панель инструментов ===
+        # Панель инструментов
         toolbar_layout = QHBoxLayout()
         
         self.add_user_btn = QPushButton("➕ Добавить пользователя")
-        self.add_user_btn.setMinimumHeight(40)
         self.add_user_btn.setProperty("role", "info")
         self.add_user_btn.clicked.connect(self.on_add_user)
         toolbar_layout.addWidget(self.add_user_btn)
         
         self.edit_user_btn = QPushButton("✏️ Редактировать")
-        self.edit_user_btn.setMinimumHeight(40)
-        self.edit_user_btn.setProperty("role", "info")
+        self.edit_user_btn.setProperty("role", "edit")
         self.edit_user_btn.clicked.connect(self.on_edit_user)
         self.edit_user_btn.setEnabled(False)
         toolbar_layout.addWidget(self.edit_user_btn)
         
-        self.delete_user_btn = QPushButton("⏸️ Деактивировать")
-        self.delete_user_btn.setMinimumHeight(40)
-        self.delete_user_btn.setProperty("role", "danger")
-        self.delete_user_btn.clicked.connect(self.on_toggle_active)
-        self.delete_user_btn.setEnabled(False)
-        toolbar_layout.addWidget(self.delete_user_btn)
-        
+        # ✅ КНОПКА ДЕАКТИВАЦИИ УДАЛЕНА
         toolbar_layout.addStretch()
         
-        search_label = QLabel("🔍 Поиск:")
-        search_label.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-        toolbar_layout.addWidget(search_label)
-        
+        toolbar_layout.addWidget(QLabel("🔍 Поиск:"))
         self.search_input = QLineEdit()
         self.search_input.setPlaceholderText("ФИО, username, email...")
-        self.search_input.setMinimumWidth(250)
-        self.search_input.setStyleSheet("""
-            QLineEdit {
-                padding: 8px;
-                border: 1px solid #ccc;
-                border-radius: 5px;
-            }
-            QLineEdit:focus {
-                border: 2px solid #2196F3;
-            }
-        """)
         self.search_input.textChanged.connect(self.on_search_changed)
         toolbar_layout.addWidget(self.search_input)
         
         layout.addLayout(toolbar_layout)
         
         self.stats_label = QLabel("")
-        self.stats_label.setStyleSheet("QLabel { color: #666; padding: 5px; font-weight: bold; }")
         layout.addWidget(self.stats_label)
-        
-        separator = QFrame()
-        separator.setFrameShape(QFrame.Shape.HLine)
-        separator.setFrameShadow(QFrame.Shadow.Sunken)
-        layout.addWidget(separator)
+        layout.addWidget(QFrame(frameShape=QFrame.Shape.HLine))
         
         self.users_table = QTableView()
-        self.users_table.setAlternatingRowColors(True)
+        self.users_model = QSqlQueryModel()
+        self.users_table.setModel(self.users_model)
         self.users_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self.users_table.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self.users_table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.users_table.customContextMenuRequested.connect(self.show_context_menu)
         self.users_table.doubleClicked.connect(self.on_edit_user)
-        
-        header = self.users_table.horizontalHeader()
-        header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        header.setStretchLastSection(True)
-        
+        self.users_table.selectionModel().selectionChanged.connect(self.update_buttons_state)
         layout.addWidget(self.users_table)
-        self.setLayout(layout)
     
     def load_users(self, search_query=""):
-        """Загрузка списка пользователей"""
-        print(f"\n🔍 [DEBUG] load_users вызван, search_query='{search_query}'")
+        """Загрузка пользователей с отладкой"""
+        print(f"\n🔄 [LOAD] Загрузка пользователей (поиск: '{search_query}')")
         
-        self.users_model = QSqlQueryModel()
+        query = QSqlQuery(self.db)
+        base_sql = """
+            SELECT u.id, u.username, u.full_name, u.email, r.role_name,
+                   CASE WHEN u.is_active THEN '✓ Активен' ELSE '⏸️ Деактивирован' END,
+                   u.created_at
+            FROM krd.users u
+            LEFT JOIN krd.user_roles r ON u.role_id = r.id
+        """
         
-        # Проверка количества записей
-        count_query = QSqlQuery(self.db)
-        count_query.exec("SELECT COUNT(*) FROM krd.users")
-        if count_query.next():
-            total_count = count_query.value(0)
-            print(f"📊 [DEBUG] Всего записей в krd.users: {total_count}")
-        
-        # === ОСНОВНОЙ ЗАПРОС (БЕЗ is_deleted - его нет в схеме!) ===
         if search_query:
-            query_str = """
-                SELECT 
-                    u.id AS "ID",
-                    u.username AS "Имя пользователя",
-                    u.full_name AS "ФИО",
-                    u.email AS "Email",
-                    r.role_name AS "Роль",
-                    CASE WHEN u.is_active THEN '✓ Активен' ELSE '⏸️ Деактивирован' END AS "Статус",
-                    u.created_at AS "Дата создания"
-                FROM krd.users u
-                LEFT JOIN krd.user_roles r ON u.role_id = r.id
-                WHERE (
-                    LOWER(u.username) LIKE LOWER(:search) OR
-                    LOWER(u.full_name) LIKE LOWER(:search) OR
-                    LOWER(u.email) LIKE LOWER(:search)
-                )
-                ORDER BY u.created_at DESC
-            """
-            query = QSqlQuery(self.db)
-            query.prepare(query_str)
-            query.bindValue(":search", f"%{search_query}%")
-            
-            if not query.exec():
-                print(f"❌ [DEBUG] Ошибка выполнения запроса: {query.lastError().text()}")
-                QMessageBox.critical(self, "Ошибка", f"Ошибка загрузки пользователей:\n{query.lastError().text()}")
-                return
-            
-            self.users_model.setQuery(query)
+            query.prepare(base_sql + " WHERE LOWER(u.username) LIKE LOWER(:s) OR LOWER(u.full_name) LIKE LOWER(:s) OR LOWER(u.email) LIKE LOWER(:s) ORDER BY u.created_at DESC")
+            query.bindValue(":s", f"%{search_query}%")
         else:
-            query_str = """
-                SELECT 
-                    u.id AS "ID",
-                    u.username AS "Имя пользователя",
-                    u.full_name AS "ФИО",
-                    u.email AS "Email",
-                    r.role_name AS "Роль",
-                    CASE WHEN u.is_active THEN '✓ Активен' ELSE '⏸️ Деактивирован' END AS "Статус",
-                    u.created_at AS "Дата создания"
-                FROM krd.users u
-                LEFT JOIN krd.user_roles r ON u.role_id = r.id
-                ORDER BY u.created_at DESC
-            """
+            query.prepare(base_sql + " ORDER BY u.created_at DESC")
             
-            print(f"📝 [DEBUG] Выполняю запрос")
-            
-            # === ПРЯМОЕ ВЫПОЛНЕНИЕ ЗАПРОСА ===
-            query = QSqlQuery(self.db)
-            if not query.exec(query_str):
-                print(f"❌ [DEBUG] Ошибка query.exec: {query.lastError().text()}")
-                QMessageBox.critical(self, "Ошибка", f"Ошибка загрузки пользователей:\n{query.lastError().text()}")
-                return
-            
-            self.users_model.setQuery(query)
+        if not query.exec():
+            print(f"❌ [SQL] Ошибка: {query.lastError().text()}")
+            return
+        
+        self.users_model.setQuery(query)
+        self.users_table.setColumnHidden(0, True)
         
         count = self.users_model.rowCount()
-        print(f"✅ [DEBUG] Запрос вернул {count} записей")
-        
-        if count > 0:
-            print("📋 [DEBUG] Первые записи:")
-            for i in range(min(count, 5)):
-                row_data = []
-                for j in range(self.users_model.columnCount()):
-                    row_data.append(str(self.users_model.data(self.users_model.index(i, j))))
-                print(f"   Строка {i}: {row_data}")
-        
-        self.users_table.setModel(self.users_model)
-        
-        self.users_table.setColumnWidth(0, 50)
-        self.users_table.setColumnWidth(1, 150)
-        self.users_table.setColumnWidth(2, 200)
-        self.users_table.setColumnWidth(3, 200)
-        self.users_table.setColumnWidth(4, 120)
-        self.users_table.setColumnWidth(5, 120)
-        
-        self.users_table.hideColumn(0)
-        
-        if search_query:
-            self.stats_label.setText(f"🔍 Найдено пользователей: {count}")
-        else:
-            self.stats_label.setText(f"📊 Всего пользователей в системе: {count}")
-        
+        print(f"✅ [LOAD] Загружено {count} пользователей")
+        self.stats_label.setText(f"📊 Всего: {count}")
         self.update_buttons_state()
-        
-        if count == 0:
-            print("⚠️ [DEBUG] Записей не найдено! Проверяю таблицу напрямую...")
-            self._check_users_table_directly()
-    
-    def _check_users_table_directly(self):
-        """Прямая проверка таблицы пользователей"""
-        query = QSqlQuery(self.db)
-        query.exec("SELECT id, username, full_name, is_active FROM krd.users")
-        
-        print("\n🔍 [DEBUG] Прямая проверка таблицы krd.users:")
-        while query.next():
-            user_id = query.value(0)
-            username = query.value(1)
-            full_name = query.value(2)
-            is_active = query.value(3)
-            print(f"   ID={user_id}, username={username}, full_name={full_name}, is_active={is_active}")
     
     def update_buttons_state(self):
         """Обновление состояния кнопок"""
         has_selection = self.users_table.selectionModel().hasSelection()
         self.edit_user_btn.setEnabled(has_selection)
-        self.delete_user_btn.setEnabled(has_selection)
+        print(f"🔘 [UI] Кнопка edit={has_selection}")
     
     def on_search_changed(self, text):
-        """Обработка изменения поискового запроса"""
         self.load_users(text.strip())
-    
-    def show_context_menu(self, position: QPoint):
-        """Показ контекстного меню"""
-        index = self.users_table.indexAt(position)
-        
-        if not index.isValid():
-            return
-        
-        menu = QMenu(self)
-        
-        edit_action = QAction("✏️ Редактировать пользователя", self)
-        edit_action.triggered.connect(self.on_edit_user)
-        menu.addAction(edit_action)
-        
-        user_id = self.get_selected_user_id()
-        is_active = self._get_user_active_status(user_id)
-        
-        if is_active:
-            deactivate_action = QAction("⏸️ Деактивировать пользователя", self)
-            deactivate_action.triggered.connect(self.on_toggle_active)
-            menu.addAction(deactivate_action)
-        else:
-            activate_action = QAction("✅ Активировать пользователя", self)
-            activate_action.triggered.connect(self.on_toggle_active)
-            menu.addAction(activate_action)
-        
-        menu.addSeparator()
-        
-        reset_password_action = QAction("🔑 Сбросить пароль", self)
-        reset_password_action.triggered.connect(self.on_reset_password)
-        menu.addAction(reset_password_action)
-        
-        menu.exec(self.users_table.mapToGlobal(position))
-    
-    def _get_user_active_status(self, user_id):
-        """Получение статуса активности пользователя"""
-        if not user_id:
-            return True
-        
-        query = QSqlQuery(self.db)
-        query.prepare("SELECT is_active FROM krd.users WHERE id = ?")
-        query.addBindValue(user_id)
-        
-        if query.exec() and query.next():
-            return query.value(0)
-        return True
     
     def get_selected_user_id(self):
         """Получение ID выбранного пользователя"""
         selection = self.users_table.selectionModel()
         if not selection.hasSelection():
             return None
-        
-        index = selection.selectedRows()[0]
-        user_id = self.users_model.data(self.users_model.index(index.row(), 0))
-        
+        row = selection.selectedRows()[0].row()
+        user_id = self.users_model.data(self.users_model.index(row, 0))
         try:
-            return int(user_id)
-        except (ValueError, TypeError):
+            return int(user_id) if user_id else None
+        except:
             return None
     
     def on_add_user(self):
-        """Открытие диалога добавления пользователя"""
+        """Добавление пользователя"""
+        print(f"\n➕ [ACTION] Запрос на добавление пользователя")
         dialog = UserAddDialog(self.db, self)
-        
         if dialog.exec() == QDialog.DialogCode.Accepted:
+            print(f"✅ [ACTION] Пользователь успешно добавлен")
             self.load_users()
-            QMessageBox.information(self, "Успешно", "Пользователь успешно добавлен!")
+            self._log_action('USER_CREATED', None, 'Пользователь добавлен через админ-панель')
     
     def on_edit_user(self):
-        """Открытие диалога редактирования пользователя"""
+        """Редактирование пользователя"""
         user_id = self.get_selected_user_id()
-        
         if not user_id:
-            QMessageBox.warning(self, "Внимание", "Выберите пользователя для редактирования")
+            print(f"⚠️ [EDIT] Нет выделения")
+            return
+        if self.current_user_id and int(self.current_user_id) == int(user_id):
+            print(f"⚠️ [EDIT] Нельзя редактировать себя")
+            QMessageBox.warning(self, "Внимание", "Нельзя редактировать свою учётную запись")
             return
         
-        if user_id == self.current_user_id:
-            QMessageBox.warning(self, "Внимание", "Вы не можете редактировать свою собственную учётную запись")
-            return
-        
+        print(f"✏️ [ACTION] Редактирование пользователя ID={user_id}")
         dialog = UserEditDialog(self.db, user_id, self)
-        
         if dialog.exec() == QDialog.DialogCode.Accepted:
+            print(f"✅ [ACTION] Данные пользователя обновлены")
             self.load_users()
-            QMessageBox.information(self, "Успешно", "Данные пользователя обновлены!")
+            self._log_action('USER_EDITED', user_id, 'Данные пользователя отредактированы')
     
-    def on_toggle_active(self):
-        """Деактивация/активация пользователя"""
-        user_id = self.get_selected_user_id()
-        
-        if not user_id:
-            QMessageBox.warning(self, "Внимание", "Выберите пользователя")
-            return
-        
-        if user_id == self.current_user_id:
-            QMessageBox.critical(self, "Ошибка", "Вы не можете деактивировать свою собственную учётную запись!")
-            return
-        
-        query = QSqlQuery(self.db)
-        query.prepare("SELECT username, full_name, is_active FROM krd.users WHERE id = ?")
-        query.addBindValue(user_id)
-        query.exec()
-        
-        if query.next():
-            username = query.value(0)
-            full_name = query.value(1)
-            is_active = query.value(2)
-        else:
-            QMessageBox.warning(self, "Ошибка", "Пользователь не найден")
-            return
-        
-        if is_active:
-            reply = QMessageBox.question(
-                self,
-                "Подтверждение деактивации",
-                f"Вы действительно хотите деактивировать пользователя?\n\n"
-                f"👤 Username: {username}\n"
-                f"📋 ФИО: {full_name}\n\n"
-                f"⚠️ Пользователь потеряет доступ к системе!",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.No
-            )
-            
-            if reply == QMessageBox.StandardButton.Yes:
-                try:
-                    update_query = QSqlQuery(self.db)
-                    update_query.prepare("UPDATE krd.users SET is_active = FALSE WHERE id = ?")
-                    update_query.addBindValue(user_id)
-                    
-                    if not update_query.exec():
-                        raise Exception(f"Ошибка при деактивации: {update_query.lastError().text()}")
-                    
-                    self.load_users()
-                    QMessageBox.information(self, "Успешно", f"Пользователь '{username}' деактивирован!")
-                    
-                except Exception as e:
-                    QMessageBox.critical(self, "Ошибка", f"Ошибка при деактивации пользователя:\n{str(e)}")
-        else:
-            reply = QMessageBox.question(
-                self,
-                "Подтверждение активации",
-                f"Вы действительно хотите активировать пользователя?\n\n"
-                f"👤 Username: {username}\n"
-                f"📋 ФИО: {full_name}",
-                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                QMessageBox.StandardButton.Yes
-            )
-            
-            if reply == QMessageBox.StandardButton.Yes:
-                try:
-                    update_query = QSqlQuery(self.db)
-                    update_query.prepare("UPDATE krd.users SET is_active = TRUE WHERE id = ?")
-                    update_query.addBindValue(user_id)
-                    
-                    if not update_query.exec():
-                        raise Exception(f"Ошибка при активации: {update_query.lastError().text()}")
-                    
-                    self.load_users()
-                    QMessageBox.information(self, "Успешно", f"Пользователь '{username}' активирован!")
-                    
-                except Exception as e:
-                    QMessageBox.critical(self, "Ошибка", f"Ошибка при активации пользователя:\n{str(e)}")
-    
-    def on_reset_password(self):
-        """Сброс пароля пользователя"""
-        user_id = self.get_selected_user_id()
-        
-        if not user_id:
-            QMessageBox.warning(self, "Внимание", "Выберите пользователя")
-            return
-        
-        if user_id == self.current_user_id:
-            QMessageBox.warning(self, "Внимание", "Вы не можете сбросить свой собственный пароль через эту функцию")
-            return
-        
-        reply = QMessageBox.question(
-            self,
-            "Сброс пароля",
-            "Сбросить пароль пользователю и показать временный пароль?\n\n"
-            "⚠️ Временный пароль будет показан только один раз!",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
-        )
-        
-        if reply == QMessageBox.StandardButton.Yes:
-            import random
-            import string
-            temp_password = ''.join(random.choices(string.ascii_letters + string.digits, k=12))
-            
-            hashed_password = bcrypt.hashpw(temp_password.encode('utf-8'), bcrypt.gensalt())
-            
-            query = QSqlQuery(self.db)
-            query.prepare("UPDATE krd.users SET password_hash = ? WHERE id = ?")
-            query.addBindValue(hashed_password.decode('utf-8'))
-            query.addBindValue(user_id)
-            
-            if query.exec():
-                QMessageBox.information(
-                    self,
-                    "Пароль сброшен",
-                    f"Временный пароль: {temp_password}\n\n"
-                    f"⚠️ Скопируйте пароль сейчас! Он не будет показан повторно."
-                )
-            else:
-                QMessageBox.critical(self, "Ошибка", f"Ошибка сброса пароля: {query.lastError().text()}")
+    def _log_action(self, action_type: str, user_id: int, description: str):
+        """Запись действия в аудит"""
+        if self.parent() and hasattr(self.parent(), 'audit_logger'):
+            self.parent().audit_logger.log_action(action_type, 'users', user_id, None, description)
+            print(f"📝 [AUDIT] Записано: {action_type} | user_id={user_id}")
 
 ========================================
 📄 FILE: ./audit_logger.py
@@ -3730,12 +3441,13 @@ class DeletedRecordsWindow(QDialog):
         buttons_layout = QHBoxLayout()
         
         restore_button = QPushButton("Восстановить выбранную запись")
-        restore_button.setStyleSheet("background-color: #4CAF50; color: white;")
+        restore_button.setProperty("role","save")
         restore_button.clicked.connect(self.restore_selected_record)
         buttons_layout.addWidget(restore_button)
         
         refresh_button = QPushButton("Обновить")
         refresh_button.clicked.connect(self.load_deleted_records)
+        refresh_button.setProperty("role","info")
         buttons_layout.addWidget(refresh_button)
         
         close_button = QPushButton("Закрыть")
@@ -4967,15 +4679,12 @@ class DocumentGeneratorTab(QWidget):
         lay = QVBoxLayout(widget)
         lay.addWidget(QLabel("📄 Управление шаблонами", font=QFont("Arial", 14, QFont.Weight.Bold)))
         btns = QHBoxLayout()
-        for lbl, fn, style in [("➕ Добавить", lambda: self.tmpl_mgr.add_template_dialog(self), None),
-                               ("✏️ Редактировать", lambda: self.tmpl_mgr.edit_template_dialog(self), None),
-                               ("🗑️ Удалить", lambda: self.tmpl_mgr.delete_selected(self), None),
-                               ("🔄 Обновить", self.tmpl_mgr.load_templates, None)]:
+        for lbl, fn, _property in [("➕ Добавить", lambda: self.tmpl_mgr.add_template_dialog(self), "info"),
+                               ("✏️ Редактировать", lambda: self.tmpl_mgr.edit_template_dialog(self), "edit"),
+                               ("🗑️ Удалить", lambda: self.tmpl_mgr.delete_selected(self), "danger"),
+                               ("🔄 Обновить", self.tmpl_mgr.load_templates, "info")]:
             b = QPushButton(lbl)
-            if lbl == "🗑️ Удалить":
-                b.setProperty("role", "danger")
-                b.setStyleSheet("")
-            if style: b.setStyleSheet(style)
+            if _property: b.setProperty("role",_property)
             b.clicked.connect(fn)
             btns.addWidget(b)
         lay.addLayout(btns)
@@ -7567,14 +7276,13 @@ if __name__ == "__main__":
 
 """
 Модуль для окна просмотра и редактирования данных КРД
-С подтверждением сохранения при закрытии
+✅ УБРАНЫ КНОПКИ СОХРАНЕНИЯ/ЗАКРЫТИЯ
+✅ АВТОСОХРАНЕНИЕ ПРИ ПЕРЕКЛЮЧЕНИИ ВКЛАДОК И ЗАКРЫТИИ ОКНА
 """
-
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox, QTabWidget
+    QDialog, QVBoxLayout, QTabWidget, QMessageBox
 )
-from PyQt6.QtGui import QFont, QCloseEvent
-from PyQt6.QtCore import Qt
+from PyQt6.QtGui import QCloseEvent
 import traceback
 
 # Импорт всех вкладок
@@ -7586,199 +7294,67 @@ from soch_episodes_tab import SochEpisodesTab
 from outgoing_requests_tab import OutgoingRequestsTab
 from document_generator_tab import DocumentGeneratorTab
 
-from audit_logger import AuditLogger
-
 
 class KrdDetailsWindow(QDialog):
-    """
-    Окно просмотра и редактирования данных КРД
-    """
+    """Окно просмотра и редактирования данных КРД"""
     
     def __init__(self, krd_id, db_connection, audit_logger=None):
         super().__init__()
         self.krd_id = krd_id
         self.db = db_connection
         self.audit_logger = audit_logger
-        
-        # Флаг наличия несохранённых изменений
-        self.has_unsaved_changes = False
+        self.previous_tab_index = -1  # Для отслеживания предыдущей вкладки
         
         self.setWindowTitle(f"Карточка розыска №{krd_id}")
         self.setModal(True)
         self.resize(1000, 700)
-        
         self.init_ui()
     
     def init_ui(self):
         """Инициализация пользовательского интерфейса"""
-        main_layout = QVBoxLayout()
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
         
-        # Создаем вкладки
-        tabs = QTabWidget()
+        self.tabs = QTabWidget()
         
-        # Добавляем все вкладки
-        tabs.addTab(SocialDataTab(self.krd_id, self.db, self.audit_logger), "Социально-демографические данные")
-        tabs.addTab(AddressesTab(self.krd_id, self.db, self.audit_logger), "Адреса проживания")
-        tabs.addTab(IncomingOrdersTab(self.krd_id, self.db, self.audit_logger), "Входящие поручения")
-        tabs.addTab(ServicePlacesTab(self.krd_id, self.db, self.audit_logger), "Места службы")
-        tabs.addTab(SochEpisodesTab(self.krd_id, self.db, self.audit_logger), "Сведения о СОЧ")
-        tabs.addTab(OutgoingRequestsTab(self.krd_id, self.db, self.audit_logger), "Запросы и поручения")
+        # Добавляем вкладки (убраны кнопки внизу)
+        self.tabs.addTab(SocialDataTab(self.krd_id, self.db, self.audit_logger), "👤 Социально-демографические данные")
+        self.tabs.addTab(AddressesTab(self.krd_id, self.db, self.audit_logger), "🏠 Адреса проживания")
+        self.tabs.addTab(IncomingOrdersTab(self.krd_id, self.db, self.audit_logger), "📬 Входящие поручения")
+        self.tabs.addTab(ServicePlacesTab(self.krd_id, self.db, self.audit_logger), "🎖️ Места службы")
+        self.tabs.addTab(SochEpisodesTab(self.krd_id, self.db, self.audit_logger), "⚠️ Сведения о СОЧ")
+        self.tabs.addTab(OutgoingRequestsTab(self.krd_id, self.db, self.audit_logger), "📤 Запросы и поручения")
+        self.tabs.addTab(DocumentGeneratorTab(self.krd_id, self.db, self.audit_logger), "📄 Генератор документов")
         
+        # Отслеживаем переключение вкладок
+        self.tabs.currentChanged.connect(self._on_tab_switched)
         
-        # Сохраняем ссылку на вкладки для доступа из save_all_changes
-        self.tabs = tabs
-        
-        # Отслеживаем изменения в вкладках
-        tabs.currentChanged.connect(self.on_tab_changed)
-        
-        main_layout.addWidget(tabs)
-        
-        # Кнопки внизу
-        button_layout = QHBoxLayout()
-        
-        save_button = QPushButton("💾 Сохранить все изменения")
-        save_button.setProperty("role", "save")
-        save_button.clicked.connect(self.save_all_changes)
-        button_layout.addWidget(save_button)
-        
-        cancel_button = QPushButton("❌ Закрыть")
-        cancel_button.setProperty("role", "danger")
-        cancel_button.clicked.connect(self.close)
-        button_layout.addWidget(cancel_button)
-        
-        main_layout.addLayout(button_layout)
-        self.setLayout(main_layout)
+        main_layout.addWidget(self.tabs)
     
-    def on_tab_changed(self, index):
-        """Обработчик переключения вкладок"""
-        # Можно отслеживать изменения при переключении вкладок
-        pass
-    
-    def mark_as_changed(self):
-        """Отметить наличие несохранённых изменений"""
-        self.has_unsaved_changes = True
-        # Обновляем заголовок окна
-        self.setWindowTitle(f"Карточка розыска №{self.krd_id} *")
-    
-    def mark_as_saved(self):
-        """Отметить что изменения сохранены"""
-        self.has_unsaved_changes = False
-        # Обновляем заголовок окна
-        self.setWindowTitle(f"Карточка розыска №{self.krd_id}")
+    def _on_tab_switched(self, new_index):
+        """Автосохранение предыдущей вкладки при переключении"""
+        if self.previous_tab_index != -1 and self.previous_tab_index != new_index:
+            prev_widget = self.tabs.widget(self.previous_tab_index)
+            self._save_widget_silent(prev_widget)
+        self.previous_tab_index = new_index
     
     def closeEvent(self, event: QCloseEvent):
-        """
-        Перехват события закрытия окна
-        ❗ СПРАШИВАЕТ о сохранении при наличии изменений
-        """
-        # Проверяем есть ли несохранённые изменения
-        if self.has_unsaved_changes:
-            # Создаём диалог подтверждения
-            reply = QMessageBox.question(
-                self,
-                "Подтверждение закрытия",
-                "⚠️ Обнаружены несохранённые изменения!\n\n"
-                "Вы хотите сохранить изменения перед закрытием?",
-                QMessageBox.StandardButton.Save | 
-                QMessageBox.StandardButton.Discard | 
-                QMessageBox.StandardButton.Cancel,
-                QMessageBox.StandardButton.Save
-            )
-            
-            if reply == QMessageBox.StandardButton.Save:
-                # Пользователь выбрал "Сохранить"
-                if self.save_all_changes(silent=True):
-                    # Сохранение успешно - закрываем окно
-                    event.accept()
-                else:
-                    # Ошибка сохранения - не закрываем окно
-                    event.ignore()
-                    
-            elif reply == QMessageBox.StandardButton.Discard:
-                # Пользователь выбрал "Не сохранять" - закрываем без сохранения
-                event.accept()
-                
-            elif reply == QMessageBox.StandardButton.Cancel:
-                # Пользователь выбрал "Отмена" - не закрываем окно
-                event.ignore()
-        else:
-            # Нет несохранённых изменений - закрываем без вопросов
-            event.accept()
+        """Сохранение текущей вкладки перед закрытием окна"""
+        current_widget = self.tabs.currentWidget()
+        self._save_widget_silent(current_widget)
+        event.accept()
     
-    def save_all_changes(self, silent=False):
-        """
-        Сохранение изменений во всех вкладках
-        Args:
-            silent: Если True, не показывать сообщения об успехе
-        Returns:
-            bool: True если сохранение успешно, False если ошибка
-        """
-        try:
-            # Получаем текущую активную вкладку
-            current_widget = self.tabs.currentWidget()
-            
-            if hasattr(current_widget, 'save_data'):
-                # Получаем старые и новые данные из вкладки (если поддерживается)
-                old_data = {}
-                new_data = {}
-                
-                if hasattr(current_widget, 'get_old_data'):
-                    old_data = current_widget.get_old_data()
-                if hasattr(current_widget, 'get_new_data'):
-                    new_data = current_widget.get_new_data()
-                
-                # Вызываем сохранение данных в текущей вкладке
-                current_widget.save_data()
-                
-                # Логирование с реальными данными
-                if self.audit_logger:
-                    self.audit_logger.log_krd_update(
-                        self.krd_id, 
-                        old_data, 
-                        new_data
-                    )
-                
-                # Помечаем как сохранённое
-                self.mark_as_saved()
-                
-                # Показываем сообщение только если не silent режим
-                if not silent:
-                    QMessageBox.information(
-                        self, 
-                        "Успех", 
-                        "✅ Данные успешно сохранены\n\n"
-                        "Вы можете продолжить редактирование или закрыть окно."
-                    )
-                
-                # Обновляем данные в текущей вкладке после сохранения
-                if hasattr(current_widget, 'load_data'):
-                    current_widget.load_data()
-                
-                return True
-                
-            else:
-                if not silent:
-                    QMessageBox.warning(self, "Ошибка", "⚠️ Текущая вкладка не поддерживает сохранение")
-                return False
-                
-        except ValueError as e:
-            # Ошибка валидации - показываем предупреждение
-            if not silent:
-                QMessageBox.warning(self, "Ошибка валидации", f"⚠️ {str(e)}")
-            return False
-            
-        except Exception as e:
-            traceback.print_exc()
-            if not silent:
-                QMessageBox.critical(self, "Ошибка", f"❌ Ошибка при сохранении данных:\n{str(e)}")
-            return False
-    
-    def reject(self):
-        """
-        Переопределение метода reject для подтверждения закрытия
-        """
-        # Используем closeEvent для единообразия
-        self.close()
+    def _save_widget_silent(self, widget):
+        """Тихое сохранение данных виджета (без вывода сообщений об успехе)"""
+        if hasattr(widget, 'save_data'):
+            try:
+                widget.save_data()
+                # Логирование можно добавить сюда при необходимости
+            except ValueError as e:
+                # Ошибки валидации не блокируют переключение вкладок
+                pass
+            except Exception as e:
+                traceback.print_exc()
 
 ========================================
 📄 FILE: ./login_window.py
@@ -12698,18 +12274,13 @@ class SochEpisodeDialog(QDialog):
 📄 FILE: ./soch_episodes_tab.py
 ========================================
 
-"""
-Вкладка сведений о самовольном оставлении части (СОЧ)
-С диалоговыми окнами для добавления/редактирования
-"""
-
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableView, QMessageBox, QHeaderView, QAbstractItemView
 )
 from PyQt6.QtSql import QSqlQuery, QSqlQueryModel
 from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont, QCursor
+from PyQt6.QtGui import QFont
 
 from soch_episode_dialog import SochEpisodeDialog
 
@@ -12752,16 +12323,13 @@ class SochEpisodesTab(QWidget):
         header = self.episodes_table.horizontalHeader()
         header.setStretchLastSection(True)
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
-        
-        # Настройка высоты строк
         self.episodes_table.verticalHeader().setDefaultSectionSize(35)
         
         # Подключение двойного клика
         self.episodes_table.doubleClicked.connect(self.on_episode_double_clicked)
-        
         layout.addWidget(self.episodes_table)
         
-        # Кнопки
+        # Кнопки управления
         button_layout = QHBoxLayout()
         button_layout.addStretch()
         
@@ -12770,10 +12338,25 @@ class SochEpisodesTab(QWidget):
         add_btn.clicked.connect(self.on_add_episode)
         button_layout.addWidget(add_btn)
         
+        # 🔥 КНОПКА МЯГКОГО УДАЛЕНИЯ
+        self.delete_btn = QPushButton("🗑️ Удалить эпизод")
+        self.delete_btn.setProperty("role", "danger")
+        self.delete_btn.clicked.connect(self.on_delete_episode)
+        self.delete_btn.setEnabled(False)  # Активируется только при выделении строки
+        button_layout.addWidget(self.delete_btn)
+        
         layout.addLayout(button_layout)
+        
+        # Отслеживание выделения для активации кнопки удаления
+        self.episodes_table.selectionModel().selectionChanged.connect(self.on_selection_changed)
+    
+    def on_selection_changed(self, selected, deselected):
+        """Активируем кнопку удаления только если есть выделение"""
+        has_selection = self.episodes_table.selectionModel().hasSelection()
+        self.delete_btn.setEnabled(has_selection)
     
     def load_data(self):
-        """Загрузка данных из базы"""
+        """Загрузка данных из базы (с фильтром мягкого удаления)"""
         query = QSqlQuery(self.db)
         query.prepare("""
             SELECT 
@@ -12785,63 +12368,97 @@ class SochEpisodesTab(QWidget):
                 search_date as "Дата розыска",
                 notification_number as "Уведомление"
             FROM krd.soch_episodes
-            WHERE krd_id = ?
+            WHERE krd_id = ? AND (is_deleted = FALSE OR is_deleted IS NULL)
             ORDER BY soch_date DESC
         """)
         query.addBindValue(self.krd_id)
         query.exec()
         self.episodes_model.setQuery(query)
         
-        # Настройка заголовков
-        self.episodes_model.setHeaderData(0, Qt.Orientation.Horizontal, "ID")
-        
         # Скрыть ID колонку
+        self.episodes_model.setHeaderData(0, Qt.Orientation.Horizontal, "ID")
         self.episodes_table.setColumnHidden(0, True)
     
     def on_add_episode(self):
         """Обработчик кнопки добавления эпизода"""
         dialog = SochEpisodeDialog(self.db, self.krd_id, parent=self)
-        
-        if dialog.exec() == 1:  # QDialog.Accepted
-            # Обновить таблицу после добавления
+        if dialog.exec() == 1:
             self.load_data()
-            
             if self.audit_logger:
                 self.audit_logger.log_action(
-                    action_type='SOCH_ADDED',
-                    table_name='soch_episodes',
-                    krd_id=self.krd_id,
-                    description='Добавлен новый эпизод СОЧ'
+                    action_type='SOCH_ADDED', table_name='soch_episodes',
+                    krd_id=self.krd_id, description='Добавлен новый эпизод СОЧ'
                 )
+    
+    def on_delete_episode(self):
+        """Мягкое удаление эпизода СОЧ (скрытие из списка)"""
+        selection = self.episodes_table.selectionModel()
+        if not selection.hasSelection():
+            return
+            
+        row = selection.selectedRows()[0].row()
+        episode_id = self.episodes_model.data(self.episodes_model.index(row, 0))
+        if not episode_id:
+            return
+            
+        # Данные для подтверждения
+        episode_date = self.episodes_model.data(self.episodes_model.index(row, 1)) or "не указана"
+        episode_loc = self.episodes_model.data(self.episodes_model.index(row, 2)) or "не указано"
+        
+        reply = QMessageBox.question(
+            self, "Подтверждение удаления",
+            f"Вы действительно хотите скрыть эпизод СОЧ?\n"
+            f"📅 Дата: {episode_date}\n📍 Место: {episode_loc}\n"
+            f"⚠️ Запись будет скрыта из списка, но сохранена в базе для истории.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                user_id = self.audit_logger.user_info.get('id') if self.audit_logger else None
+                q = QSqlQuery(self.db)
+                q.prepare("""
+                    UPDATE krd.soch_episodes
+                    SET is_deleted = TRUE,
+                        deleted_at = CURRENT_TIMESTAMP,
+                        deleted_by = :user_id
+                    WHERE id = :id AND krd_id = :krd_id
+                """)
+                q.bindValue(":id", episode_id)
+                q.bindValue(":krd_id", self.krd_id)
+                q.bindValue(":user_id", user_id)
+                
+                if q.exec() and q.numRowsAffected() > 0:
+                    QMessageBox.information(self, "Успех", "✅ Эпизод СОЧ успешно скрыт!")
+                    self.load_data()
+                    if self.audit_logger:
+                        self.audit_logger.log_action(
+                            action_type='SOCH_SOFT_DELETED', table_name='soch_episodes',
+                            record_id=episode_id, krd_id=self.krd_id,
+                            description=f'Скрыт эпизод СОЧ (Дата: {episode_date})'
+                        )
+                else:
+                    QMessageBox.warning(self, "Внимание", "Запись не найдена или уже удалена.")
+                    
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"❌ Ошибка при удалении:\n{str(e)}")
     
     def on_episode_double_clicked(self, index):
         """Обработчик двойного клика по записи"""
         row = index.row()
-        
-        # Получить ID эпизода из скрытой колонки
-        id_index = self.episodes_model.index(row, 0)
-        episode_id = self.episodes_model.data(id_index)
-        
-        if not episode_id:
-            return
-        
-        # Загрузить полные данные эпизода
-        episode_data = self.load_episode_data(episode_id)
-        
-        if episode_data:
-            # Открыть диалог редактирования
-            dialog = SochEpisodeDialog(self.db, self.krd_id, episode_data, parent=self)
+        episode_id = self.episodes_model.data(self.episodes_model.index(row, 0))
+        if not episode_id: return
             
-            if dialog.exec() == 1:  # QDialog.Accepted
-                # Обновить таблицу после редактирования
+        episode_data = self.load_episode_data(episode_id)
+        if episode_data:
+            dialog = SochEpisodeDialog(self.db, self.krd_id, episode_data, parent=self)
+            if dialog.exec() == 1:
                 self.load_data()
-                
                 if self.audit_logger:
                     self.audit_logger.log_action(
-                        action_type='SOCH_EDITED',
-                        table_name='soch_episodes',
-                        record_id=episode_id,
-                        krd_id=self.krd_id,
+                        action_type='SOCH_EDITED', table_name='soch_episodes',
+                        record_id=episode_id, krd_id=self.krd_id,
                         description='Отредактирован эпизод СОЧ'
                     )
     
@@ -12849,59 +12466,31 @@ class SochEpisodesTab(QWidget):
         """Загрузка полных данных эпизода для редактирования"""
         query = QSqlQuery(self.db)
         query.prepare("""
-            SELECT 
-                id,
-                soch_date,
-                soch_location,
-                order_date_number,
-                witnesses,
-                reasons,
-                weapon_info,
-                clothing,
-                movement_options,
-                other_info,
-                duty_officer_commissariat,
-                duty_officer_omvd,
-                investigation_info,
-                prosecution_info,
-                criminal_case_info,
-                search_date,
-                found_by,
-                search_circumstances,
-                notification_recipient,
-                notification_date,
-                notification_number
-            FROM krd.soch_episodes
-            WHERE id = ?
+            SELECT id, soch_date, soch_location, order_date_number, witnesses, reasons,
+                   weapon_info, clothing, movement_options, other_info,
+                   duty_officer_commissariat, duty_officer_omvd, investigation_info,
+                   prosecution_info, criminal_case_info, search_date, found_by,
+                   search_circumstances, notification_recipient, notification_date, notification_number
+            FROM krd.soch_episodes WHERE id = ?
         """)
         query.addBindValue(episode_id)
         query.exec()
         
         if query.next():
             return {
-                'id': query.value('id'),
-                'soch_date': query.value('soch_date'),
+                'id': query.value('id'), 'soch_date': query.value('soch_date'),
                 'soch_location': query.value('soch_location') or '',
                 'order_date_number': query.value('order_date_number') or '',
                 'witnesses': query.value('witnesses') or '',
-                'reasons': query.value('reasons') or '',
-                'weapon_info': query.value('weapon_info') or '',
-                'clothing': query.value('clothing') or '',
-                'movement_options': query.value('movement_options') or '',
-                'other_info': query.value('other_info') or '',
-                'duty_officer_commissariat': query.value('duty_officer_commissariat') or '',
-                'duty_officer_omvd': query.value('duty_officer_omvd') or '',
-                'investigation_info': query.value('investigation_info') or '',
-                'prosecution_info': query.value('prosecution_info') or '',
-                'criminal_case_info': query.value('criminal_case_info') or '',
-                'search_date': query.value('search_date'),
-                'found_by': query.value('found_by') or '',
-                'search_circumstances': query.value('search_circumstances') or '',
-                'notification_recipient': query.value('notification_recipient') or '',
-                'notification_date': query.value('notification_date'),
-                'notification_number': query.value('notification_number') or ''
+                'reasons': query.value('reasons') or '', 'weapon_info': query.value('weapon_info') or '',
+                'clothing': query.value('clothing') or '', 'movement_options': query.value('movement_options') or '',
+                'other_info': query.value('other_info') or '', 'duty_officer_commissariat': query.value('duty_officer_commissariat') or '',
+                'duty_officer_omvd': query.value('duty_officer_omvd') or '', 'investigation_info': query.value('investigation_info') or '',
+                'prosecution_info': query.value('prosecution_info') or '', 'criminal_case_info': query.value('criminal_case_info') or '',
+                'search_date': query.value('search_date'), 'found_by': query.value('found_by') or '',
+                'search_circumstances': query.value('search_circumstances') or '', 'notification_recipient': query.value('notification_recipient') or '',
+                'notification_date': query.value('notification_date'), 'notification_number': query.value('notification_number') or ''
             }
-        
         return None
 
 ========================================
@@ -12917,7 +12506,7 @@ from PyQt6.QtWidgets import (
     QLineEdit, QTextEdit, QDateEdit, QComboBox, QLabel, QPushButton, QFileDialog, 
     QMessageBox, QFrame
 )
-from PyQt6.QtCore import Qt, QDate, QByteArray
+from PyQt6.QtCore import Qt, QDate, QByteArray,QTimer
 from PyQt6.QtGui import QPixmap, QFont
 from PyQt6.QtSql import QSqlQuery
 import os
@@ -12957,7 +12546,7 @@ class SocialDataTab(QWidget):
         # === ВАЖНО: Сначала init_ui(), потом load_data() ===
         self.init_ui()
         self.load_data()
-        
+        self.setup_auto_save()       
         # === НАСТРОЙКА АВТОДОПОЛНЕНИЯ ПОСЛЕ ЗАГРУЗКИ ===
         self.setup_autocomplete_fields()
     
@@ -13766,6 +13355,56 @@ class SocialDataTab(QWidget):
             except Exception as e:
                 traceback.print_exc()
                 QMessageBox.critical(self, "Ошибка", f"Ошибка сохранения:\n{str(e)}")
+    def setup_auto_save(self):
+        """Настройка мгновенного автосохранения при изменении полей"""
+        self._auto_save_timer = QTimer(self)
+        self._auto_save_timer.setSingleShot(True)
+        self._auto_save_timer.timeout.connect(self._perform_auto_save)
+
+        # Группируем все поля ввода
+        line_edits = [
+            self.surname_input, self.name_input, self.patronymic_input,
+            self.tab_number_input, self.personal_number_input,
+            self.birth_place_town_input, self.birth_place_district_input,
+            self.birth_place_region_input, self.birth_place_country_input,
+            self.drafted_by_commissariat_input, self.povsk_input,
+            self.education_input, self.social_media_account_input,
+            self.bank_card_number_input, self.passport_series_input,
+            self.passport_number_input, self.passport_issued_by_input,
+            self.military_id_series_input, self.military_id_number_input,
+            self.military_id_issued_by_input, self.military_contacts_input
+        ]
+        date_edits = [
+            self.birth_date_input, self.draft_date_input, self.selection_date_input,
+            self.passport_issue_date_input, self.military_id_issue_date_input
+        ]
+        combos = [self.category_combo, self.rank_combo]
+        text_edits = [
+            self.criminal_record_input, self.appearance_features_input,
+            self.personal_marks_input, self.federal_search_info_input,
+            self.relatives_info_input
+        ]
+
+        # Подключаем сигналы изменения
+        for w in line_edits + text_edits:
+            w.textChanged.connect(self._on_field_changed)
+        for w in date_edits:
+            w.dateChanged.connect(self._on_field_changed)
+        for w in combos:
+            w.currentIndexChanged.connect(self._on_field_changed)
+
+    def _on_field_changed(self):
+        """Запуск таймера при изменении любого поля"""
+        self._auto_save_timer.start(400)  # 400мс задержка (защита от спама в БД)
+
+    def _perform_auto_save(self):
+        """Непосредственное сохранение"""
+        try:
+            self.save_data()
+        except ValueError:
+            pass  # Игнорируем ошибки валидации при автосохранении (пользователь ещё не дописал)
+        except Exception as e:
+            print(f"⚠️ Ошибка автосохранения соц. данных: {e}")
 
 ========================================
 📄 FILE: ./template_edit_dialog.py
@@ -14388,8 +14027,8 @@ class ThemeSettingsDialog(QDialog):
 
 """
 Диалог добавления нового пользователя
+✅ ИСПРАВЛЕНО: Все SQL-запросы переведены на именованные параметры (:name) для стабильной работы с PostgreSQL (QPSQL)
 """
-
 import bcrypt
 import re
 from PyQt6.QtWidgets import (
@@ -14411,7 +14050,6 @@ class UserAddDialog(QDialog):
         self.setWindowTitle("➕ Добавление нового пользователя")
         self.setMinimumSize(500, 600)
         self.setModal(True)
-        
         self.init_ui()
     
     def init_ui(self):
@@ -14502,10 +14140,8 @@ class UserAddDialog(QDialog):
         """Загрузка доступных ролей"""
         self.role_combo.clear()
         self.role_combo.addItem("— Выберите роль —", None)
-        
         query = QSqlQuery(self.db)
         query.exec("SELECT id, role_name, description FROM krd.user_roles ORDER BY role_name")
-        
         while query.next():
             role_id = query.value(0)
             role_name = query.value(1)
@@ -14513,36 +14149,27 @@ class UserAddDialog(QDialog):
             self.role_combo.addItem(f"{role_name} ({description})", role_id)
     
     def validate_username(self, username):
-        """Проверка имени пользователя"""
         if len(username) < 3:
             return False, "Имя пользователя должно содержать минимум 3 символа"
-        
         if not re.match(r'^[a-zA-Z0-9_-]+$', username):
             return False, "Имя пользователя может содержать только латинские буквы, цифры, _ и -"
-        
         return True, ""
     
     def validate_password(self, password):
-        """Проверка пароля"""
         if len(password) < 6:
             return False, "Пароль должен содержать минимум 6 символов"
-        
         return True, ""
     
     def validate_email(self, email):
-        """Проверка email"""
         if not email:
-            return True, ""  # Email не обязателен
-        
+            return True, ""
         pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
         if not re.match(pattern, email):
             return False, "Введите корректный email адрес"
-        
         return True, ""
     
     def on_accept(self):
-        """Обработка нажатия OK"""
-        # Сбор данных
+        """Обработка нажатия OK — ✅ ИСПРАВЛЕНО: именованные параметры"""
         username = self.username_input.text().strip()
         password = self.password_input.text()
         password_confirm = self.password_confirm_input.text()
@@ -14553,44 +14180,36 @@ class UserAddDialog(QDialog):
         
         # Валидация
         errors = []
-        
         if not username:
             errors.append("Введите имя пользователя")
         else:
             valid, msg = self.validate_username(username)
             if not valid:
                 errors.append(msg)
-        
         if not password:
             errors.append("Введите пароль")
         else:
             valid, msg = self.validate_password(password)
             if not valid:
                 errors.append(msg)
-        
         if password != password_confirm:
             errors.append("Пароли не совпадают")
-        
         if not full_name:
             errors.append("Введите ФИО")
-        
         valid, msg = self.validate_email(email)
         if not valid:
             errors.append(msg)
-        
         if role_id is None:
             errors.append("Выберите роль")
-        
         if errors:
             QMessageBox.critical(self, "Ошибка валидации", "\n".join(errors))
             return
         
-        # Проверка на дубликат username
+        # ✅ Проверка на дубликат с именованными параметрами
         check_query = QSqlQuery(self.db)
-        check_query.prepare("SELECT id FROM krd.users WHERE username = ? AND is_deleted = FALSE")
-        check_query.addBindValue(username)
+        check_query.prepare("SELECT id FROM krd.users WHERE username = :username AND is_deleted = FALSE")
+        check_query.bindValue(":username", username)
         check_query.exec()
-        
         if check_query.next():
             QMessageBox.critical(self, "Ошибка", "Пользователь с таким именем уже существует!")
             return
@@ -14599,19 +14218,21 @@ class UserAddDialog(QDialog):
             # Хеширование пароля
             hashed_password = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
             
-            # Вставка в БД
+            # ✅ Вставка с именованными параметрами
             insert_query = QSqlQuery(self.db)
             insert_query.prepare("""
                 INSERT INTO krd.users 
                 (username, password_hash, full_name, email, role_id, is_active, created_at)
-                VALUES (?, ?, ?, ?, ?, ?, CURRENT_TIMESTAMP)
+                VALUES (
+                    :username, :password_hash, :full_name, :email, :role_id, :is_active, CURRENT_TIMESTAMP
+                )
             """)
-            insert_query.addBindValue(username)
-            insert_query.addBindValue(hashed_password.decode('utf-8'))
-            insert_query.addBindValue(full_name)
-            insert_query.addBindValue(email)
-            insert_query.addBindValue(role_id)
-            insert_query.addBindValue(is_active)
+            insert_query.bindValue(":username", username)
+            insert_query.bindValue(":password_hash", hashed_password.decode('utf-8'))
+            insert_query.bindValue(":full_name", full_name)
+            insert_query.bindValue(":email", email)
+            insert_query.bindValue(":role_id", role_id)
+            insert_query.bindValue(":is_active", is_active)
             
             if not insert_query.exec():
                 raise Exception(f"Ошибка БД: {insert_query.lastError().text()}")
@@ -14817,62 +14438,59 @@ class UserAuditWindow(QDialog):
                 self.user_combo.setCurrentIndex(index)
     
     def load_audit_data(self):
-        """Загрузка данных аудита с применением фильтров"""
+        """Загрузка данных аудита с применением фильтров (✅ ИСПРАВЛЕНО: именованные параметры)"""
         # Получаем параметры фильтрации
         user_id = self.user_combo.currentData()
         action_type = self.action_type_combo.currentData()
         date_from = self.date_from.date().toString("yyyy-MM-dd")
         date_to = self.date_to.date().toString("yyyy-MM-dd")
         
-        # Формируем SQL-запрос
-        query_parts = [
-            "SELECT ",
-            "    al.created_at as \"Дата и время\",",
-            "    al.username as \"Пользователь\",",
-            "    al.action_type as \"Тип действия\",",
-            "    al.table_name as \"Таблица\",",
-            "    al.record_id as \"ID записи\",",
-            "    al.krd_id as \"ID КРД\",",
-            "    al.description as \"Описание\"",
-            "FROM krd.audit_log al",
-            "WHERE 1=1"
-        ]
+        # ✅ Формируем SQL-запрос с ИМЕНОВАННЫМИ параметрами
+        query_str = """
+            SELECT 
+                al.created_at as "Дата и время",
+                al.username as "Пользователь",
+                al.action_type as "Тип действия",
+                al.table_name as "Таблица",
+                al.record_id as "ID записи",
+                al.krd_id as "ID КРД",
+                al.description as "Описание"
+            FROM krd.audit_log al
+            WHERE 1=1
+        """
         
-        params = []
+        # ✅ Добавляем условия с именованными параметрами
+        conditions = []
+        params = {}
         
-        # Фильтр по пользователю
         if user_id and user_id > 0:
-            query_parts.append("AND al.user_id = ?")
-            params.append(user_id)
+            conditions.append("AND al.user_id = :user_id")
+            params[":user_id"] = user_id
         
-        # Фильтр по типу действия
         if action_type:
-            query_parts.append("AND al.action_type = ?")
-            params.append(action_type)
+            conditions.append("AND al.action_type = :action_type")
+            params[":action_type"] = action_type
         
-        # Фильтр по дате
-        query_parts.append("AND al.created_at >= ?")
-        params.append(date_from)
+        conditions.append("AND al.created_at >= :date_from")
+        params[":date_from"] = date_from
         
-        query_parts.append("AND al.created_at <= ?")
-        params.append(f"{date_to} 23:59:59")
+        conditions.append("AND al.created_at <= :date_to")
+        params[":date_to"] = f"{date_to} 23:59:59"
         
-        # Сортировка
-        query_parts.append("ORDER BY al.created_at DESC")
+        query_str += " ".join(conditions)
+        query_str += " ORDER BY al.created_at DESC LIMIT 1000"
         
-        # Ограничение количества записей
-        query_parts.append("LIMIT 1000")
-        
-        query_str = " ".join(query_parts)
-        
-        # Выполняем запрос
+        # ✅ Выполняем запрос с именованными параметрами
         query = QSqlQuery(self.db)
         query.prepare(query_str)
         
-        for param in params:
-            query.addBindValue(param)
+        for name, value in params.items():
+            query.bindValue(name, value)
         
         if not query.exec():
+            print(f"❌ Ошибка запроса: {query.lastError().text()}")
+            print(f"📝 SQL: {query_str}")
+            print(f"🔗 Параметры: {params}")
             QMessageBox.critical(
                 self,
                 "Ошибка",
@@ -14880,10 +14498,8 @@ class UserAuditWindow(QDialog):
             )
             return
         
-        # Устанавливаем результаты в модель
         self.audit_model.setQuery(query)
         
-        # Обновляем заголовок окна
         record_count = self.audit_model.rowCount()
         self.setWindowTitle(f"Аудит действий пользователей - {record_count} записей")
     
@@ -14957,8 +14573,9 @@ class UserAuditWindow(QDialog):
 
 """
 Диалог редактирования данных пользователя
+✅ ДОБАВЛЕНО: Кнопки деактивации/активации и удаления
+✅ Кнопки меняют состояние в зависимости от статуса пользователя
 """
-
 import bcrypt
 import re
 from PyQt6.QtWidgets import (
@@ -14979,18 +14596,19 @@ class UserEditDialog(QDialog):
         self.db = db_connection
         self.user_id = user_id
         self.setWindowTitle("✏️ Редактирование пользователя")
-        self.setMinimumSize(500, 650)
+        self.setMinimumSize(500, 700)
         self.setModal(True)
         
         self.original_username = ""
+        self.is_user_active = True
         
         self.init_ui()
         self.load_user_data()
     
     def init_ui(self):
         """Инициализация интерфейса"""
-        layout = QVBoxLayout()
-        layout.setSpacing(15)
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)  # ✅ Основной отступ между группами
         
         # === Заголовок ===
         title_label = QLabel("👤 Редактирование учётной записи")
@@ -15000,21 +14618,25 @@ class UserEditDialog(QDialog):
         # === Основная информация ===
         info_group = QGroupBox("📋 Основная информация")
         info_layout = QFormLayout(info_group)
-        info_layout.setSpacing(10)
+        info_layout.setSpacing(12)  # ✅ Отступ между строками
+        info_layout.setContentsMargins(15, 15, 15, 15)  # ✅ Внутренние отступы
         
         # ID (только для просмотра)
         self.id_label = QLabel("")
-        self.id_label.setStyleSheet("QLabel { color: #666; }")
+        self.id_label.setStyleSheet("QLabel { color: #666; padding: 4px; }")
         info_layout.addRow("ID пользователя:", self.id_label)
         
         # Имя пользователя
         self.username_input = QLineEdit()
         self.username_input.setPlaceholderText("Логин для входа в систему")
+        self.username_input.setMinimumHeight(32)  # ✅ Фиксируем высоту
         info_layout.addRow("Имя пользователя *:", self.username_input)
         
         # Смена пароля
         password_group = QGroupBox("🔑 Смена пароля")
         password_layout = QFormLayout(password_group)
+        password_layout.setSpacing(10)
+        password_layout.setContentsMargins(10, 10, 10, 10)
         
         self.change_password_checkbox = QCheckBox("Изменить пароль")
         self.change_password_checkbox.stateChanged.connect(self.on_password_change_toggled)
@@ -15024,12 +14646,14 @@ class UserEditDialog(QDialog):
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.password_input.setEnabled(False)
         self.password_input.setPlaceholderText("Новый пароль")
+        self.password_input.setMinimumHeight(32)
         password_layout.addRow("Новый пароль:", self.password_input)
         
         self.password_confirm_input = QLineEdit()
         self.password_confirm_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.password_confirm_input.setEnabled(False)
         self.password_confirm_input.setPlaceholderText("Подтвердите пароль")
+        self.password_confirm_input.setMinimumHeight(32)
         password_layout.addRow("Подтверждение:", self.password_confirm_input)
         
         info_layout.addRow(password_group)
@@ -15037,23 +14661,27 @@ class UserEditDialog(QDialog):
         # ФИО
         self.full_name_input = QLineEdit()
         self.full_name_input.setPlaceholderText("Иванов Иван Иванович")
+        self.full_name_input.setMinimumHeight(32)
         info_layout.addRow("ФИО *:", self.full_name_input)
         
         # Email
         self.email_input = QLineEdit()
         self.email_input.setPlaceholderText("user@example.com")
+        self.email_input.setMinimumHeight(32)
         info_layout.addRow("Email:", self.email_input)
         
         layout.addWidget(info_group)
         
-        # === Роль и статус ===
+        # === Права доступа ===
         role_group = QGroupBox("🔐 Права доступа")
         role_layout = QFormLayout(role_group)
-        role_layout.setSpacing(10)
+        role_layout.setSpacing(12)
+        role_layout.setContentsMargins(15, 15, 15, 15)
         
         # Выбор роли
         self.role_combo = QComboBox()
-        self.role_combo.setMinimumWidth(250)
+        self.role_combo.setMinimumWidth(280)
+        self.role_combo.setMinimumHeight(32)
         self.load_roles()
         role_layout.addRow("Роль *:", self.role_combo)
         
@@ -15061,24 +14689,99 @@ class UserEditDialog(QDialog):
         self.status_combo = QComboBox()
         self.status_combo.addItem("✓ Активен", True)
         self.status_combo.addItem("✕ Заблокирован", False)
+        self.status_combo.setMinimumHeight(32)
         role_layout.addRow("Статус учётной записи:", self.status_combo)
         
         # Дата создания
         self.created_at_label = QLabel("")
+        self.created_at_label.setStyleSheet("QLabel { padding: 4px; }")
         role_layout.addRow("Дата создания:", self.created_at_label)
         
         # Последний вход
         self.last_login_label = QLabel("")
+        self.last_login_label.setStyleSheet("QLabel { padding: 4px; }")
         role_layout.addRow("Последний вход:", self.last_login_label)
         
         layout.addWidget(role_group)
         
-        # === Кнопки ===
+        # === Кнопки управления статусом ===
+        status_buttons_group = QGroupBox("⚡ Быстрое управление статусом")
+        status_buttons_layout = QHBoxLayout(status_buttons_group)
+        status_buttons_layout.setSpacing(10)
+        status_buttons_layout.setContentsMargins(10, 10, 10, 10)
+        
+        # Кнопка деактивации
+        self.deactivate_btn = QPushButton("⏸️ Деактивировать")
+        self.deactivate_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #FF9800;
+                color: white;
+                font-weight: bold;
+                padding: 10px;
+                border-radius: 5px;
+                min-height: 36px;
+            }
+            QPushButton:hover { background-color: #F57C00; }
+            QPushButton:disabled { background-color: #cccccc; }
+        """)
+        self.deactivate_btn.clicked.connect(self.on_deactivate_user)
+        status_buttons_layout.addWidget(self.deactivate_btn)
+        
+        # Кнопка активации
+        self.activate_btn = QPushButton("✅ Активировать")
+        self.activate_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #4CAF50;
+                color: white;
+                font-weight: bold;
+                padding: 10px;
+                border-radius: 5px;
+                min-height: 36px;
+            }
+            QPushButton:hover { background-color: #45a049; }
+            QPushButton:disabled { background-color: #cccccc; }
+        """)
+        self.activate_btn.clicked.connect(self.on_activate_user)
+        status_buttons_layout.addWidget(self.activate_btn)
+        
+        layout.addWidget(status_buttons_group)
+        
+        # === Разделитель ===
+        separator = QHBoxLayout()
+        line = QLabel("────────────────────────────────────────")
+        line.setStyleSheet("QLabel { color: #999; font-size: 16px; }")
+        separator.addWidget(line)
+        layout.addLayout(separator)
+        
+        # === Кнопки удаления ===
+        delete_group = QGroupBox("🗑️ Опасная зона")
+        delete_layout = QHBoxLayout(delete_group)
+        delete_layout.setContentsMargins(10, 10, 10, 10)
+        
+        self.delete_btn = QPushButton("🗑️ Удалить пользователя")
+        self.delete_btn.setStyleSheet("""
+            QPushButton {
+                background-color: #f44336;
+                color: white;
+                font-weight: bold;
+                padding: 12px;
+                border-radius: 5px;
+                min-height: 42px;
+                font-size: 13px;
+            }
+            QPushButton:hover { background-color: #da190b; }
+        """)
+        self.delete_btn.clicked.connect(self.on_delete_user)
+        delete_layout.addWidget(self.delete_btn)
+        
+        layout.addWidget(delete_group)
+        
+        # === Кнопки OK/Cancel ===
         button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
         button_box.button(QDialogButtonBox.StandardButton.Ok).setText("💾 Сохранить")
-        button_box.button(QDialogButtonBox.StandardButton.Ok).setProperty("role","save")
+        button_box.button(QDialogButtonBox.StandardButton.Ok).setProperty("role", "save")
         button_box.button(QDialogButtonBox.StandardButton.Cancel).setText("Отмена")
         button_box.accepted.connect(self.on_accept)
         button_box.rejected.connect(self.reject)
@@ -15114,16 +14817,10 @@ class UserEditDialog(QDialog):
         query = QSqlQuery(self.db)
         query.prepare("""
             SELECT 
-                u.id,
-                u.username,
-                u.full_name,
-                u.email,
-                u.role_id,
-                u.is_active,
-                u.created_at,
-                u.last_login
+                u.id, u.username, u.full_name, u.email, u.role_id, 
+                u.is_active, u.created_at, u.last_login
             FROM krd.users u
-            WHERE u.id = ? AND u.is_deleted = FALSE
+            WHERE u.id = ?
         """)
         query.addBindValue(self.user_id)
         
@@ -15137,63 +14834,168 @@ class UserEditDialog(QDialog):
             self.reject()
             return
         
-        # Заполнение полей
+        # === Основная информация ===
         self.id_label.setText(str(query.value(0)))
         self.username_input.setText(query.value(1) or "")
         self.original_username = query.value(1) or ""
         self.full_name_input.setText(query.value(2) or "")
         self.email_input.setText(query.value(3) or "")
         
-        # Выбор роли
+        # === Роль и статус ===
         role_id = query.value(4)
         if role_id:
             index = self.role_combo.findData(role_id)
-            if index >= 0:
-                self.role_combo.setCurrentIndex(index)
+            if index >= 0: self.role_combo.setCurrentIndex(index)
         
-        # Статус
-        is_active = query.value(5)
-        index = self.status_combo.findData(is_active)
-        if index >= 0:
-            self.status_combo.setCurrentIndex(index)
+        self.is_user_active = query.value(5)
+        index = self.status_combo.findData(self.is_user_active)
+        if index >= 0: self.status_combo.setCurrentIndex(index)
+        self.update_status_buttons()
         
-        # Даты
+        # === ✅ ИСПРАВЛЕНИЕ: Форматирование дат ===
         created_at = query.value(6)
-        if created_at:
-            self.created_at_label.setText(str(created_at))
+        if created_at and hasattr(created_at, 'toString'):
+            self.created_at_label.setText(created_at.toString("dd.MM.yyyy hh:mm:ss"))
+        else:
+            self.created_at_label.setText("—")
         
         last_login = query.value(7)
-        if last_login:
-            self.last_login_label.setText(str(last_login))
+        if last_login and hasattr(last_login, 'toString'):
+            self.last_login_label.setText(last_login.toString("dd.MM.yyyy hh:mm:ss"))
         else:
             self.last_login_label.setText("Никогда")
+    
+    def update_status_buttons(self):
+        """Обновление состояния кнопок деактивации/активации"""
+        if self.is_user_active:
+            # Пользователь активен - показываем кнопку деактивации
+            self.deactivate_btn.setEnabled(True)
+            self.activate_btn.setEnabled(False)
+            self.status_combo.setCurrentIndex(0)  # "Активен"
+        else:
+            # Пользователь деактивирован - показываем кнопку активации
+            self.deactivate_btn.setEnabled(False)
+            self.activate_btn.setEnabled(True)
+            self.status_combo.setCurrentIndex(1)  # "Заблокирован"
+    
+    def on_deactivate_user(self):
+        """Деактивация пользователя"""
+        reply = QMessageBox.question(
+            self,
+            "Подтверждение деактивации",
+            f"Вы действительно хотите деактивировать пользователя?\n"
+            f"👤 {self.username_input.text()}\n"
+            f"⚠️ Пользователь потеряет доступ к системе!",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                query = QSqlQuery(self.db)
+                query.prepare("UPDATE krd.users SET is_active = FALSE WHERE id = ?")
+                query.addBindValue(self.user_id)
+                
+                if not query.exec():
+                    raise Exception(f"Ошибка при деактивации: {query.lastError().text()}")
+                
+                self.is_user_active = False
+                self.update_status_buttons()
+                QMessageBox.information(self, "Успех", "Пользователь деактивирован!")
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Ошибка при деактивации:\n{str(e)}")
+    
+    def on_activate_user(self):
+        """Активация пользователя"""
+        reply = QMessageBox.question(
+            self,
+            "Подтверждение активации",
+            f"Вы действительно хотите активировать пользователя?\n"
+            f"👤 {self.username_input.text()}\n"
+            f"✅ Пользователь сможет войти в систему",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.Yes
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                query = QSqlQuery(self.db)
+                query.prepare("UPDATE krd.users SET is_active = TRUE WHERE id = ?")
+                query.addBindValue(self.user_id)
+                
+                if not query.exec():
+                    raise Exception(f"Ошибка при активации: {query.lastError().text()}")
+                
+                self.is_user_active = True
+                self.update_status_buttons()
+                QMessageBox.information(self, "Успех", "Пользователь активирован!")
+                
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", f"Ошибка при активации:\n{str(e)}")
+    
+    def on_delete_user(self):
+        """Удаление пользователя"""
+        reply = QMessageBox.question(
+            self,
+            "⚠️ ПОДТВЕРЖДЕНИЕ УДАЛЕНИЯ",
+            f"Вы действительно хотите УДАЛИТЬ пользователя?\n"
+            f"👤 {self.username_input.text()}\n"
+            f"📋 {self.full_name_input.text()}\n\n"
+            f"⚠️ ВНИМАНИЕ: Это действие НЕЛЬЗЯ ОТМЕНИТЬ!\n"
+            f"Все связанные данные будут удалены!",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply == QMessageBox.StandardButton.Yes:
+            # Дополнительное подтверждение
+            confirm_text, ok = QMessageBox.getText(
+                self,
+                "Подтверждение",
+                f"Введите '{self.username_input.text()}' для подтверждения удаления:",
+                QLineEdit.Normal,
+                ""
+            )
+            
+            if ok and confirm_text == self.username_input.text():
+                try:
+                    query = QSqlQuery(self.db)
+                    query.prepare("DELETE FROM krd.users WHERE id = ?")
+                    query.addBindValue(self.user_id)
+                    
+                    if not query.exec():
+                        raise Exception(f"Ошибка при удалении: {query.lastError().text()}")
+                    
+                    QMessageBox.information(self, "Успех", "Пользователь удалён!")
+                    self.accept()
+                    
+                except Exception as e:
+                    QMessageBox.critical(self, "Ошибка", f"Ошибка при удалении:\n{str(e)}")
+            else:
+                QMessageBox.warning(self, "Отменено", "Удаление отменено. Имя пользователя не совпадает.")
     
     def validate_username(self, username):
         """Проверка имени пользователя"""
         if len(username) < 3:
             return False, "Имя пользователя должно содержать минимум 3 символа"
-        
         if not re.match(r'^[a-zA-Z0-9_-]+$', username):
             return False, "Имя пользователя может содержать только латинские буквы, цифры, _ и -"
-        
         return True, ""
     
     def validate_password(self, password):
         """Проверка пароля"""
         if len(password) < 6:
             return False, "Пароль должен содержать минимум 6 символов"
-        
         return True, ""
     
     def validate_email(self, email):
         """Проверка email"""
         if not email:
             return True, ""
-        
         pattern = r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$'
         if not re.match(pattern, email):
             return False, "Введите корректный email адрес"
-        
         return True, ""
     
     def on_accept(self):
@@ -15210,7 +15012,6 @@ class UserEditDialog(QDialog):
         
         # Валидация
         errors = []
-        
         if not username:
             errors.append("Введите имя пользователя")
         else:
@@ -15220,11 +15021,9 @@ class UserEditDialog(QDialog):
         
         if not full_name:
             errors.append("Введите ФИО")
-        
         valid, msg = self.validate_email(email)
         if not valid:
             errors.append(msg)
-        
         if role_id is None:
             errors.append("Выберите роль")
         
@@ -15235,7 +15034,6 @@ class UserEditDialog(QDialog):
                 valid, msg = self.validate_password(password)
                 if not valid:
                     errors.append(msg)
-            
             if password != password_confirm:
                 errors.append("Пароли не совпадают")
         
@@ -15246,7 +15044,7 @@ class UserEditDialog(QDialog):
         # Проверка на дубликат username (если изменили)
         if username != self.original_username:
             check_query = QSqlQuery(self.db)
-            check_query.prepare("SELECT id FROM krd.users WHERE username = ? AND id != ? AND is_deleted = FALSE")
+            check_query.prepare("SELECT id FROM krd.users WHERE username = ? AND id != ?")
             check_query.addBindValue(username)
             check_query.addBindValue(self.user_id)
             check_query.exec()

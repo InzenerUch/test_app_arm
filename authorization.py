@@ -2,51 +2,66 @@
 Компактный модуль авторизации с интерфейсом логина
 Содержит классы для аутентификации пользователей и окно авторизации
 """
-
 import sys
 import bcrypt
 from PyQt6.QtWidgets import (
-    QApplication, QDialog, QVBoxLayout, QFormLayout, 
+    QApplication, QDialog, QVBoxLayout, QFormLayout,
     QLineEdit, QPushButton, QMessageBox, QLabel
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtSql import QSqlDatabase, QSqlQuery
-
 
 class SimpleAuthManager:
     """
     Упрощенный менеджер авторизации
     Обеспечивает только функцию аутентификации
     """
-    
     def __init__(self, db_connection):
         """
         Инициализация менеджера авторизации
-        
         Args:
             db_connection: соединение с базой данных
         """
         self.db = db_connection
-    
+
     def authenticate_user(self, username, password):
+        """
+        Аутентификация пользователя с обновлением времени входа
+        """
         query = QSqlQuery(self.db)
         query.prepare("""
-            SELECT u.id, u.username, u.full_name, r.role_name, u.password_hash
-            FROM krd.users u
-            JOIN krd.user_roles r ON u.role_id = r.id
-            WHERE u.username = ? AND u.is_active = TRUE
+        SELECT u.id, u.username, u.full_name, r.role_name, u.password_hash
+        FROM krd.users u
+        JOIN krd.user_roles r ON u.role_id = r.id
+        WHERE u.username = ? AND u.is_active = TRUE
         """)
         query.addBindValue(username)
         query.exec()
         
         if not query.next():
             return None
-            
-        user_id = query.value(0)
-        stored_hash = query.value(4)  # ✅ Теперь колонка 4 существует
         
-        # ✅ Реальная проверка пароля через bcrypt
+        user_id = query.value(0)
+        stored_hash = query.value(4)
+        
+        # ✅ Проверка пароля через bcrypt
         if bcrypt.checkpw(password.encode('utf-8'), stored_hash.encode('utf-8')):
+            
+            # === ИСПРАВЛЕНИЕ: ОБНОВЛЯЕМ ВРЕМЯ ПОСЛЕДНЕГО ВХОДА ===
+            try:
+                update_query = QSqlQuery(self.db)
+                update_query.prepare("""
+                    UPDATE krd.users 
+                    SET last_login = CURRENT_TIMESTAMP 
+                    WHERE id = ?
+                """)
+                update_query.addBindValue(user_id)
+                update_query.exec()
+            except Exception as e:
+                # Если обновление времени не удалось, это не критично для входа
+                print(f"⚠️ Ошибка обновления last_login: {e}")
+            # ====================================================
+            
             return {
                 'id': int(user_id),
                 'username': query.value(1),
@@ -61,14 +76,12 @@ class LoginWindow(QDialog):
     Окно авторизации
     Предоставляет интерфейс для входа в систему
     """
-    
     # Сигнал, который испускается при успешной авторизации
     login_successful = pyqtSignal(dict)  # передает информацию о пользователе
-    
+
     def __init__(self, db_connection):
         """
         Инициализация окна авторизации
-        
         Args:
             db_connection: соединение с базой данных
         """
@@ -76,7 +89,7 @@ class LoginWindow(QDialog):
         self.db = db_connection
         self.auth_manager = SimpleAuthManager(self.db)
         self.setup_ui()
-    
+
     def setup_ui(self):
         """
         Настройка пользовательского интерфейса
@@ -114,7 +127,7 @@ class LoginWindow(QDialog):
         
         # Устанавливаем фокус на поле имени пользователя
         self.username_input.setFocus()
-    
+
     def attempt_login(self):
         """
         Попытка входа в систему
@@ -128,7 +141,7 @@ class LoginWindow(QDialog):
         if not username or not password:
             QMessageBox.warning(self, "Ошибка", "Пожалуйста, заполните все поля")
             return
-        
+
         try:
             # Пытаемся аутентифицировать пользователя
             user_info = self.auth_manager.authenticate_user(username, password)
@@ -136,8 +149,8 @@ class LoginWindow(QDialog):
             if user_info:
                 # Показываем сообщение об успехе
                 QMessageBox.information(
-                    self, 
-                    "Успех", 
+                    self,
+                    "Успех",
                     f"Добро пожаловать, {user_info.get('full_name', username)}!"
                 )
                 
@@ -149,15 +162,16 @@ class LoginWindow(QDialog):
             else:
                 # Неверные учетные данные
                 QMessageBox.warning(
-                    self, 
-                    "Ошибка", 
+                    self,
+                    "Ошибка",
                     "Неверное имя пользователя или пароль"
                 )
+                
         except Exception as e:
             # Показываем сообщение об ошибке
             QMessageBox.critical(
-                self, 
-                "Ошибка", 
+                self,
+                "Ошибка",
                 f"Ошибка при авторизации:\n{str(e)}"
             )
 
@@ -179,8 +193,8 @@ def main():
     # Проверяем подключение к базе данных
     if not db.open():
         QMessageBox.critical(
-            None, 
-            "Ошибка", 
+            None,
+            "Ошибка",
             f"Не удалось подключиться к базе данных:\n{db.lastError().text()}"
         )
         sys.exit(1)
@@ -193,7 +207,7 @@ def main():
         """Обработчик успешной авторизации"""
         print(f"Успешный вход для: {user_info['username']} (Роль: {user_info['role']})")
         # Здесь можно открыть главное окно приложения
-    
+
     # Подключаем сигнал к обработчику
     login_window.login_successful.connect(on_login_success)
     
@@ -205,7 +219,6 @@ def main():
     
     # Завершаем приложение
     sys.exit(app.exec())
-
 
 if __name__ == "__main__":
     main()
