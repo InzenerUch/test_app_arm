@@ -58,9 +58,11 @@ class TemplateEditDialog(QDialog):
         
         btn_box = QHBoxLayout()
         save_btn = QPushButton("💾 Сохранить")
-        save_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-weight: bold; padding: 8px 20px; border-radius: 5px; } QPushButton:hover { background-color: #45a049; }")
+        save_btn.setProperty("role", "save") 
         save_btn.clicked.connect(self.save)
+        
         cancel_btn = QPushButton("❌ Отмена")
+        cancel_btn.setProperty("role", "danger")
         cancel_btn.clicked.connect(self.reject)
         btn_box.addWidget(save_btn)
         btn_box.addWidget(cancel_btn)

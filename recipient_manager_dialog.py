@@ -31,14 +31,23 @@ class RecipientManagerDialog(QDialog):
         
         btns = QHBoxLayout()
         for label, slot, style in [
-            ("➕ Добавить", self.add_recipient, None),
-            ("✏️ Изменить", self.edit_recipient, None),
-            ("🗑️ Удалить", self.delete_recipient, "background-color: #ff6b6b; color: white;"),
-            ("🔄 Обновить", self.load_data, None),
-            ("Закрыть", self.accept, "background-color: #2196F3; color: white; font-weight: bold;")
+            ("➕ Добавить", self.add_recipient, None),      # → role="info"
+            ("✏️ Изменить", self.edit_recipient, None),     # → role="edit"
+            ("🗑️ Удалить", self.delete_recipient, None),    # → role="danger"
+            ("🔄 Обновить", self.load_data, None),          # → role="info"
+            ("Закрыть", self.accept, None),                 # → role="normal"
         ]:
             btn = QPushButton(label)
-            if style: btn.setStyleSheet(style)
+            if label == "➕ Добавить":
+                btn.setProperty("role", "info")
+            elif label == "✏️ Изменить":
+                btn.setProperty("role", "edit")
+            elif label == "🗑️ Удалить":
+                btn.setProperty("role", "danger")
+            elif label == "🔄 Обновить":
+                btn.setProperty("role", "info")
+            else:  # Закрыть
+                btn.setProperty("role", "normal")
             btn.clicked.connect(slot)
             btns.addWidget(btn)
         layout.addLayout(btns)

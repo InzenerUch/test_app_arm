@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict QPJ7lgrwCf2ndvbJqUnhPGK3nKg1eUcn8RLRso7VgCEbyJRhDrbIWbooVQ9BMHI
+\restrict 1cfeOTykfOpnQfvg3m5yzxIXYpCx5GBugu9EPze50b5O8qvYjhzxXeeyoYfcbyK
 
 -- Dumped from database version 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)
 -- Dumped by pg_dump version 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)
@@ -1694,7 +1694,8 @@ CREATE TABLE krd.users (
     created_at timestamp without time zone DEFAULT now(),
     last_login timestamp without time zone,
     is_deleted boolean DEFAULT false,
-    deleted_at timestamp without time zone
+    deleted_at timestamp without time zone,
+    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
 );
 
 
@@ -2935,5 +2936,5 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA krd GRANT SELECT,INSERT,DEL
 -- PostgreSQL database dump complete
 --
 
-\unrestrict QPJ7lgrwCf2ndvbJqUnhPGK3nKg1eUcn8RLRso7VgCEbyJRhDrbIWbooVQ9BMHI
+\unrestrict 1cfeOTykfOpnQfvg3m5yzxIXYpCx5GBugu9EPze50b5O8qvYjhzxXeeyoYfcbyK
 

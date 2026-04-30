@@ -117,7 +117,7 @@ class ReportConfigDialog(QDialog):
         # Кнопка отмены (СЕРЫЙ)
         cancel_btn = QPushButton("Отмена")
         cancel_btn.setMinimumHeight(40)
-        cancel_btn.setProperty("role", "danger")
+        cancel_btn.setProperty("role", "normal")
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
         
