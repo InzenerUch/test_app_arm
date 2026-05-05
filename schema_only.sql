@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict yjUJ9DDNkV56f1Y3c2MsOD29E3udiuU720FAh3l7tRK8NEoDfVjfJXtr6VpL1SF
+\restrict KA9bfZExERd5NgF80Tv5aabEXjEtL1CgYouyZzOF7K4xde66K5twN3lh71Oi3HP
 
 -- Dumped from database version 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)
 -- Dumped by pg_dump version 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)
@@ -1052,7 +1052,9 @@ CREATE TABLE krd.report_templates (
     created_by integer,
     is_deleted boolean DEFAULT false,
     is_default boolean DEFAULT false,
-    usage_count integer DEFAULT 0
+    usage_count integer DEFAULT 0,
+    deleted_by integer,
+    deleted_at timestamp without time zone
 );
 
 
@@ -2364,6 +2366,14 @@ ALTER TABLE ONLY krd.krd
 
 
 --
+-- Name: report_templates fk_report_templates_deleted_by; Type: FK CONSTRAINT; Schema: krd; Owner: postgres
+--
+
+ALTER TABLE ONLY krd.report_templates
+    ADD CONSTRAINT fk_report_templates_deleted_by FOREIGN KEY (deleted_by) REFERENCES krd.users(id);
+
+
+--
 -- Name: generated_documents generated_documents_template_id_fkey; Type: FK CONSTRAINT; Schema: krd; Owner: postgres
 --
 
@@ -2936,5 +2946,5 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA krd GRANT SELECT,INSERT,DEL
 -- PostgreSQL database dump complete
 --
 
-\unrestrict yjUJ9DDNkV56f1Y3c2MsOD29E3udiuU720FAh3l7tRK8NEoDfVjfJXtr6VpL1SF
+\unrestrict KA9bfZExERd5NgF80Tv5aabEXjEtL1CgYouyZzOF7K4xde66K5twN3lh71Oi3HP
 

@@ -1,14 +1,14 @@
 """
-Вкладка социально-демографических данных с поддержкой изображений
-Соответствует структуре из шаблона "Шаблон проги.xlsx"
+Вкладка социально-демографических данных с поддержкой изображений и строгой валидацией
+Соответствует структуре из шаблона "Шаблон проги.xlsx" и схеме БД
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QScrollArea, QGroupBox, QGridLayout, QHBoxLayout,
     QLineEdit, QTextEdit, QDateEdit, QComboBox, QLabel, QPushButton, QFileDialog,
     QMessageBox, QFrame
 )
-from PyQt6.QtCore import Qt, QDate, QByteArray, QTimer
-from PyQt6.QtGui import QPixmap, QFont
+from PyQt6.QtCore import Qt, QDate, QByteArray, QTimer, QRegularExpression
+from PyQt6.QtGui import QPixmap, QFont, QRegularExpressionValidator
 from PyQt6.QtSql import QSqlQuery
 import os
 import traceback
@@ -31,6 +31,99 @@ class SocialDataTab(QWidget):
         self.load_data()
         self.setup_auto_save()
         self.setup_autocomplete_fields()
+        
+        # ✅ НОВОЕ: Настройка валидаторов согласно схеме БД
+        self.setup_validators()
+
+    def setup_validators(self):
+        """
+        Настройка валидации полей ввода согласно схеме базы данных
+        """
+        # 1. Валидатор для ФИО и Наименований (Буквы, цифры, пробелы, дефис)
+        # Разрешает кириллицу, латиницу, цифры, пробелы и дефисы
+        name_regex = QRegularExpression(r"^[а-яА-Яa-zA-Z0-9\s\-]+$")
+        validator_names = QRegularExpressionValidator(name_regex)
+
+        # 2. Валидатор для Банковской карты (Только цифры и пробелы)
+        card_regex = QRegularExpression(r"^[0-9\s]+$")
+        validator_card = QRegularExpressionValidator(card_regex)
+
+        # 3. Валидатор для Паспортных данных (Буквы и цифры)
+        doc_regex = QRegularExpression(r"^[а-яА-Яa-zA-Z0-9\s\-]+$")
+        validator_doc = QRegularExpressionValidator(doc_regex)
+
+        # === ПРИМЕНЕНИЕ ОГРАНИЧЕНИЙ (MaxLength + Validator) ===
+        
+        # --- ФИО и Личные данные (VARCHAR 100) ---
+        self.surname_input.setMaxLength(100)
+        self.surname_input.setValidator(validator_names)
+        
+        self.name_input.setMaxLength(100)
+        self.name_input.setValidator(validator_names)
+        
+        self.patronymic_input.setMaxLength(100)
+        self.patronymic_input.setValidator(validator_names)
+
+        # --- Место рождения (VARCHAR 100) ---
+        fields_100 = [
+            self.birth_place_town_input, 
+            self.birth_place_district_input, 
+            self.birth_place_region_input, 
+            self.birth_place_country_input
+        ]
+        for field in fields_100:
+            field.setMaxLength(100)
+            field.setValidator(validator_names)
+
+        # --- Номера (VARCHAR 50) ---
+        self.tab_number_input.setMaxLength(50)
+        self.personal_number_input.setMaxLength(50)
+        # Разрешим цифры и дефис для табельного номера
+        num_regex = QRegularExpression(r"^[0-9\-]+$")
+        self.tab_number_input.setValidator(QRegularExpressionValidator(num_regex))
+        self.personal_number_input.setValidator(QRegularExpressionValidator(num_regex))
+
+        # --- Военкоматы и ПОВСК (VARCHAR 255) ---
+        fields_255 = [
+            self.drafted_by_commissariat_input, 
+            self.povsk_input, 
+            self.education_input,
+            self.passport_issued_by_input,
+            self.military_id_issued_by_input,
+            self.military_contacts_input
+        ]
+        for field in fields_255:
+            field.setMaxLength(255)
+            field.setValidator(validator_names)
+
+        # --- Банковская карта (VARCHAR 50, только цифры) ---
+        self.bank_card_number_input.setMaxLength(50)
+        self.bank_card_number_input.setValidator(validator_card)
+
+        # --- Соцсети (VARCHAR 255, допустим латиницу и спецсимволы для ссылок) ---
+        social_regex = QRegularExpression(r"^[a-zA-Z0-9\-\.\_\@\:\?\/\&\=]+$")
+        self.social_media_account_input.setMaxLength(255)
+        self.social_media_account_input.setValidator(QRegularExpressionValidator(social_regex))
+
+        # --- Паспортные данные ---
+        # Серия паспорта (VARCHAR 10)
+        self.passport_series_input.setMaxLength(10)
+        self.passport_series_input.setValidator(validator_doc)
+        
+        # Номер паспорта (VARCHAR 20)
+        self.passport_number_input.setMaxLength(20)
+        self.passport_number_input.setValidator(validator_doc)
+
+        # --- Военный билет ---
+        # Серия ВБ (VARCHAR 10)
+        self.military_id_series_input.setMaxLength(10)
+        self.military_id_series_input.setValidator(validator_doc)
+        
+        # Номер ВБ (VARCHAR 20)
+        self.military_id_number_input.setMaxLength(20)
+        self.military_id_number_input.setValidator(validator_doc)
+
+        print("✅ Валидаторы настроены согласно схеме БД")
 
     def _create_ref_combo_widget(self, combo, table_name, reload_func):
         """Вспомогательный метод: ComboBox + кнопка ⚙️"""
@@ -234,19 +327,27 @@ class SocialDataTab(QWidget):
     def save_data(self):
         err = self.validate_required_fields()
         if err: raise ValueError(err)
+        
+        # Дополнительная проверка длины для QTextEdit (так как у них нет setMaxLength)
+        if len(self.criminal_record_input.toPlainText()) > 5000: # TEXT limit check example
+             raise ValueError("Поле 'Сведения о судимости' слишком длинное")
+
         data = {"krd_id": self.krd_id, "surname": self.surname_input.text().strip(), "name": self.name_input.text().strip(), "patronymic": self.patronymic_input.text().strip(), "birth_date": self.birth_date_input.date(), "birth_place_town": self.birth_place_town_input.text().strip(), "birth_place_district": self.birth_place_district_input.text().strip(), "birth_place_region": self.birth_place_region_input.text().strip(), "birth_place_country": self.birth_place_country_input.text().strip(), "tab_number": self.tab_number_input.text().strip(), "personal_number": self.personal_number_input.text().strip(), "category_id": self.category_combo.currentData(), "rank_id": self.rank_combo.currentData(), "drafted_by_commissariat": self.drafted_by_commissariat_input.text().strip(), "draft_date": self.draft_date_input.date(), "povsk": self.povsk_input.text().strip(), "selection_date": self.selection_date_input.date(), "education": self.education_input.text().strip(), "criminal_record": self.criminal_record_input.toPlainText(), "social_media_account": self.social_media_account_input.text().strip(), "bank_card_number": self.bank_card_number_input.text().strip(), "passport_series": self.passport_series_input.text().strip(), "passport_number": self.passport_number_input.text().strip(), "passport_issue_date": self.passport_issue_date_input.date(), "passport_issued_by": self.passport_issued_by_input.text().strip(), "military_id_series": self.military_id_series_input.text().strip(), "military_id_number": self.military_id_number_input.text().strip(), "military_id_issue_date": self.military_id_issue_date_input.date(), "military_id_issued_by": self.military_id_issued_by_input.text().strip(), "appearance_features": self.appearance_features_input.toPlainText(), "personal_marks": self.personal_marks_input.toPlainText(), "federal_search_info": self.federal_search_info_input.toPlainText(), "military_contacts": self.military_contacts_input.text().strip(), "relatives_info": self.relatives_info_input.toPlainText()}
+        
         for pt in ['civilian', 'military_headgear', 'military_no_headgear', 'distinctive_marks']:
             p = self.photo_paths.get(pt); fb = None
             if p and os.path.exists(p):
                 with open(p, 'rb') as f: fb = f.read()
             elif self.original_photos.get(pt): fb = self.original_photos[pt]
             data[f"photo_{pt}"] = QByteArray(fb) if fb else QByteArray()
+            
         q = QSqlQuery(self.db)
         if self.record:
             q.prepare("""UPDATE krd.social_data SET surname=:surname, name=:name, patronymic=:patronymic, birth_date=:birth_date, birth_place_town=:birth_place_town, birth_place_district=:birth_place_district, birth_place_region=:birth_place_region, birth_place_country=:birth_place_country, tab_number=:tab_number, personal_number=:personal_number, category_id=:category_id, rank_id=:rank_id, drafted_by_commissariat=:drafted_by_commissariat, draft_date=:draft_date, povsk=:povsk, selection_date=:selection_date, education=:education, criminal_record=:criminal_record, social_media_account=:social_media_account, bank_card_number=:bank_card_number, passport_series=:passport_series, passport_number=:passport_number, passport_issue_date=:passport_issue_date, passport_issued_by=:passport_issued_by, military_id_series=:military_id_series, military_id_number=:military_id_number, military_id_issue_date=:military_id_issue_date, military_id_issued_by=:military_id_issued_by, appearance_features=:appearance_features, personal_marks=:personal_marks, federal_search_info=:federal_search_info, military_contacts=:military_contacts, relatives_info=:relatives_info, photo_civilian=:photo_civilian, photo_military_headgear=:photo_military_headgear, photo_military_no_headgear=:photo_military_no_headgear, photo_distinctive_marks=:photo_distinctive_marks WHERE id=:id""")
             q.bindValue(":id", self.record.value("id"))
         else:
             q.prepare("""INSERT INTO krd.social_data (krd_id, surname, name, patronymic, birth_date, birth_place_town, birth_place_district, birth_place_region, birth_place_country, tab_number, personal_number, category_id, rank_id, drafted_by_commissariat, draft_date, povsk, selection_date, education, criminal_record, social_media_account, bank_card_number, passport_series, passport_number, passport_issue_date, passport_issued_by, military_id_series, military_id_number, military_id_issue_date, military_id_issued_by, appearance_features, personal_marks, federal_search_info, military_contacts, relatives_info, photo_civilian, photo_military_headgear, photo_military_no_headgear, photo_distinctive_marks) VALUES (:krd_id, :surname, :name, :patronymic, :birth_date, :birth_place_town, :birth_place_district, :birth_place_region, :birth_place_country, :tab_number, :personal_number, :category_id, :rank_id, :drafted_by_commissariat, :draft_date, :povsk, :selection_date, :education, :criminal_record, :social_media_account, :bank_card_number, :passport_series, :passport_number, :passport_issue_date, :passport_issued_by, :military_id_series, :military_id_number, :military_id_issue_date, :military_id_issued_by, :appearance_features, :personal_marks, :federal_search_info, :military_contacts, :relatives_info, :photo_civilian, :photo_military_headgear, :photo_military_no_headgear, :photo_distinctive_marks)""")
+            
         for k, v in data.items(): q.bindValue(f":{k}", v)
         if not q.exec(): raise Exception(f"Ошибка сохранения: {q.lastError().text()}")
         self.autocomplete_helper.refresh_all_fields()

@@ -1,5 +1,6 @@
 """
 Диалог редактирования/добавления шаблона документа
+✅ ИСПРАВЛЕНО: Убраны случайные логи из импортов, исправлен оператор if
 ✅ ИСПРАВЛЕНО: Именованные параметры (:name) для совместимости с PostgreSQL
 """
 import os
@@ -91,8 +92,8 @@ class TemplateEditDialog(QDialog):
                     QMessageBox.critical(self, "Ошибка", f"Ошибка сохранения:\n{str(e)}")
 
     def load_data(self):
-        # ✅ ИСПРАВЛЕНО: Именованный параметр :id
         query = QSqlQuery(self.db)
+        # ✅ ИСПРАВЛЕНО: Именованный параметр :id
         query.prepare("SELECT name, description, template_data FROM krd.document_templates WHERE id = :id")
         query.bindValue(":id", self.template_id)
         
@@ -100,7 +101,9 @@ class TemplateEditDialog(QDialog):
             self.name_input.setText(query.value(0) or "")
             self.desc_input.setPlainText(query.value(1) or "")
             data = query.value(2)
-            if
+            
+            # ✅ ИСПРАВЛЕНО: Добавлено условие проверки данных (if data:)
+            if data:
                 self.current_file_bytes = bytes(data) if not isinstance(data, bytes) else data
                 size = len(self.current_file_bytes)
                 self.file_label.setText(f"✅ Текущий шаблон в БД ({size} байт)")
