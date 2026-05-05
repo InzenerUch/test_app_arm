@@ -613,13 +613,14 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Ошибка", f"❌ Ошибка при генерации отчета:\n\n{str(e)}")
     
     def on_manage_templates(self):
-        """Открытие управления шаблонами без экспорта"""
-        dialog = ReportConfigDialog(self.db, self)
-        
-        # Переключаем на вкладку управления шаблонами
-        dialog.tabs.setCurrentIndex(1)
-        
-        dialog.exec()
+        """Открытие управления шаблонами"""
+        try:
+            dialog = ReportConfigDialog(self.db, self)
+            # Убрано обращение к dialog.tabs, так как в ReportConfigDialog нет вкладок
+            dialog.exec()
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Ошибка при открытии шаблонов:\n{str(e)}")
     
     # ========================
     # === СУЩЕСТВУЮЩИЕ МЕТОДЫ ===

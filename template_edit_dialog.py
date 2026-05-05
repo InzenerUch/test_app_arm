@@ -1,5 +1,6 @@
 """
 Диалог редактирования/добавления шаблона документа
+✅ ИСПРАВЛЕНО: Именованные параметры (:name) для совместимости с PostgreSQL
 """
 import os
 from PyQt6.QtWidgets import (
@@ -90,14 +91,16 @@ class TemplateEditDialog(QDialog):
                     QMessageBox.critical(self, "Ошибка", f"Ошибка сохранения:\n{str(e)}")
 
     def load_data(self):
+        # ✅ ИСПРАВЛЕНО: Именованный параметр :id
         query = QSqlQuery(self.db)
-        query.prepare("SELECT name, description, template_data FROM krd.document_templates WHERE id = ?")
-        query.addBindValue(self.template_id)
+        query.prepare("SELECT name, description, template_data FROM krd.document_templates WHERE id = :id")
+        query.bindValue(":id", self.template_id)
+        
         if query.exec() and query.next():
             self.name_input.setText(query.value(0) or "")
             self.desc_input.setPlainText(query.value(1) or "")
             data = query.value(2)
-            if data:
+            if
                 self.current_file_bytes = bytes(data) if not isinstance(data, bytes) else data
                 size = len(self.current_file_bytes)
                 self.file_label.setText(f"✅ Текущий шаблон в БД ({size} байт)")
@@ -124,16 +127,25 @@ class TemplateEditDialog(QDialog):
         query = QSqlQuery(self.db)
         try:
             if self.template_id:
-                query.prepare("UPDATE krd.document_templates SET name = ?, description = ?, template_data = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-                query.addBindValue(name)
-                query.addBindValue(desc)
-                query.addBindValue(QByteArray(file_bytes))
-                query.addBindValue(self.template_id)
+                # ✅ ИСПРАВЛЕНО: Именованные параметры для UPDATE
+                query.prepare("""
+                    UPDATE krd.document_templates 
+                    SET name = :name, description = :desc, template_data = :data, updated_at = CURRENT_TIMESTAMP 
+                    WHERE id = :id
+                """)
+                query.bindValue(":name", name)
+                query.bindValue(":desc", desc)
+                query.bindValue(":data", QByteArray(file_bytes))
+                query.bindValue(":id", self.template_id)
             else:
-                query.prepare("INSERT INTO krd.document_templates (name, description, template_data, is_deleted) VALUES (?, ?, ?, FALSE)")
-                query.addBindValue(name)
-                query.addBindValue(desc)
-                query.addBindValue(QByteArray(file_bytes))
+                # ✅ ИСПРАВЛЕНО: Именованные параметры для INSERT
+                query.prepare("""
+                    INSERT INTO krd.document_templates (name, description, template_data, is_deleted) 
+                    VALUES (:name, :desc, :data, FALSE)
+                """)
+                query.bindValue(":name", name)
+                query.bindValue(":desc", desc)
+                query.bindValue(":data", QByteArray(file_bytes))
                 
             if query.exec():
                 QMessageBox.information(self, "Успех", "Шаблон успешно сохранён!")

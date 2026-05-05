@@ -4,905 +4,266 @@
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QScrollArea, QGroupBox, QGridLayout, QHBoxLayout,
-    QLineEdit, QTextEdit, QDateEdit, QComboBox, QLabel, QPushButton, QFileDialog, 
+    QLineEdit, QTextEdit, QDateEdit, QComboBox, QLabel, QPushButton, QFileDialog,
     QMessageBox, QFrame
 )
-from PyQt6.QtCore import Qt, QDate, QByteArray,QTimer
+from PyQt6.QtCore import Qt, QDate, QByteArray, QTimer
 from PyQt6.QtGui import QPixmap, QFont
 from PyQt6.QtSql import QSqlQuery
 import os
 import traceback
-
 from autocomplete_helper import AutocompleteHelper
-
+from reference_editor_dialog import ReferenceEditorDialog
 
 class SocialDataTab(QWidget):
     """Вкладка социально-демографических данных с поддержкой изображений"""
-    
     def __init__(self, krd_id, db_connection, audit_logger=None):
         super().__init__()
         self.krd_id = krd_id
         self.db = db_connection
         self.audit_logger = audit_logger
         self.record = None
-        
-        # === ИНИЦИАЛИЗАЦИЯ ПОМОЩНИКА АВТОДОПОЛНЕНИЯ ===
         self.autocomplete_helper = AutocompleteHelper(db_connection)
+        self.photo_paths = {'civilian': None, 'military_headgear': None, 'military_no_headgear': None, 'distinctive_marks': None}
+        self.original_photos = {'civilian': None, 'military_headgear': None, 'military_no_headgear': None, 'distinctive_marks': None}
         
-        # Хранилище путей к временным файлам изображений
-        self.photo_paths = {
-            'civilian': None,
-            'military_headgear': None,
-            'military_no_headgear': None,
-            'distinctive_marks': None
-        }
-        # Хранилище оригинальных фото из базы
-        self.original_photos = {
-            'civilian': None,
-            'military_headgear': None,
-            'military_no_headgear': None,
-            'distinctive_marks': None
-        }
-        
-        # === ВАЖНО: Сначала init_ui(), потом load_data() ===
         self.init_ui()
         self.load_data()
-        self.setup_auto_save()       
-        # === НАСТРОЙКА АВТОДОПОЛНЕНИЯ ПОСЛЕ ЗАГРУЗКИ ===
+        self.setup_auto_save()
         self.setup_autocomplete_fields()
-    
+
+    def _create_ref_combo_widget(self, combo, table_name, reload_func):
+        """Вспомогательный метод: ComboBox + кнопка ⚙️"""
+        w = QWidget()
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.addWidget(combo)
+        
+        btn = QPushButton("⚙️")
+        btn.setToolTip(f"Настроить справочник: {table_name}")
+        btn.setFixedSize(32, 32)
+        btn.setStyleSheet("QPushButton { font-weight: bold; font-size: 15px; border-radius: 4px; background: #f8f9fa; border: 1px solid #ced4da; } QPushButton:hover { background: #e9ecef; }")
+        
+        def open_ref():
+            dlg = ReferenceEditorDialog(self.db, self, initial_table=table_name)
+            if dlg.exec() == 1:
+                reload_func()
+                
+        btn.clicked.connect(open_ref)
+        lay.addWidget(btn)
+        return w
+
     def init_ui(self):
-        """Инициализация интерфейса - ВСЕ виджеты создаются здесь"""
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
-        
         container = QWidget()
         layout = QVBoxLayout(container)
         layout.setSpacing(15)
         layout.setContentsMargins(10, 10, 10, 10)
-        
-        # === Группа 1: Основные данные ===
+
         group1 = QGroupBox("Основные данные (поля со знаком * обязательны)")
         group1.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-        group1_layout = QGridLayout()
-        group1_layout.setSpacing(8)
-        
-        group1_layout.addWidget(QLabel("Фамилия *:"), 0, 0)
-        self.surname_input = QLineEdit()
-        self.surname_input.setPlaceholderText("Введите фамилию")
-        group1_layout.addWidget(self.surname_input, 0, 1)
-        
-        group1_layout.addWidget(QLabel("Имя *:"), 0, 2)
-        self.name_input = QLineEdit()
-        self.name_input.setPlaceholderText("Введите имя")
-        group1_layout.addWidget(self.name_input, 0, 3)
-        
-        group1_layout.addWidget(QLabel("Отчество *:"), 0, 4)
-        self.patronymic_input = QLineEdit()
-        self.patronymic_input.setPlaceholderText("Введите отчество")
-        group1_layout.addWidget(self.patronymic_input, 0, 5)
-        
-        group1_layout.addWidget(QLabel("Табельный номер:"), 1, 0)
+        g1 = QGridLayout(); g1.setSpacing(8)
+        g1.addWidget(QLabel("Фамилия *:"), 0, 0)
+        self.surname_input = QLineEdit(); self.surname_input.setPlaceholderText("Введите фамилию")
+        g1.addWidget(self.surname_input, 0, 1)
+        g1.addWidget(QLabel("Имя *:"), 0, 2)
+        self.name_input = QLineEdit(); self.name_input.setPlaceholderText("Введите имя")
+        g1.addWidget(self.name_input, 0, 3)
+        g1.addWidget(QLabel("Отчество *:"), 0, 4)
+        self.patronymic_input = QLineEdit(); self.patronymic_input.setPlaceholderText("Введите отчество")
+        g1.addWidget(self.patronymic_input, 0, 5)
+        g1.addWidget(QLabel("Табельный номер:"), 1, 0)
         self.tab_number_input = QLineEdit()
-        group1_layout.addWidget(self.tab_number_input, 1, 1)
-        
-        group1_layout.addWidget(QLabel("Личный номер:"), 1, 2)
+        g1.addWidget(self.tab_number_input, 1, 1)
+        g1.addWidget(QLabel("Личный номер:"), 1, 2)
         self.personal_number_input = QLineEdit()
-        group1_layout.addWidget(self.personal_number_input, 1, 3)
+        g1.addWidget(self.personal_number_input, 1, 3)
         
-        group1_layout.addWidget(QLabel("Категория военнослужащего:"), 2, 0)
-        self.category_combo = QComboBox()
-        self.load_categories()
-        group1_layout.addWidget(self.category_combo, 2, 1)
+        g1.addWidget(QLabel("Категория военнослужащего:"), 2, 0)
+        self.category_combo = QComboBox(); self.load_categories()
+        g1.addWidget(self._create_ref_combo_widget(self.category_combo, 'categories', self.load_categories), 2, 1)
         
-        group1_layout.addWidget(QLabel("Воинское звание:"), 2, 2)
-        self.rank_combo = QComboBox()
-        self.load_ranks()
-        group1_layout.addWidget(self.rank_combo, 2, 3)
+        g1.addWidget(QLabel("Воинское звание:"), 2, 2)
+        self.rank_combo = QComboBox(); self.load_ranks()
+        g1.addWidget(self._create_ref_combo_widget(self.rank_combo, 'ranks', self.load_ranks), 2, 3)
         
-        group1.setLayout(group1_layout)
-        layout.addWidget(group1)
-        
-        # === Группа 2: Место рождения ===
+        group1.setLayout(g1); layout.addWidget(group1)
+
         group2 = QGroupBox("Место рождения")
         group2.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-        group2_layout = QGridLayout()
-        group2_layout.setSpacing(8)
-        
-        group2_layout.addWidget(QLabel("Населенный пункт:"), 0, 0)
-        self.birth_place_town_input = QLineEdit()
-        group2_layout.addWidget(self.birth_place_town_input, 0, 1)
-        
-        group2_layout.addWidget(QLabel("Административный район:"), 0, 2)
-        self.birth_place_district_input = QLineEdit()
-        group2_layout.addWidget(self.birth_place_district_input, 0, 3)
-        
-        group2_layout.addWidget(QLabel("Субъект (регион):"), 1, 0)
-        self.birth_place_region_input = QLineEdit()
-        group2_layout.addWidget(self.birth_place_region_input, 1, 1)
-        
-        group2_layout.addWidget(QLabel("Страна:"), 1, 2)
-        self.birth_place_country_input = QLineEdit()
-        group2_layout.addWidget(self.birth_place_country_input, 1, 3)
-        
-        group2_layout.addWidget(QLabel("Дата рождения:"), 2, 0)
-        self.birth_date_input = QDateEdit()
-        self.birth_date_input.setCalendarPopup(True)
-        self.birth_date_input.setDate(QDate.currentDate())
-        group2_layout.addWidget(self.birth_date_input, 2, 1)
-        
-        group2.setLayout(group2_layout)
-        layout.addWidget(group2)
-        
-        # === Группа 3: Призыв ===
+        g2 = QGridLayout(); g2.setSpacing(8)
+        g2.addWidget(QLabel("Населенный пункт:"), 0, 0); self.birth_place_town_input = QLineEdit(); g2.addWidget(self.birth_place_town_input, 0, 1)
+        g2.addWidget(QLabel("Административный район:"), 0, 2); self.birth_place_district_input = QLineEdit(); g2.addWidget(self.birth_place_district_input, 0, 3)
+        g2.addWidget(QLabel("Субъект (регион):"), 1, 0); self.birth_place_region_input = QLineEdit(); g2.addWidget(self.birth_place_region_input, 1, 1)
+        g2.addWidget(QLabel("Страна:"), 1, 2); self.birth_place_country_input = QLineEdit(); g2.addWidget(self.birth_place_country_input, 1, 3)
+        g2.addWidget(QLabel("Дата рождения:"), 2, 0); self.birth_date_input = QDateEdit(); self.birth_date_input.setCalendarPopup(True); self.birth_date_input.setDate(QDate.currentDate()); g2.addWidget(self.birth_date_input, 2, 1)
+        group2.setLayout(g2); layout.addWidget(group2)
+
         group3 = QGroupBox("Призыв")
         group3.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-        group3_layout = QGridLayout()
-        group3_layout.setSpacing(8)
-        
-        group3_layout.addWidget(QLabel("Каким комиссариатом призван:"), 0, 0)
-        self.drafted_by_commissariat_input = QLineEdit()
-        group3_layout.addWidget(self.drafted_by_commissariat_input, 0, 1, 1, 3)
-        
-        group3_layout.addWidget(QLabel("Дата призыва:"), 1, 0)
-        self.draft_date_input = QDateEdit()
-        self.draft_date_input.setCalendarPopup(True)
-        self.draft_date_input.setDate(QDate.currentDate())
-        group3_layout.addWidget(self.draft_date_input, 1, 1)
-        
-        group3_layout.addWidget(QLabel("Каким ПОВСК отобран:"), 1, 2)
-        self.povsk_input = QLineEdit()
-        group3_layout.addWidget(self.povsk_input, 1, 3)
-        
-        group3_layout.addWidget(QLabel("Дата отбора:"), 2, 0)
-        self.selection_date_input = QDateEdit()
-        self.selection_date_input.setCalendarPopup(True)
-        self.selection_date_input.setDate(QDate.currentDate())
-        group3_layout.addWidget(self.selection_date_input, 2, 1)
-        
-        group3.setLayout(group3_layout)
-        layout.addWidget(group3)
-        
-        # === Группа 4: Образование и судимость ===
+        g3 = QGridLayout(); g3.setSpacing(8)
+        g3.addWidget(QLabel("Каким комиссариатом призван:"), 0, 0); self.drafted_by_commissariat_input = QLineEdit(); g3.addWidget(self.drafted_by_commissariat_input, 0, 1, 1, 3)
+        g3.addWidget(QLabel("Дата призыва:"), 1, 0); self.draft_date_input = QDateEdit(); self.draft_date_input.setCalendarPopup(True); self.draft_date_input.setDate(QDate.currentDate()); g3.addWidget(self.draft_date_input, 1, 1)
+        g3.addWidget(QLabel("Каким ПОВСК отобран:"), 1, 2); self.povsk_input = QLineEdit(); g3.addWidget(self.povsk_input, 1, 3)
+        g3.addWidget(QLabel("Дата отбора:"), 2, 0); self.selection_date_input = QDateEdit(); self.selection_date_input.setCalendarPopup(True); self.selection_date_input.setDate(QDate.currentDate()); g3.addWidget(self.selection_date_input, 2, 1)
+        group3.setLayout(g3); layout.addWidget(group3)
+
         group4 = QGroupBox("Образование и судимость")
         group4.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-        group4_layout = QGridLayout()
-        group4_layout.setSpacing(8)
-        
-        group4_layout.addWidget(QLabel("Образование:"), 0, 0)
-        self.education_input = QLineEdit()
-        group4_layout.addWidget(self.education_input, 0, 1, 1, 3)
-        
-        group4_layout.addWidget(QLabel("Сведения о судимости:"), 1, 0)
-        self.criminal_record_input = QTextEdit()
-        self.criminal_record_input.setMaximumHeight(60)
-        group4_layout.addWidget(self.criminal_record_input, 1, 1, 1, 3)
-        
-        group4_layout.addWidget(QLabel("Аккаунт в соцсетях:"), 2, 0)
-        self.social_media_account_input = QLineEdit()
-        group4_layout.addWidget(self.social_media_account_input, 2, 1)
-        
-        group4_layout.addWidget(QLabel("Номер банковской карты:"), 2, 2)
-        self.bank_card_number_input = QLineEdit()
-        group4_layout.addWidget(self.bank_card_number_input, 2, 3)
-        
-        group4.setLayout(group4_layout)
-        layout.addWidget(group4)
-        
-        # === Группа 5: Паспортные данные ===
+        g4 = QGridLayout(); g4.setSpacing(8)
+        g4.addWidget(QLabel("Образование:"), 0, 0); self.education_input = QLineEdit(); g4.addWidget(self.education_input, 0, 1, 1, 3)
+        g4.addWidget(QLabel("Сведения о судимости:"), 1, 0); self.criminal_record_input = QTextEdit(); self.criminal_record_input.setMaximumHeight(60); g4.addWidget(self.criminal_record_input, 1, 1, 1, 3)
+        g4.addWidget(QLabel("Аккаунт в соцсетях:"), 2, 0); self.social_media_account_input = QLineEdit(); g4.addWidget(self.social_media_account_input, 2, 1)
+        g4.addWidget(QLabel("Номер банковской карты:"), 2, 2); self.bank_card_number_input = QLineEdit(); g4.addWidget(self.bank_card_number_input, 2, 3)
+        group4.setLayout(g4); layout.addWidget(group4)
+
         group5 = QGroupBox("Паспортные данные")
         group5.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-        group5_layout = QGridLayout()
-        group5_layout.setSpacing(8)
-        
-        group5_layout.addWidget(QLabel("Серия паспорта:"), 0, 0)
-        self.passport_series_input = QLineEdit()
-        group5_layout.addWidget(self.passport_series_input, 0, 1)
-        
-        group5_layout.addWidget(QLabel("Номер паспорта:"), 0, 2)
-        self.passport_number_input = QLineEdit()
-        group5_layout.addWidget(self.passport_number_input, 0, 3)
-        
-        group5_layout.addWidget(QLabel("Дата выдачи:"), 1, 0)
-        self.passport_issue_date_input = QDateEdit()
-        self.passport_issue_date_input.setCalendarPopup(True)
-        self.passport_issue_date_input.setDate(QDate.currentDate())
-        group5_layout.addWidget(self.passport_issue_date_input, 1, 1)
-        
-        group5_layout.addWidget(QLabel("Кем выдан:"), 1, 2)
-        self.passport_issued_by_input = QLineEdit()
-        group5_layout.addWidget(self.passport_issued_by_input, 1, 3)
-        
-        group5.setLayout(group5_layout)
-        layout.addWidget(group5)
-        
-        # === Группа 6: Военный билет ===
+        g5 = QGridLayout(); g5.setSpacing(8)
+        g5.addWidget(QLabel("Серия паспорта:"), 0, 0); self.passport_series_input = QLineEdit(); g5.addWidget(self.passport_series_input, 0, 1)
+        g5.addWidget(QLabel("Номер паспорта:"), 0, 2); self.passport_number_input = QLineEdit(); g5.addWidget(self.passport_number_input, 0, 3)
+        g5.addWidget(QLabel("Дата выдачи:"), 1, 0); self.passport_issue_date_input = QDateEdit(); self.passport_issue_date_input.setCalendarPopup(True); self.passport_issue_date_input.setDate(QDate.currentDate()); g5.addWidget(self.passport_issue_date_input, 1, 1)
+        g5.addWidget(QLabel("Кем выдан:"), 1, 2); self.passport_issued_by_input = QLineEdit(); g5.addWidget(self.passport_issued_by_input, 1, 3)
+        group5.setLayout(g5); layout.addWidget(group5)
+
         group6 = QGroupBox("Военный билет (удостоверение личности)")
         group6.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-        group6_layout = QGridLayout()
-        group6_layout.setSpacing(8)
-        
-        group6_layout.addWidget(QLabel("Серия:"), 0, 0)
-        self.military_id_series_input = QLineEdit()
-        group6_layout.addWidget(self.military_id_series_input, 0, 1)
-        
-        group6_layout.addWidget(QLabel("Номер:"), 0, 2)
-        self.military_id_number_input = QLineEdit()
-        group6_layout.addWidget(self.military_id_number_input, 0, 3)
-        
-        group6_layout.addWidget(QLabel("Дата выдачи:"), 1, 0)
-        self.military_id_issue_date_input = QDateEdit()
-        self.military_id_issue_date_input.setCalendarPopup(True)
-        self.military_id_issue_date_input.setDate(QDate.currentDate())
-        group6_layout.addWidget(self.military_id_issue_date_input, 1, 1)
-        
-        group6_layout.addWidget(QLabel("Кем выдан:"), 1, 2)
-        self.military_id_issued_by_input = QLineEdit()
-        group6_layout.addWidget(self.military_id_issued_by_input, 1, 3)
-        
-        group6.setLayout(group6_layout)
-        layout.addWidget(group6)
-        
-        # === Группа 7: Внешность и фотографии ===
+        g6 = QGridLayout(); g6.setSpacing(8)
+        g6.addWidget(QLabel("Серия:"), 0, 0); self.military_id_series_input = QLineEdit(); g6.addWidget(self.military_id_series_input, 0, 1)
+        g6.addWidget(QLabel("Номер:"), 0, 2); self.military_id_number_input = QLineEdit(); g6.addWidget(self.military_id_number_input, 0, 3)
+        g6.addWidget(QLabel("Дата выдачи:"), 1, 0); self.military_id_issue_date_input = QDateEdit(); self.military_id_issue_date_input.setCalendarPopup(True); self.military_id_issue_date_input.setDate(QDate.currentDate()); g6.addWidget(self.military_id_issue_date_input, 1, 1)
+        g6.addWidget(QLabel("Кем выдан:"), 1, 2); self.military_id_issued_by_input = QLineEdit(); g6.addWidget(self.military_id_issued_by_input, 1, 3)
+        group6.setLayout(g6); layout.addWidget(group6)
+
         group7 = QGroupBox("Особенности внешности и фотографии")
         group7.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-        group7_layout = QVBoxLayout()
-        group7_layout.setSpacing(10)
-        
-        text_grid = QGridLayout()
-        text_grid.setSpacing(8)
-        
-        text_grid.addWidget(QLabel("Особенности внешности:"), 0, 0)
-        self.appearance_features_input = QTextEdit()
-        self.appearance_features_input.setMaximumHeight(60)
-        text_grid.addWidget(self.appearance_features_input, 0, 1, 1, 3)
-        
-        text_grid.addWidget(QLabel("Личные приметы:"), 1, 0)
-        self.personal_marks_input = QTextEdit()
-        self.personal_marks_input.setMaximumHeight(60)
-        text_grid.addWidget(self.personal_marks_input, 1, 1, 1, 3)
-        
-        text_grid.addWidget(QLabel("Сведения о федеральном розыске:"), 2, 0)
-        self.federal_search_info_input = QTextEdit()
-        self.federal_search_info_input.setMaximumHeight(60)
-        text_grid.addWidget(self.federal_search_info_input, 2, 1, 1, 3)
-        
-        text_grid.addWidget(QLabel("Контакты военнослужащего:"), 3, 0)
-        self.military_contacts_input = QLineEdit()
-        text_grid.addWidget(self.military_contacts_input, 3, 1, 1, 3)
-        
-        text_grid.addWidget(QLabel("Сведения о близких родственниках:"), 4, 0)
-        self.relatives_info_input = QTextEdit()
-        self.relatives_info_input.setMaximumHeight(60)
-        text_grid.addWidget(self.relatives_info_input, 4, 1, 1, 3)
-        
-        group7_layout.addLayout(text_grid)
-        
-        separator = QFrame()
-        separator.setFrameShape(QFrame.Shape.HLine)
-        separator.setFrameShadow(QFrame.Shadow.Sunken)
-        group7_layout.addWidget(separator)
-        
-        photos_title = QLabel("Фотографии военнослужащего")
-        photos_title.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-        photos_title.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        group7_layout.addWidget(photos_title)
-        
-        photos_grid = QGridLayout()
-        photos_grid.setSpacing(15)
-        
-        # === ФОТО 1: Гражданская одежда ===
-        photo1_layout = QVBoxLayout()
-        photo1_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        photo1_label = QLabel("Фото в гражданской одежде:")
-        photo1_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        photo1_layout.addWidget(photo1_label)
-        
-        # === ВАЖНО: Создаём все label для фото ===
-        self.photo_civilian_label = QLabel("Нет фото")
-        self.photo_civilian_label.setFixedSize(180, 240)
-        self.photo_civilian_label.setStyleSheet("""
-            QLabel {
-                border: 2px dashed #999;
-                background-color: #f8f9fa;
-                color: #6c757d;
-                font-size: 12px;
-            }
-        """)
-        self.photo_civilian_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        photo1_layout.addWidget(self.photo_civilian_label)
-        
-        civilian_btn = QPushButton("Загрузить фото")
-        civilian_btn.setMinimumWidth(150)
-        civilian_btn.clicked.connect(lambda: self.load_photo('civilian'))
-        photo1_layout.addWidget(civilian_btn)
-        
-        civilian_export_btn = QPushButton("Выгрузить фото")
-        civilian_export_btn.setMinimumWidth(150)
-        civilian_export_btn.clicked.connect(lambda: self.export_photo('civilian'))
-        photo1_layout.addWidget(civilian_export_btn)
-        
-        photos_grid.addLayout(photo1_layout, 0, 0)
-        
-        # === ФОТО 2: Военная форма с головным убором ===
-        photo2_layout = QVBoxLayout()
-        photo2_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        photo2_label = QLabel("Фото в военной форме\nс головным убором:")
-        photo2_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        photo2_layout.addWidget(photo2_label)
-        
-        # === ВАЖНО: Создаём label ===
-        self.photo_military_headgear_label = QLabel("Нет фото")
-        self.photo_military_headgear_label.setFixedSize(180, 240)
-        self.photo_military_headgear_label.setStyleSheet("""
-            QLabel {
-                border: 2px dashed #999;
-                background-color: #f8f9fa;
-                color: #6c757d;
-                font-size: 12px;
-            }
-        """)
-        self.photo_military_headgear_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        photo2_layout.addWidget(self.photo_military_headgear_label)
-        
-        military_headgear_btn = QPushButton("Загрузить фото")
-        military_headgear_btn.setMinimumWidth(150)
-        military_headgear_btn.clicked.connect(lambda: self.load_photo('military_headgear'))
-        photo2_layout.addWidget(military_headgear_btn)
-        
-        military_headgear_export_btn = QPushButton("Выгрузить фото")
-        military_headgear_export_btn.setMinimumWidth(150)
-        military_headgear_export_btn.clicked.connect(lambda: self.export_photo('military_headgear'))
-        photo2_layout.addWidget(military_headgear_export_btn)
-        
-        photos_grid.addLayout(photo2_layout, 0, 1)
-        
-        # === ФОТО 3: Военная форма без головного убора ===
-        photo3_layout = QVBoxLayout()
-        photo3_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        photo3_label = QLabel("Фото в военной форме\nбез головного убора:")
-        photo3_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        photo3_layout.addWidget(photo3_label)
-        
-        # === ВАЖНО: Создаём label ===
-        self.photo_military_no_headgear_label = QLabel("Нет фото")
-        self.photo_military_no_headgear_label.setFixedSize(180, 240)
-        self.photo_military_no_headgear_label.setStyleSheet("""
-            QLabel {
-                border: 2px dashed #999;
-                background-color: #f8f9fa;
-                color: #6c757d;
-                font-size: 12px;
-            }
-        """)
-        self.photo_military_no_headgear_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        photo3_layout.addWidget(self.photo_military_no_headgear_label)
-        
-        military_no_headgear_btn = QPushButton("Загрузить фото")
-        military_no_headgear_btn.setMinimumWidth(150)
-        military_no_headgear_btn.clicked.connect(lambda: self.load_photo('military_no_headgear'))
-        photo3_layout.addWidget(military_no_headgear_btn)
-        
-        military_no_headgear_export_btn = QPushButton("Выгрузить фото")
-        military_no_headgear_export_btn.setMinimumWidth(150)
-        military_no_headgear_export_btn.clicked.connect(lambda: self.export_photo('military_no_headgear'))
-        photo3_layout.addWidget(military_no_headgear_export_btn)
-        
-        photos_grid.addLayout(photo3_layout, 0, 2)
-        
-        # === ФОТО 4: Отличительные приметы ===
-        photo4_layout = QVBoxLayout()
-        photo4_layout.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        photo4_label = QLabel("Фото отличительных примет:\n(татуировки, шрамы,\nотсутствие зубов, пальцев и т.д.)")
-        photo4_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        photo4_layout.addWidget(photo4_label)
-        
-        # === ВАЖНО: Создаём label ===
-        self.photo_distinctive_marks_label = QLabel("Нет фото")
-        self.photo_distinctive_marks_label.setFixedSize(180, 240)
-        self.photo_distinctive_marks_label.setStyleSheet("""
-            QLabel {
-                border: 2px dashed #999;
-                background-color: #f8f9fa;
-                color: #6c757d;
-                font-size: 12px;
-            }
-        """)
-        self.photo_distinctive_marks_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        photo4_layout.addWidget(self.photo_distinctive_marks_label)
-        
-        distinctive_marks_btn = QPushButton("Загрузить фото")
-        distinctive_marks_btn.setMinimumWidth(150)
-        distinctive_marks_btn.clicked.connect(lambda: self.load_photo('distinctive_marks'))
-        photo4_layout.addWidget(distinctive_marks_btn)
-        
-        distinctive_marks_export_btn = QPushButton("Выгрузить фото")
-        distinctive_marks_export_btn.setMinimumWidth(150)
-        distinctive_marks_export_btn.clicked.connect(lambda: self.export_photo('distinctive_marks'))
-        photo4_layout.addWidget(distinctive_marks_export_btn)
-        
-        photos_grid.addLayout(photo4_layout, 0, 3)
-        
-        group7_layout.addLayout(photos_grid)
-        group7.setLayout(group7_layout)
-        layout.addWidget(group7)
-        
-        layout.addStretch()
-        
-        scroll.setWidget(container)
-        
-        main_layout = QVBoxLayout(self)
-        main_layout.addWidget(scroll)
-    
+        g7 = QVBoxLayout(); g7.setSpacing(10)
+        tg = QGridLayout(); tg.setSpacing(8)
+        tg.addWidget(QLabel("Особенности внешности:"), 0, 0); self.appearance_features_input = QTextEdit(); self.appearance_features_input.setMaximumHeight(60); tg.addWidget(self.appearance_features_input, 0, 1, 1, 3)
+        tg.addWidget(QLabel("Личные приметы:"), 1, 0); self.personal_marks_input = QTextEdit(); self.personal_marks_input.setMaximumHeight(60); tg.addWidget(self.personal_marks_input, 1, 1, 1, 3)
+        tg.addWidget(QLabel("Сведения о федеральном розыске:"), 2, 0); self.federal_search_info_input = QTextEdit(); self.federal_search_info_input.setMaximumHeight(60); tg.addWidget(self.federal_search_info_input, 2, 1, 1, 3)
+        tg.addWidget(QLabel("Контакты военнослужащего:"), 3, 0); self.military_contacts_input = QLineEdit(); tg.addWidget(self.military_contacts_input, 3, 1, 1, 3)
+        tg.addWidget(QLabel("Сведения о близких родственниках:"), 4, 0); self.relatives_info_input = QTextEdit(); self.relatives_info_input.setMaximumHeight(60); tg.addWidget(self.relatives_info_input, 4, 1, 1, 3)
+        g7.addLayout(tg)
+        sep = QFrame(); sep.setFrameShape(QFrame.Shape.HLine); sep.setFrameShadow(QFrame.Shadow.Sunken); g7.addWidget(sep)
+        pt = QLabel("Фотографии военнослужащего"); pt.setFont(QFont("Arial", 10, QFont.Weight.Bold)); pt.setAlignment(Qt.AlignmentFlag.AlignCenter); g7.addWidget(pt)
+        pg = QGridLayout(); pg.setSpacing(15)
+        for i, (key, label) in enumerate([('civilian','Гражданская одежда'), ('military_headgear','Форма с головным убором'), ('military_no_headgear','Форма без головного убора'), ('distinctive_marks','Отличительные приметы')]):
+            v = QVBoxLayout(); v.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            v.addWidget(QLabel(label, alignment=Qt.AlignmentFlag.AlignCenter))
+            lbl = QLabel("Нет фото"); lbl.setFixedSize(180, 240); lbl.setStyleSheet("QLabel { border: 2px dashed #999; background-color: #f8f9fa; color: #6c757d; font-size: 12px; }"); lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
+            setattr(self, f'photo_{key}_label', lbl); v.addWidget(lbl)
+            b1 = QPushButton("Загрузить фото"); b1.setMinimumWidth(150); b1.clicked.connect(lambda c, k=key: self.load_photo(k)); v.addWidget(b1)
+            b2 = QPushButton("Выгрузить фото"); b2.setMinimumWidth(150); b2.clicked.connect(lambda c, k=key: self.export_photo(k)); v.addWidget(b2)
+            pg.addLayout(v, 0, i)
+        g7.addLayout(pg); group7.setLayout(g7); layout.addWidget(group7)
+        layout.addStretch(); scroll.setWidget(container); main = QVBoxLayout(self); main.addWidget(scroll)
+
     def setup_autocomplete_fields(self):
-        """Настройка автодополнения для текстовых полей"""
-        
-        fields_config = [
-            (self.surname_input, 'surname', 50),
-            (self.name_input, 'name', 50),
-            (self.patronymic_input, 'patronymic', 50),
-            (self.tab_number_input, 'tab_number', 30),
-            (self.personal_number_input, 'personal_number', 30),
-            (self.birth_place_town_input, 'birth_place_town', 20),
-            (self.birth_place_district_input, 'birth_place_district', 20),
-            (self.birth_place_region_input, 'birth_place_region', 20),
-            (self.birth_place_country_input, 'birth_place_country', 20),
-            (self.drafted_by_commissariat_input, 'drafted_by_commissariat', 20),
-            (self.povsk_input, 'povsk', 20),
-            (self.education_input, 'education', 15),
-            (self.social_media_account_input, 'social_media_account', 20),
-            (self.bank_card_number_input, 'bank_card_number', 20),
-            (self.passport_series_input, 'passport_series', 20),
-            (self.passport_number_input, 'passport_number', 20),
-            (self.passport_issued_by_input, 'passport_issued_by', 20),
-            (self.military_id_series_input, 'military_id_series', 20),
-            (self.military_id_number_input, 'military_id_number', 20),
-            (self.military_id_issued_by_input, 'military_id_issued_by', 20),
-            (self.military_contacts_input, 'military_contacts', 20),
-        ]
-        
-        for field_widget, column_name, max_items in fields_config:
-            self.autocomplete_helper.setup_autocomplete(
-                field_widget, 
-                'social_data',
-                column_name,
-                max_items=max_items,
-                show_on_focus=True
-            )
-        
-        print(f"✅ Автодополнение настроено для {len(fields_config)} полей")
-    
+        fields = [(self.surname_input, 'surname', 50), (self.name_input, 'name', 50), (self.patronymic_input, 'patronymic', 50), (self.tab_number_input, 'tab_number', 30), (self.personal_number_input, 'personal_number', 30), (self.birth_place_town_input, 'birth_place_town', 20), (self.birth_place_district_input, 'birth_place_district', 20), (self.birth_place_region_input, 'birth_place_region', 20), (self.birth_place_country_input, 'birth_place_country', 20), (self.drafted_by_commissariat_input, 'drafted_by_commissariat', 20), (self.povsk_input, 'povsk', 20), (self.education_input, 'education', 15), (self.social_media_account_input, 'social_media_account', 20), (self.bank_card_number_input, 'bank_card_number', 20), (self.passport_series_input, 'passport_series', 20), (self.passport_number_input, 'passport_number', 20), (self.passport_issued_by_input, 'passport_issued_by', 20), (self.military_id_series_input, 'military_id_series', 20), (self.military_id_number_input, 'military_id_number', 20), (self.military_id_issued_by_input, 'military_id_issued_by', 20), (self.military_contacts_input, 'military_contacts', 20)]
+        for w, c, m in fields: self.autocomplete_helper.setup_autocomplete(w, 'social_data', c, max_items=m, show_on_focus=True)
+
     def load_categories(self):
-        """Загрузка категорий из базы данных"""
-        self.category_combo.clear()
-        self.category_combo.addItem("", None)
-        query = QSqlQuery(self.db)
-        query.exec("SELECT id, name FROM krd.categories ORDER BY name")
-        while query.next():
-            category_id = query.value(0)
-            category_name = query.value(1)
-            self.category_combo.addItem(category_name, category_id)
-    
+        self.category_combo.clear(); self.category_combo.addItem("", None)
+        q = QSqlQuery(self.db); q.exec("SELECT id, name FROM krd.categories ORDER BY name")
+        while q.next(): self.category_combo.addItem(q.value(1), q.value(0))
+
     def load_ranks(self):
-        """Загрузка воинских званий из базы данных"""
-        self.rank_combo.clear()
-        self.rank_combo.addItem("", None)
-        query = QSqlQuery(self.db)
-        query.exec("SELECT id, name FROM krd.ranks ORDER BY name")
-        while query.next():
-            rank_id = query.value(0)
-            rank_name = query.value(1)
-            self.rank_combo.addItem(rank_name, rank_id)
-    
+        self.rank_combo.clear(); self.rank_combo.addItem("", None)
+        q = QSqlQuery(self.db); q.exec("SELECT id, name FROM krd.ranks ORDER BY name")
+        while q.next(): self.rank_combo.addItem(q.value(1), q.value(0))
+
     def load_data(self):
-        """Загрузка данных из базы"""
-        query = QSqlQuery(self.db)
-        query.prepare("""
-            SELECT * FROM krd.social_data 
-            WHERE krd_id = ?
-            ORDER BY id DESC 
-            LIMIT 1
-        """)
-        query.addBindValue(self.krd_id)
-        query.exec()
-        
-        if query.next():
-            self.record = query.record()
-            
-            self.surname_input.setText(query.value("surname") or "")
-            self.name_input.setText(query.value("name") or "")
-            self.patronymic_input.setText(query.value("patronymic") or "")
-            self.tab_number_input.setText(query.value("tab_number") or "")
-            self.personal_number_input.setText(query.value("personal_number") or "")
-            
-            category_id = query.value("category_id")
-            if category_id:
-                index = self.category_combo.findData(category_id)
-                if index >= 0:
-                    self.category_combo.setCurrentIndex(index)
-            
-            rank_id = query.value("rank_id")
-            if rank_id:
-                index = self.rank_combo.findData(rank_id)
-                if index >= 0:
-                    self.rank_combo.setCurrentIndex(index)
-            
-            self.birth_place_town_input.setText(query.value("birth_place_town") or "")
-            self.birth_place_district_input.setText(query.value("birth_place_district") or "")
-            self.birth_place_region_input.setText(query.value("birth_place_region") or "")
-            self.birth_place_country_input.setText(query.value("birth_place_country") or "")
-            
-            birth_date = query.value("birth_date")
-            if birth_date:
-                self.birth_date_input.setDate(birth_date)
-            
-            self.drafted_by_commissariat_input.setText(query.value("drafted_by_commissariat") or "")
-            
-            draft_date = query.value("draft_date")
-            if draft_date:
-                self.draft_date_input.setDate(draft_date)
-            
-            self.povsk_input.setText(query.value("povsk") or "")
-            
-            selection_date = query.value("selection_date")
-            if selection_date:
-                self.selection_date_input.setDate(selection_date)
-            
-            self.education_input.setText(query.value("education") or "")
-            self.criminal_record_input.setPlainText(query.value("criminal_record") or "")
-            self.social_media_account_input.setText(query.value("social_media_account") or "")
-            self.bank_card_number_input.setText(query.value("bank_card_number") or "")
-            
-            self.passport_series_input.setText(query.value("passport_series") or "")
-            self.passport_number_input.setText(query.value("passport_number") or "")
-            
-            passport_issue_date = query.value("passport_issue_date")
-            if passport_issue_date:
-                self.passport_issue_date_input.setDate(passport_issue_date)
-            
-            self.passport_issued_by_input.setText(query.value("passport_issued_by") or "")
-            
-            self.military_id_series_input.setText(query.value("military_id_series") or "")
-            self.military_id_number_input.setText(query.value("military_id_number") or "")
-            
-            military_id_issue_date = query.value("military_id_issue_date")
-            if military_id_issue_date:
-                self.military_id_issue_date_input.setDate(military_id_issue_date)
-            
-            self.military_id_issued_by_input.setText(query.value("military_id_issued_by") or "")
-            
-            self.appearance_features_input.setPlainText(query.value("appearance_features") or "")
-            self.personal_marks_input.setPlainText(query.value("personal_marks") or "")
-            self.federal_search_info_input.setPlainText(query.value("federal_search_info") or "")
-            self.military_contacts_input.setText(query.value("military_contacts") or "")
-            self.relatives_info_input.setPlainText(query.value("relatives_info") or "")
-            
-            # === Загрузка фотографий ===
-            self.load_photo_from_db(query, 'photo_civilian', self.photo_civilian_label, 'civilian')
-            self.load_photo_from_db(query, 'photo_military_headgear', self.photo_military_headgear_label, 'military_headgear')
-            self.load_photo_from_db(query, 'photo_military_no_headgear', self.photo_military_no_headgear_label, 'military_no_headgear')
-            self.load_photo_from_db(query, 'photo_distinctive_marks', self.photo_distinctive_marks_label, 'distinctive_marks')
-    
+        q = QSqlQuery(self.db); q.prepare("SELECT * FROM krd.social_data WHERE krd_id = ? ORDER BY id DESC LIMIT 1"); q.addBindValue(self.krd_id); q.exec()
+        if q.next():
+            self.record = q.record()
+            self.surname_input.setText(q.value("surname") or ""); self.name_input.setText(q.value("name") or ""); self.patronymic_input.setText(q.value("patronymic") or ""); self.tab_number_input.setText(q.value("tab_number") or ""); self.personal_number_input.setText(q.value("personal_number") or "")
+            c = q.value("category_id"); i = self.category_combo.findData(c) if c else -1; self.category_combo.setCurrentIndex(i) if i >= 0 else None
+            r = q.value("rank_id"); i = self.rank_combo.findData(r) if r else -1; self.rank_combo.setCurrentIndex(i) if i >= 0 else None
+            self.birth_place_town_input.setText(q.value("birth_place_town") or ""); self.birth_place_district_input.setText(q.value("birth_place_district") or ""); self.birth_place_region_input.setText(q.value("birth_place_region") or ""); self.birth_place_country_input.setText(q.value("birth_place_country") or "")
+            bd = q.value("birth_date"); self.birth_date_input.setDate(bd) if bd else None
+            self.drafted_by_commissariat_input.setText(q.value("drafted_by_commissariat") or ""); dd = q.value("draft_date"); self.draft_date_input.setDate(dd) if dd else None
+            self.povsk_input.setText(q.value("povsk") or ""); sd = q.value("selection_date"); self.selection_date_input.setDate(sd) if sd else None
+            self.education_input.setText(q.value("education") or ""); self.criminal_record_input.setPlainText(q.value("criminal_record") or ""); self.social_media_account_input.setText(q.value("social_media_account") or ""); self.bank_card_number_input.setText(q.value("bank_card_number") or "")
+            self.passport_series_input.setText(q.value("passport_series") or ""); self.passport_number_input.setText(q.value("passport_number") or ""); pid = q.value("passport_issue_date"); self.passport_issue_date_input.setDate(pid) if pid else None; self.passport_issued_by_input.setText(q.value("passport_issued_by") or "")
+            self.military_id_series_input.setText(q.value("military_id_series") or ""); self.military_id_number_input.setText(q.value("military_id_number") or ""); mid = q.value("military_id_issue_date"); self.military_id_issue_date_input.setDate(mid) if mid else None; self.military_id_issued_by_input.setText(q.value("military_id_issued_by") or "")
+            self.appearance_features_input.setPlainText(q.value("appearance_features") or ""); self.personal_marks_input.setPlainText(q.value("personal_marks") or ""); self.federal_search_info_input.setPlainText(q.value("federal_search_info") or ""); self.military_contacts_input.setText(q.value("military_contacts") or ""); self.relatives_info_input.setPlainText(q.value("relatives_info") or "")
+            self.load_photo_from_db(q, 'photo_civilian', self.photo_civilian_label, 'civilian')
+            self.load_photo_from_db(q, 'photo_military_headgear', self.photo_military_headgear_label, 'military_headgear')
+            self.load_photo_from_db(q, 'photo_military_no_headgear', self.photo_military_no_headgear_label, 'military_no_headgear')
+            self.load_photo_from_db(q, 'photo_distinctive_marks', self.photo_distinctive_marks_label, 'distinctive_marks')
+
     def load_photo_from_db(self, query, field_name, label_widget, photo_type):
-        """Загрузка фотографии из базы данных"""
-        photo_data = query.value(field_name)
-        self.original_photos[photo_type] = None
-        
-        if photo_data and (isinstance(photo_data, bytes) or hasattr(photo_data, 'data')):
+        pd = query.value(field_name); self.original_photos[photo_type] = None
+        if pd and (isinstance(pd, bytes) or hasattr(pd, 'data')):
             try:
-                if hasattr(photo_data, 'data'):
-                    photo_bytes = bytes(photo_data.data())
-                else:
-                    photo_bytes = bytes(photo_data)
-                
-                self.original_photos[photo_type] = photo_bytes
-                
-                pixmap = QPixmap()
-                pixmap.loadFromData(photo_bytes)
-                
-                if not pixmap.isNull():
-                    scaled_pixmap = pixmap.scaled(
-                        180, 240, 
-                        Qt.AspectRatioMode.KeepAspectRatio, 
-                        Qt.TransformationMode.SmoothTransformation
-                    )
-                    label_widget.setPixmap(scaled_pixmap)
-                    label_widget.setAlignment(Qt.AlignmentFlag.AlignCenter)
-                    label_widget.setStyleSheet("QLabel { border: 2px solid #4CAF50; background-color: white; }")
-                else:
-                    label_widget.setText("Ошибка загрузки")
-            
-            except Exception as e:
-                traceback.print_exc()
-                label_widget.setText("Ошибка")
-        else:
-            label_widget.setText("Нет фото")
-            label_widget.setStyleSheet("QLabel { border: 2px dashed #999; background-color: #f8f9fa; color: #6c757d; font-size: 12px; }")
-    
+                b = bytes(pd.data()) if hasattr(pd, 'data') else bytes(pd)
+                self.original_photos[photo_type] = b
+                p = QPixmap(); p.loadFromData(b)
+                if not p.isNull(): label_widget.setPixmap(p.scaled(180, 240, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)); label_widget.setStyleSheet("QLabel { border: 2px solid #4CAF50; background-color: white; }")
+                else: label_widget.setText("Ошибка загрузки")
+            except: label_widget.setText("Ошибка")
+        else: label_widget.setText("Нет фото"); label_widget.setStyleSheet("QLabel { border: 2px dashed #999; background-color: #f8f9fa; color: #6c757d; font-size: 12px; }")
+
     def load_photo(self, photo_type):
-        """Загрузка фотографии из файла"""
-        file_path, _ = QFileDialog.getOpenFileName(
-            self,
-            f"Выберите фотографию ({photo_type})",
-            "",
-            "Изображения (*.png *.jpg *.jpeg *.bmp);;Все файлы (*)"
-        )
-        if file_path:
+        path, _ = QFileDialog.getOpenFileName(self, f"Выберите фотографию ({photo_type})", "", "Изображения (*.png *.jpg *.jpeg *.bmp);;Все файлы (*)")
+        if path:
             try:
-                file_size = os.path.getsize(file_path)
-                if file_size > 5 * 1024 * 1024:
-                    QMessageBox.warning(self, "Ошибка", "Размер файла не должен превышать 5 МБ")
-                    return
-                
-                pixmap = QPixmap(file_path)
-                if pixmap.isNull():
-                    QMessageBox.warning(self, "Ошибка", "Невозможно загрузить изображение.")
-                    return
-                
-                scaled_pixmap = pixmap.scaled(
-                    180, 240, 
-                    Qt.AspectRatioMode.KeepAspectRatio, 
-                    Qt.TransformationMode.SmoothTransformation
-                )
-                
-                label_map = {
-                    'civilian': self.photo_civilian_label,
-                    'military_headgear': self.photo_military_headgear_label,
-                    'military_no_headgear': self.photo_military_no_headgear_label,
-                    'distinctive_marks': self.photo_distinctive_marks_label
-                }
-                label_map[photo_type].setPixmap(scaled_pixmap)
-                label_map[photo_type].setAlignment(Qt.AlignmentFlag.AlignCenter)
-                label_map[photo_type].setStyleSheet("""
-                    QLabel {
-                        border: 2px solid #2196F3;
-                        background-color: white;
-                    }
-                """)
-                
-                self.photo_paths[photo_type] = file_path
-                print(f"✅ Фото '{photo_type}' загружено: {file_path}")
-            
-            except Exception as e:
-                traceback.print_exc()
-                QMessageBox.critical(self, "Ошибка", f"Ошибка загрузки изображения:\n{str(e)}")
-    
-    def save_data(self):
-        """Сохранение данных в базу"""
-        validation_error = self.validate_required_fields()
-        if validation_error:
-            raise ValueError(validation_error)
-        
-        data = {
-            "krd_id": self.krd_id,
-            "surname": self.surname_input.text().strip(),
-            "name": self.name_input.text().strip(),
-            "patronymic": self.patronymic_input.text().strip(),
-            "birth_date": self.birth_date_input.date(),
-            "birth_place_town": self.birth_place_town_input.text().strip(),
-            "birth_place_district": self.birth_place_district_input.text().strip(),
-            "birth_place_region": self.birth_place_region_input.text().strip(),
-            "birth_place_country": self.birth_place_country_input.text().strip(),
-            "tab_number": self.tab_number_input.text().strip(),
-            "personal_number": self.personal_number_input.text().strip(),
-            "category_id": self.category_combo.currentData(),
-            "rank_id": self.rank_combo.currentData(),
-            "drafted_by_commissariat": self.drafted_by_commissariat_input.text().strip(),
-            "draft_date": self.draft_date_input.date(),
-            "povsk": self.povsk_input.text().strip(),
-            "selection_date": self.selection_date_input.date(),
-            "education": self.education_input.text().strip(),
-            "criminal_record": self.criminal_record_input.toPlainText(),
-            "social_media_account": self.social_media_account_input.text().strip(),
-            "bank_card_number": self.bank_card_number_input.text().strip(),
-            "passport_series": self.passport_series_input.text().strip(),
-            "passport_number": self.passport_number_input.text().strip(),
-            "passport_issue_date": self.passport_issue_date_input.date(),
-            "passport_issued_by": self.passport_issued_by_input.text().strip(),
-            "military_id_series": self.military_id_series_input.text().strip(),
-            "military_id_number": self.military_id_number_input.text().strip(),
-            "military_id_issue_date": self.military_id_issue_date_input.date(),
-            "military_id_issued_by": self.military_id_issued_by_input.text().strip(),
-            "appearance_features": self.appearance_features_input.toPlainText(),
-            "personal_marks": self.personal_marks_input.toPlainText(),
-            "federal_search_info": self.federal_search_info_input.toPlainText(),
-            "military_contacts": self.military_contacts_input.text().strip(),
-            "relatives_info": self.relatives_info_input.toPlainText()
-        }
-        
-        photo_types = ['civilian', 'military_headgear', 'military_no_headgear', 'distinctive_marks']
-        for photo_type in photo_types:
-            field_name = f"photo_{photo_type}"
-            final_photo_bytes = None
-            
-            new_path = self.photo_paths.get(photo_type)
-            if new_path and os.path.exists(new_path):
-                try:
-                    with open(new_path, 'rb') as f:
-                        final_photo_bytes = f.read()
-                    if len(final_photo_bytes) > 5 * 1024 * 1024:
-                        raise ValueError(f"Фото '{photo_type}' превышает 5 МБ")
-                except Exception as e:
-                    raise Exception(f"Ошибка обработки фото '{photo_type}': {str(e)}")
-            elif self.original_photos.get(photo_type):
-                final_photo_bytes = self.original_photos[photo_type]
-            
-            if final_photo_bytes:
-                data[field_name] = QByteArray(final_photo_bytes)
-            else:
-                data[field_name] = QByteArray()
-        
-        query = QSqlQuery(self.db)
-        
-        if self.record:
-            query.prepare("""
-                UPDATE krd.social_data SET
-                    surname = :surname, name = :name, patronymic = :patronymic,
-                    birth_date = :birth_date, birth_place_town = :birth_place_town,
-                    birth_place_district = :birth_place_district, birth_place_region = :birth_place_region,
-                    birth_place_country = :birth_place_country, tab_number = :tab_number,
-                    personal_number = :personal_number, category_id = :category_id,
-                    rank_id = :rank_id, drafted_by_commissariat = :drafted_by_commissariat,
-                    draft_date = :draft_date, povsk = :povsk, selection_date = :selection_date,
-                    education = :education, criminal_record = :criminal_record,
-                    social_media_account = :social_media_account, bank_card_number = :bank_card_number,
-                    passport_series = :passport_series, passport_number = :passport_number,
-                    passport_issue_date = :passport_issue_date, passport_issued_by = :passport_issued_by,
-                    military_id_series = :military_id_series, military_id_number = :military_id_number,
-                    military_id_issue_date = :military_id_issue_date, military_id_issued_by = :military_id_issued_by,
-                    appearance_features = :appearance_features, personal_marks = :personal_marks,
-                    federal_search_info = :federal_search_info, military_contacts = :military_contacts,
-                    relatives_info = :relatives_info,
-                    photo_civilian = :photo_civilian,
-                    photo_military_headgear = :photo_military_headgear,
-                    photo_military_no_headgear = :photo_military_no_headgear,
-                    photo_distinctive_marks = :photo_distinctive_marks
-                WHERE id = :id
-            """)
-            query.bindValue(":id", self.record.value("id"))
-        else:
-            query.prepare("""
-                INSERT INTO krd.social_data (
-                    krd_id, surname, name, patronymic, birth_date, birth_place_town,
-                    birth_place_district, birth_place_region, birth_place_country, tab_number,
-                    personal_number, category_id, rank_id, drafted_by_commissariat, draft_date,
-                    povsk, selection_date, education, criminal_record, social_media_account,
-                    bank_card_number, passport_series, passport_number, passport_issue_date,
-                    passport_issued_by, military_id_series, military_id_number, military_id_issue_date,
-                    military_id_issued_by, appearance_features, personal_marks, federal_search_info,
-                    military_contacts, relatives_info,
-                    photo_civilian, photo_military_headgear, 
-                    photo_military_no_headgear, photo_distinctive_marks
-                ) VALUES (
-                    :krd_id, :surname, :name, :patronymic, :birth_date, :birth_place_town,
-                    :birth_place_district, :birth_place_region, :birth_place_country, :tab_number,
-                    :personal_number, :category_id, :rank_id, :drafted_by_commissariat, :draft_date,
-                    :povsk, :selection_date, :education, :criminal_record, :social_media_account,
-                    :bank_card_number, :passport_series, :passport_number, :passport_issue_date,
-                    :passport_issued_by, :military_id_series, :military_id_number, :military_id_issue_date,
-                    :military_id_issued_by, :appearance_features, :personal_marks, :federal_search_info,
-                    :military_contacts, :relatives_info,
-                    :photo_civilian, :photo_military_headgear,
-                    :photo_military_no_headgear, :photo_distinctive_marks
-                )
-            """)
-        
-        for key, value in data.items():
-            query.bindValue(f":{key}", value)
-        
-        if not query.exec():
-            raise Exception(f"Ошибка сохранения данных: {query.lastError().text()}")
-        
-        # === ОБНОВЛЕНИЕ АВТОДОПОЛНЕНИЯ ===
-        self.autocomplete_helper.refresh_all_fields()
-        
-        print(f"✅ Данные успешно сохранены для КРД-{self.krd_id}")
-    
-    def validate_required_fields(self):
-        """Валидация обязательных полей"""
-        if not self.surname_input.text().strip():
-            return "Поле 'Фамилия' обязательно для заполнения"
-        if not self.name_input.text().strip():
-            return "Поле 'Имя' обязательно для заполнения"
-        if not self.patronymic_input.text().strip():
-            return "Поле 'Отчество' обязательно для заполнения"
-        return None
-    
+                if os.path.getsize(path) > 5 * 1024 * 1024: return QMessageBox.warning(self, "Ошибка", "Размер файла не должен превышать 5 МБ")
+                p = QPixmap(path); p = p.scaled(180, 240, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
+                getattr(self, f'photo_{photo_type}_label').setPixmap(p); getattr(self, f'photo_{photo_type}_label').setStyleSheet("QLabel { border: 2px solid #2196F3; background-color: white; }")
+                self.photo_paths[photo_type] = path
+            except Exception as e: QMessageBox.critical(self, "Ошибка", f"Ошибка загрузки: {e}")
+
     def export_photo(self, photo_type):
-        """Выгрузка фотографии в файл"""
-        photo_bytes = None
-        
-        new_path = self.photo_paths.get(photo_type)
-        if new_path and os.path.exists(new_path):
+        b = None
+        if self.photo_paths.get(photo_type) and os.path.exists(self.photo_paths[photo_type]):
+            with open(self.photo_paths[photo_type], 'rb') as f: b = f.read()
+        elif self.original_photos.get(photo_type): b = self.original_photos[photo_type]
+        if not b: return QMessageBox.information(self, "Информация", f"Фото '{photo_type}' отсутствует.")
+        path, _ = QFileDialog.getSaveFileName(self, f"Сохранить фото ({photo_type})", f"КРД-{self.krd_id}_{photo_type}.jpg", "Изображения (*.jpg *.png *.bmp);;Все файлы (*)")
+        if path:
             try:
-                with open(new_path, 'rb') as f:
-                    photo_bytes = f.read()
-            except Exception as e:
-                QMessageBox.critical(self, "Ошибка", f"Невозможно прочитать файл:\n{str(e)}")
-                return
-        elif self.original_photos.get(photo_type):
-            photo_bytes = self.original_photos[photo_type]
-        
-        if not photo_bytes:
-            QMessageBox.information(self, "Информация", f"Фото '{photo_type}' отсутствует.")
-            return
-        
-        default_name = f"КРД-{self.krd_id}_{photo_type}.jpg"
-        file_path, _ = QFileDialog.getSaveFileName(
-            self,
-            f"Сохранить фото ({photo_type})",
-            default_name,
-            "Изображения (*.jpg *.png *.bmp);;Все файлы (*)"
-        )
-        
-        if file_path:
-            try:
-                with open(file_path, 'wb') as f:
-                    f.write(photo_bytes)
-                
-                if self.audit_logger:
-                    self.audit_logger.log_action(
-                        action_type='PHOTO_EXPORT',
-                        table_name='social_data',
-                        record_id=self.krd_id,
-                        krd_id=self.krd_id,
-                        description=f'Выгружено фото "{photo_type}" для КРД-{self.krd_id}'
-                    )
-                
-                QMessageBox.information(self, "Успешно", f"Фото сохранено:\n{file_path}")
-                print(f"✅ Фото '{photo_type}' выгружено: {file_path}")
-            
-            except Exception as e:
-                traceback.print_exc()
-                QMessageBox.critical(self, "Ошибка", f"Ошибка сохранения:\n{str(e)}")
+                with open(path, 'wb') as f: f.write(b)
+                QMessageBox.information(self, "Успешно", f"Фото сохранено: {path}")
+                if self.audit_logger: self.audit_logger.log_action('PHOTO_EXPORT', 'social_data', self.krd_id, self.krd_id, f'Выгружено фото "{photo_type}"')
+            except Exception as e: QMessageBox.critical(self, "Ошибка", str(e))
+
+    def save_data(self):
+        err = self.validate_required_fields()
+        if err: raise ValueError(err)
+        data = {"krd_id": self.krd_id, "surname": self.surname_input.text().strip(), "name": self.name_input.text().strip(), "patronymic": self.patronymic_input.text().strip(), "birth_date": self.birth_date_input.date(), "birth_place_town": self.birth_place_town_input.text().strip(), "birth_place_district": self.birth_place_district_input.text().strip(), "birth_place_region": self.birth_place_region_input.text().strip(), "birth_place_country": self.birth_place_country_input.text().strip(), "tab_number": self.tab_number_input.text().strip(), "personal_number": self.personal_number_input.text().strip(), "category_id": self.category_combo.currentData(), "rank_id": self.rank_combo.currentData(), "drafted_by_commissariat": self.drafted_by_commissariat_input.text().strip(), "draft_date": self.draft_date_input.date(), "povsk": self.povsk_input.text().strip(), "selection_date": self.selection_date_input.date(), "education": self.education_input.text().strip(), "criminal_record": self.criminal_record_input.toPlainText(), "social_media_account": self.social_media_account_input.text().strip(), "bank_card_number": self.bank_card_number_input.text().strip(), "passport_series": self.passport_series_input.text().strip(), "passport_number": self.passport_number_input.text().strip(), "passport_issue_date": self.passport_issue_date_input.date(), "passport_issued_by": self.passport_issued_by_input.text().strip(), "military_id_series": self.military_id_series_input.text().strip(), "military_id_number": self.military_id_number_input.text().strip(), "military_id_issue_date": self.military_id_issue_date_input.date(), "military_id_issued_by": self.military_id_issued_by_input.text().strip(), "appearance_features": self.appearance_features_input.toPlainText(), "personal_marks": self.personal_marks_input.toPlainText(), "federal_search_info": self.federal_search_info_input.toPlainText(), "military_contacts": self.military_contacts_input.text().strip(), "relatives_info": self.relatives_info_input.toPlainText()}
+        for pt in ['civilian', 'military_headgear', 'military_no_headgear', 'distinctive_marks']:
+            p = self.photo_paths.get(pt); fb = None
+            if p and os.path.exists(p):
+                with open(p, 'rb') as f: fb = f.read()
+            elif self.original_photos.get(pt): fb = self.original_photos[pt]
+            data[f"photo_{pt}"] = QByteArray(fb) if fb else QByteArray()
+        q = QSqlQuery(self.db)
+        if self.record:
+            q.prepare("""UPDATE krd.social_data SET surname=:surname, name=:name, patronymic=:patronymic, birth_date=:birth_date, birth_place_town=:birth_place_town, birth_place_district=:birth_place_district, birth_place_region=:birth_place_region, birth_place_country=:birth_place_country, tab_number=:tab_number, personal_number=:personal_number, category_id=:category_id, rank_id=:rank_id, drafted_by_commissariat=:drafted_by_commissariat, draft_date=:draft_date, povsk=:povsk, selection_date=:selection_date, education=:education, criminal_record=:criminal_record, social_media_account=:social_media_account, bank_card_number=:bank_card_number, passport_series=:passport_series, passport_number=:passport_number, passport_issue_date=:passport_issue_date, passport_issued_by=:passport_issued_by, military_id_series=:military_id_series, military_id_number=:military_id_number, military_id_issue_date=:military_id_issue_date, military_id_issued_by=:military_id_issued_by, appearance_features=:appearance_features, personal_marks=:personal_marks, federal_search_info=:federal_search_info, military_contacts=:military_contacts, relatives_info=:relatives_info, photo_civilian=:photo_civilian, photo_military_headgear=:photo_military_headgear, photo_military_no_headgear=:photo_military_no_headgear, photo_distinctive_marks=:photo_distinctive_marks WHERE id=:id""")
+            q.bindValue(":id", self.record.value("id"))
+        else:
+            q.prepare("""INSERT INTO krd.social_data (krd_id, surname, name, patronymic, birth_date, birth_place_town, birth_place_district, birth_place_region, birth_place_country, tab_number, personal_number, category_id, rank_id, drafted_by_commissariat, draft_date, povsk, selection_date, education, criminal_record, social_media_account, bank_card_number, passport_series, passport_number, passport_issue_date, passport_issued_by, military_id_series, military_id_number, military_id_issue_date, military_id_issued_by, appearance_features, personal_marks, federal_search_info, military_contacts, relatives_info, photo_civilian, photo_military_headgear, photo_military_no_headgear, photo_distinctive_marks) VALUES (:krd_id, :surname, :name, :patronymic, :birth_date, :birth_place_town, :birth_place_district, :birth_place_region, :birth_place_country, :tab_number, :personal_number, :category_id, :rank_id, :drafted_by_commissariat, :draft_date, :povsk, :selection_date, :education, :criminal_record, :social_media_account, :bank_card_number, :passport_series, :passport_number, :passport_issue_date, :passport_issued_by, :military_id_series, :military_id_number, :military_id_issue_date, :military_id_issued_by, :appearance_features, :personal_marks, :federal_search_info, :military_contacts, :relatives_info, :photo_civilian, :photo_military_headgear, :photo_military_no_headgear, :photo_distinctive_marks)""")
+        for k, v in data.items(): q.bindValue(f":{k}", v)
+        if not q.exec(): raise Exception(f"Ошибка сохранения: {q.lastError().text()}")
+        self.autocomplete_helper.refresh_all_fields()
+
+    def validate_required_fields(self):
+        if not self.surname_input.text().strip(): return "Поле 'Фамилия' обязательно"
+        if not self.name_input.text().strip(): return "Поле 'Имя' обязательно"
+        if not self.patronymic_input.text().strip(): return "Поле 'Отчество' обязательно"
+        return None
+
     def setup_auto_save(self):
-        """Настройка мгновенного автосохранения при изменении полей"""
-        self._auto_save_timer = QTimer(self)
-        self._auto_save_timer.setSingleShot(True)
-        self._auto_save_timer.timeout.connect(self._perform_auto_save)
-
-        # Группируем все поля ввода
-        line_edits = [
-            self.surname_input, self.name_input, self.patronymic_input,
-            self.tab_number_input, self.personal_number_input,
-            self.birth_place_town_input, self.birth_place_district_input,
-            self.birth_place_region_input, self.birth_place_country_input,
-            self.drafted_by_commissariat_input, self.povsk_input,
-            self.education_input, self.social_media_account_input,
-            self.bank_card_number_input, self.passport_series_input,
-            self.passport_number_input, self.passport_issued_by_input,
-            self.military_id_series_input, self.military_id_number_input,
-            self.military_id_issued_by_input, self.military_contacts_input
-        ]
-        date_edits = [
-            self.birth_date_input, self.draft_date_input, self.selection_date_input,
-            self.passport_issue_date_input, self.military_id_issue_date_input
-        ]
-        combos = [self.category_combo, self.rank_combo]
-        text_edits = [
-            self.criminal_record_input, self.appearance_features_input,
-            self.personal_marks_input, self.federal_search_info_input,
-            self.relatives_info_input
-        ]
-
-        # Подключаем сигналы изменения
-        for w in line_edits + text_edits:
-            w.textChanged.connect(self._on_field_changed)
-        for w in date_edits:
-            w.dateChanged.connect(self._on_field_changed)
-        for w in combos:
-            w.currentIndexChanged.connect(self._on_field_changed)
-
-    def _on_field_changed(self):
-        """Запуск таймера при изменении любого поля"""
-        self._auto_save_timer.start(400)  # 400мс задержка (защита от спама в БД)
-
+        self._auto_save_timer = QTimer(self); self._auto_save_timer.setSingleShot(True); self._auto_save_timer.timeout.connect(self._perform_auto_save)
+        for w in [self.surname_input, self.name_input, self.patronymic_input, self.tab_number_input, self.personal_number_input, self.birth_place_town_input, self.birth_place_district_input, self.birth_place_region_input, self.birth_place_country_input, self.drafted_by_commissariat_input, self.povsk_input, self.education_input, self.social_media_account_input, self.bank_card_number_input, self.passport_series_input, self.passport_number_input, self.passport_issued_by_input, self.military_id_series_input, self.military_id_number_input, self.military_id_issued_by_input, self.military_contacts_input, self.criminal_record_input, self.appearance_features_input, self.personal_marks_input, self.federal_search_info_input, self.relatives_info_input]: w.textChanged.connect(self._on_field_changed)
+        for w in [self.birth_date_input, self.draft_date_input, self.selection_date_input, self.passport_issue_date_input, self.military_id_issue_date_input]: w.dateChanged.connect(self._on_field_changed)
+        for w in [self.category_combo, self.rank_combo]: w.currentIndexChanged.connect(self._on_field_changed)
+    def _on_field_changed(self): self._auto_save_timer.start(400)
     def _perform_auto_save(self):
-        """Непосредственное сохранение"""
-        try:
-            self.save_data()
-        except ValueError:
-            pass  # Игнорируем ошибки валидации при автосохранении (пользователь ещё не дописал)
-        except Exception as e:
-            print(f"⚠️ Ошибка автосохранения соц. данных: {e}")
+        try: self.save_data()
+        except ValueError: pass
+        except Exception as e: print(f"⚠️ Ошибка автосохранения: {e}")

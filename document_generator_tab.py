@@ -1,6 +1,8 @@
 """
 Главная вкладка генерации документов
-Интегрирует шаблоны, адресаты, маппинги и генерацию через DocGenerationEngine
+✅ ОПТИМИЗАЦИЯ: Убран ручной выбор "Типа запроса" для упрощения интерфейса.
+Тип запроса теперь определяется автоматически (берется первый из справочника),
+так как он не влияет на генерацию шаблона, а нужен только для категоризации в БД.
 """
 import os
 import tempfile
@@ -22,7 +24,7 @@ from mapping_editor_dialog import MappingEditorDialog
 from composite_field_widget import CompositeFieldWidget
 from field_mapping_manager import FieldMappingManager
 from database_handler import DatabaseHandler
-from doc_generation_engine import DocGenerationEngine  # ✅ Импорт движка
+from doc_generation_engine import DocGenerationEngine
 
 class DocumentGeneratorTab(QWidget):
     request_saved = pyqtSignal()
@@ -55,8 +57,7 @@ class DocumentGeneratorTab(QWidget):
         
         # ✅ Инициализация движка генерации
         self.engine = DocGenerationEngine(db_connection, krd_id, audit_logger)
-        # ✅ Передаем карту колонок движку (чтобы он знал, где искать поля)
-        # Загружаем колонки перед передачей
+        # ✅ Передаем карту колонок движку
         self.load_db_columns() 
         self.engine.set_columns_map(self.db_columns)
         
@@ -111,14 +112,14 @@ class DocumentGeneratorTab(QWidget):
         template_layout.addWidget(QPushButton("✏️ Сопоставления", clicked=self.open_mapping_editor), 0, 2)
         layout.addWidget(template_group)
 
+        # ✅ ОПТИМИЗИРОВАННАЯ ГРУППА МЕТАДАННЫХ (без выбора Типа запроса)
         metadata_group = QGroupBox("📝 Метаданные запроса")
         metadata_layout = QGridLayout(metadata_group)
-        metadata_layout.addWidget(QLabel("Тип запроса *:"), 0, 0)
-        self.request_type_combo = QComboBox()
-        self.load_request_types()
-        metadata_layout.addWidget(self.request_type_combo, 0, 1)
-        metadata_layout.addWidget(QLabel("Адресат *:"), 0, 2)
-        metadata_layout.addWidget(self.recipient_widget, 0, 3)
+        
+        # Убрано: Тип запроса (теперь выбирается автоматически)
+        metadata_layout.addWidget(QLabel("Адресат *:"), 0, 0)
+        metadata_layout.addWidget(self.recipient_widget, 0, 1)
+        
         layout.addWidget(metadata_group)
 
         btn = QPushButton("📄 Сформировать и сохранить в базу")
@@ -164,13 +165,6 @@ class DocumentGeneratorTab(QWidget):
                 while q.next():
                     combo.addItem(f"{label} {q.value(1)}", q.value(0))
 
-    def load_request_types(self):
-        self.request_type_combo.clear()
-        q = QSqlQuery(self.db)
-        q.exec("SELECT id, name FROM krd.request_types ORDER BY name")
-        while q.next():
-            self.request_type_combo.addItem(q.value(1), q.value(0))
-
     def on_template_changed(self):
         self.current_template_id = self.template_combo.currentData()
         self.used_tables_in_mappings = self.get_used_tables(self.current_template_id) if self.current_template_id else set()
@@ -204,16 +198,27 @@ class DocumentGeneratorTab(QWidget):
     def on_service_place_selected(self, index): self.selected_service_place_id = self.service_place_combo.currentData()
     def on_soch_episode_selected(self, index): self.selected_soch_episode_id = self.soch_episode_combo.currentData()
 
-    # ==========================================
-    # ✅ ОБНОВЛЕННЫЙ МЕТОД ГЕНЕРАЦИИ (Использует Engine)
-    # ==========================================
+    def _get_default_request_type_id(self):
+        """
+        ✅ ОПТИМИЗАЦИЯ: Автоматически получает ID типа запроса.
+        Так как поле в БД NOT NULL, мы берем первый доступный тип из справочника,
+        чтобы пользователю не приходилось выбирать его вручную.
+        """
+        q = QSqlQuery(self.db)
+        q.prepare("SELECT id FROM krd.request_types ORDER BY name LIMIT 1")
+        if q.exec() and q.next():
+            return q.value(0)
+        return None
+
     def generate_and_save_document(self):
         tid = self.current_template_id
-        rt_id = self.request_type_combo.currentData()
         rec_id = self.recipient_widget.current_id()
         
+        # ✅ Получаем тип запроса автоматически
+        rt_id = self._get_default_request_type_id()
+        
         if not tid: return QMessageBox.warning(self, "Ошибка", "Выберите шаблон")
-        if not rt_id: return QMessageBox.warning(self, "Ошибка", "Выберите тип запроса")
+        if not rt_id: return QMessageBox.warning(self, "Ошибка", "Справочник типов запросов пуст! Невозможно сохранить документ.")
         if not rec_id: return QMessageBox.warning(self, "Ошибка", "Выберите адресата")
 
         errs = []

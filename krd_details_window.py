@@ -48,7 +48,6 @@ class KrdDetailsWindow(QDialog):
         self.tabs.addTab(ServicePlacesTab(self.krd_id, self.db, self.audit_logger), "🎖️ Места службы")
         self.tabs.addTab(SochEpisodesTab(self.krd_id, self.db, self.audit_logger), "⚠️ Сведения о СОЧ")
         self.tabs.addTab(OutgoingRequestsTab(self.krd_id, self.db, self.audit_logger), "📤 Запросы и поручения")
-        self.tabs.addTab(DocumentGeneratorTab(self.krd_id, self.db, self.audit_logger), "📄 Генератор документов")
         
         # Отслеживаем переключение вкладок
         self.tabs.currentChanged.connect(self._on_tab_switched)

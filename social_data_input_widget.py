@@ -1,7 +1,7 @@
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGroupBox, QGridLayout,
     QLabel, QLineEdit, QTextEdit, QDateEdit, QComboBox, QFileDialog,
-    QPushButton, QScrollArea, QFrame, QMessageBox
+    QPushButton, QScrollArea, QFrame, QMessageBox, QDialog
 )
 from PyQt6.QtCore import Qt, QDate, QByteArray, QRegularExpression
 from PyQt6.QtGui import QFont, QPixmap, QRegularExpressionValidator
@@ -9,7 +9,7 @@ from PyQt6.QtSql import QSqlQuery
 import os
 import traceback
 
-# Импорт вашего вспомогательного модуля из проекта
+# Импорт вспомогательного модуля из проекта
 from autocomplete_helper import AutocompleteHelper
 
 
@@ -19,16 +19,19 @@ class SocialDataInputWidget(QWidget):
     def __init__(self, db_connection, parent=None):
         super().__init__(parent)
         self.db = db_connection
+        self.parent_window = parent # Сохраняем ссылку на родительское окно
         self.photo_paths = {
             'civilian': None, 'military_headgear': None,
             'military_no_headgear': None, 'distinctive_marks': None
         }
         self.autocomplete_helper = AutocompleteHelper(db_connection)
+        
         self.init_ui()
         self.load_combo_data()
         self._setup_validators_and_autocomplete()
 
     def init_ui(self):
+        """Инициализация интерфейса"""
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -56,8 +59,31 @@ class SocialDataInputWidget(QWidget):
         l1.addWidget(QLabel("Отчество *:"), 0, 4); l1.addWidget(self.patronymic_input, 0, 5)
         l1.addWidget(QLabel("Табельный номер:"), 1, 0); l1.addWidget(self.tab_number_input, 1, 1)
         l1.addWidget(QLabel("Личный номер:"), 1, 2); l1.addWidget(self.personal_number_input, 1, 3)
-        l1.addWidget(QLabel("Категория:"), 2, 0); l1.addWidget(self.category_combo, 2, 1)
-        l1.addWidget(QLabel("Звание:"), 2, 2); l1.addWidget(self.rank_combo, 2, 3)
+        
+        # ✅ ИЗМЕНЕНО: Добавляем кнопки настроек для Категории
+        l1.addWidget(QLabel("Категория:"), 2, 0)
+        cat_layout = QHBoxLayout()
+        cat_layout.addWidget(self.category_combo)
+        btn_cat = QPushButton("⚙️")
+        btn_cat.setToolTip("Настроить справочник категорий")
+        btn_cat.setFixedSize(32, 32)
+        btn_cat.setStyleSheet("QPushButton { font-weight: bold; }")
+        btn_cat.clicked.connect(lambda: self.open_ref_editor('categories'))
+        cat_layout.addWidget(btn_cat)
+        l1.addLayout(cat_layout, 2, 1)
+        
+        # ✅ ИЗМЕНЕНО: Добавляем кнопки настроек для Звания
+        l1.addWidget(QLabel("Звание:"), 2, 2)
+        rank_layout = QHBoxLayout()
+        rank_layout.addWidget(self.rank_combo)
+        btn_rank = QPushButton("⚙️")
+        btn_rank.setToolTip("Настроить справочник званий")
+        btn_rank.setFixedSize(32, 32)
+        btn_rank.setStyleSheet("QPushButton { font-weight: bold; }")
+        btn_rank.clicked.connect(lambda: self.open_ref_editor('ranks'))
+        rank_layout.addWidget(btn_rank)
+        l1.addLayout(rank_layout, 2, 3)
+        
         g1.setLayout(l1); layout.addWidget(g1)
 
         # === Группа 2: Место рождения ===
@@ -188,6 +214,23 @@ class SocialDataInputWidget(QWidget):
         main = QVBoxLayout(self)
         main.addWidget(scroll)
 
+    def open_ref_editor(self, table_name: str):
+        """Открытие редактора справочников на нужной вкладке с последующим обновлением"""
+        try:
+            from reference_editor_dialog import ReferenceEditorDialog
+            # Передаем table_name, чтобы справочник открылся сразу на нужной вкладке
+            # Если у виджета есть родительское окно, передаем его как parent
+            parent_window = self.parent_window or self.parent()
+            dialog = ReferenceEditorDialog(self.db, parent_window, table_name)
+            
+            if dialog.exec() == QDialog.DialogCode.Accepted:
+                # Если что-то изменили, обновляем данные в ComboBox
+                print(f"🔄 Обновление справочника '{table_name}'...")
+                self.load_combo_data()
+        except Exception as e:
+            print(f"⚠️ Ошибка открытия редактора справочников: {e}")
+            QMessageBox.warning(self, "Ошибка", f"Не удалось открыть справочник: {str(e)}")
+
     def _setup_validators_and_autocomplete(self):
         """Настройка валидаторов и автодополнения по схеме БД"""
         # 1. Ограничения по длине (VARCHAR) согласно schema_only.sql
@@ -256,16 +299,22 @@ class SocialDataInputWidget(QWidget):
             )
 
     def load_combo_data(self):
+        """Загрузка данных в комбобоксы"""
+        # Очистка и заполнение Категории
+        self.category_combo.clear()
         self.category_combo.addItem("", None)
         q = QSqlQuery(self.db)
         q.exec("SELECT id, name FROM krd.categories ORDER BY name")
         while q.next(): self.category_combo.addItem(q.value(1), q.value(0))
         
+        # Очистка и заполнение Звания
+        self.rank_combo.clear()
         self.rank_combo.addItem("", None)
         q.exec("SELECT id, name FROM krd.ranks ORDER BY name")
         while q.next(): self.rank_combo.addItem(q.value(1), q.value(0))
 
     def load_photo(self, photo_type):
+        """Загрузка фотографии"""
         path, _ = QFileDialog.getOpenFileName(self, f"Выберите фото ({photo_type})", "", "Images (*.png *.jpg *.jpeg *.bmp)")
         if path:
             try:
@@ -281,11 +330,13 @@ class SocialDataInputWidget(QWidget):
                 QMessageBox.critical(self, "Ошибка", str(e))
 
     def _load_pixmap(self, path):
+        """Масштабирование изображения"""
         p = QPixmap(path)
         if p.isNull(): return None
         return p.scaled(150, 200, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
 
     def validate_required_fields(self):
+        """Валидация обязательных полей"""
         if not self.surname_input.text().strip(): return False, "Введите фамилию"
         if not self.name_input.text().strip(): return False, "Введите имя"
         if not self.patronymic_input.text().strip(): return False, "Введите отчество"
@@ -296,6 +347,7 @@ class SocialDataInputWidget(QWidget):
         return True, ""
 
     def get_data(self):
+        """Получение данных из формы"""
         data = {
             'surname': self.surname_input.text().strip(),
             'name': self.name_input.text().strip(),

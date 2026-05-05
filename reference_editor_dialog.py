@@ -37,6 +37,9 @@ class ReferenceEditorDialog(QDialog):
 
         self.init_ui()
         if initial_table:
+            idx = self.table_combo.findData(initial_table)
+            if idx >= 0:
+                self.table_combo.setCurrentIndex(idx)
             self.load_table(initial_table)
 
     def init_ui(self):
