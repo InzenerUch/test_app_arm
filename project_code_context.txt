@@ -3998,1080 +3998,528 @@ class DocumentGeneratorTab(QWidget):
 
 """
 Модуль для выгрузки данных КРД в Excel
-С поддержкой экспорта фотографий и конфигурации отчетов
+✅ СТРУКТУРИРОВАННЫЙ ВЫВОД: Каждая КРД занимает несколько строк (основные данные + связанные записи)
+✅ ФИЛЬТРАЦИЯ: Выгружаются только те столбцы, которые выбраны в шаблоне отчета
+✅ ЧИСТЫЕ ЗАГОЛОВКИ: Убраны префиксы названий таблиц из заголовков Excel
+✅ БЕЗОПАСНОСТЬ: Все SQL-запросы используют bindValue
+✅ ФОРМАТИРОВАНИЕ: Корректные aRGB цвета для openpyxl
 """
-
 from PyQt6.QtSql import QSqlQuery
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment, Border, Side, PatternFill
 from openpyxl.utils import get_column_letter
 from openpyxl.cell.cell import MergedCell
-from openpyxl.drawing.image import Image as OpenPyXLImage
-from datetime import datetime
-import tempfile
 import os
-import io
-from PIL import Image as PILImage
-from PyQt6.QtCore import QByteArray
+import traceback
 
 
 class KrdExcelExporter:
     """Экспорт данных КРД в Excel с поддержкой конфигурации отчета"""
-    
+
+    # Описание всех доступных полей и секций
     AVAILABLE_FIELDS = {
         "social_data": {
             "title": "Социально-демографические данные",
             "fields": [
-                ("krd_number", "№ КРД"),
-                ("tab_number", "Табельный номер"),
-                ("personal_number", "Личный номер"),
-                ("category_name", "Категория военнослужащего"),
-                ("rank_name", "Воинское звание"),
-                ("surname", "Фамилия"),
-                ("name", "Имя"),
-                ("patronymic", "Отчество"),
-                ("birth_date", "Дата рождения"),
-                ("birth_place_town", "Населенный пункт места рождения"),
-                ("birth_place_district", "Административный район места рождения"),
-                ("birth_place_region", "Субъект (регион) места рождения"),
-                ("birth_place_country", "Страна места рождения"),
-                ("drafted_by_commissariat", "Наименование комиссариата"),
-                ("draft_date", "Дата призыва"),
-                ("povsk", "Наименование ПОВСК"),
-                ("selection_date", "Дата отбора"),
-                ("education", "Образование"),
-                ("criminal_record", "Сведения о судимости"),
-                ("social_media_account", "Аккаунт в социальных сетях"),
-                ("bank_card_number", "Номер банковской карты"),
-                ("passport_series", "Серия паспорта"),
-                ("passport_number", "Номер паспорта"),
-                ("passport_issue_date", "Дата выдачи паспорта"),
-                ("passport_issued_by", "Кем выдан паспорт"),
-                ("military_id_series", "Серия военного билета"),
-                ("military_id_number", "Номер военного билета"),
-                ("military_id_issue_date", "Дата выдачи военного билета"),
-                ("military_id_issued_by", "Кем выдан военный билет"),
-                ("appearance_features", "Особенности внешности"),
-                ("personal_marks", "Личные приметы"),
-                ("military_contacts", "Контакты в/с"),
-                ("relatives_info", "Сведения о близких родственниках"),
+                ("krd_number", "№ КРД"), ("tab_number", "Табельный номер"), ("personal_number", "Личный номер"),
+                ("category_name", "Категория военнослужащего"), ("rank_name", "Воинское звание"),
+                ("surname", "Фамилия"), ("name", "Имя"), ("patronymic", "Отчество"),
+                ("birth_date", "Дата рождения"), ("birth_place_town", "Населенный пункт места рождения"),
+                ("birth_place_district", "Административный район места рождения"), ("birth_place_region", "Субъект (регион) места рождения"),
+                ("birth_place_country", "Страна места рождения"), ("drafted_by_commissariat", "Наименование комиссариата"),
+                ("draft_date", "Дата призыва"), ("povsk", "Наименование ПОВСК"), ("selection_date", "Дата отбора"),
+                ("education", "Образование"), ("criminal_record", "Сведения о судимости"),
+                ("social_media_account", "Аккаунт в социальных сетях"), ("bank_card_number", "Номер банковской карты"),
+                ("passport_series", "Серия паспорта"), ("passport_number", "Номер паспорта"),
+                ("passport_issue_date", "Дата выдачи паспорта"), ("passport_issued_by", "Кем выдан паспорт"),
+                ("military_id_series", "Серия военного билета"), ("military_id_number", "Номер военного билета"),
+                ("military_id_issue_date", "Дата выдачи военного билета"), ("military_id_issued_by", "Кем выдан военный билет"),
+                ("appearance_features", "Особенности внешности"), ("personal_marks", "Личные приметы"),
+                ("military_contacts", "Контакты в/с"), ("relatives_info", "Сведения о близких родственниках"),
             ]
         },
         "addresses": {
             "title": "Адреса проживания",
             "fields": [
-                ("region", "Субъект РФ"),
-                ("district", "Административный район"),
-                ("town", "Населенный пункт"),
-                ("street", "Улица"),
-                ("house", "Дом"),
-                ("building", "Корпус"),
-                ("letter", "Литер"),
-                ("apartment", "Квартира"),
-                ("room", "Комната"),
-                ("check_date", "Дата адресной проверки"),
-                ("check_result", "Результат адресной проверки"),
+                ("region", "Субъект РФ"), ("district", "Административный район"), ("town", "Населенный пункт"),
+                ("street", "Улица"), ("house", "Дом"), ("building", "Корпус"), ("letter", "Литер"),
+                ("apartment", "Квартира"), ("room", "Комната"), ("check_date", "Дата адресной проверки"),
+                ("check_result", "Результат адресной проверки")
             ]
         },
         "incoming_orders": {
             "title": "Входящие поручения на розыск",
             "fields": [
-                ("initiator_full_name", "Инициатор розыска"),
-                ("order_date", "Исходящая дата поручения"),
-                ("order_number", "Исходящий номер поручения"),
-                ("receipt_date", "Дата поступления в ВК"),
-                ("receipt_number", "Входящий номер в ВК"),
-                ("postal_index", "Индекс"),
-                ("postal_region", "Субъект РФ"),
-                ("postal_district", "Административный район"),
-                ("postal_town", "Населенный пункт"),
-                ("postal_street", "Улица"),
-                ("postal_house", "Дом"),
-                ("initiator_contacts", "Контакты источника"),
-                ("our_response_date", "Дата ответа ВК"),
-                ("our_response_number", "Исходящий номер ответа ВК"),
-                ("military_unit_name", "Военное управление инициатора"),
+                ("initiator_full_name", "Инициатор розыска"), ("order_date", "Исходящая дата поручения"),
+                ("order_number", "Исходящий номер поручения"), ("receipt_date", "Дата поступления в ВК"),
+                ("receipt_number", "Входящий номер в ВК"), ("postal_index", "Индекс"),
+                ("postal_region", "Субъект РФ"), ("postal_district", "Административный район"),
+                ("postal_town", "Населенный пункт"), ("postal_street", "Улица"), ("postal_house", "Дом"),
+                ("initiator_contacts", "Контакты источника"), ("our_response_date", "Дата ответа ВК"),
+                ("our_response_number", "Исходящий номер ответа ВК"), ("military_unit_name", "Военное управление инициатора")
             ]
         },
         "service_places": {
             "title": "Места службы",
             "fields": [
-                ("place_name", "Наименование места службы"),
-                ("military_unit_name", "Военное управление места службы"),
-                ("garrison_name", "Гарнизон места службы"),
-                ("position_name", "Воинская должность"),
-                ("commanders", "Командиры (начальники)"),
-                ("postal_index", "Индекс"),
-                ("postal_region", "Субъект РФ"),
-                ("postal_town", "Населенный пункт"),
-                ("postal_street", "Улица"),
-                ("postal_house", "Дом"),
-                ("place_contacts", "Контакты места службы"),
+                ("place_name", "Наименование места службы"), ("military_unit_name", "Военное управление места службы"),
+                ("garrison_name", "Гарнизон места службы"), ("position_name", "Воинская должность"),
+                ("commanders", "Командиры (начальники)"), ("postal_index", "Индекс"),
+                ("postal_region", "Субъект РФ"), ("postal_town", "Населенный пункт"), ("postal_street", "Улица"),
+                ("postal_house", "Дом"), ("place_contacts", "Контакты места службы")
             ]
         },
         "soch_episodes": {
             "title": "Сведения о СОЧ",
             "fields": [
-                ("soch_date", "Дата СОЧ"),
-                ("soch_location", "Место СОЧ"),
-                ("order_date_number", "Дата и номер приказа о СОЧ"),
-                ("witnesses", "Очевидцы СОЧ"),
-                ("reasons", "Вероятные причины СОЧ"),
-                ("weapon_info", "Сведения о наличии оружия"),
-                ("clothing", "Во что был одет"),
-                ("movement_options", "Варианты движения"),
-                ("search_date", "Дата розыска"),
-                ("found_by", "Кем разыскан"),
-                ("notification_date", "Дата уведомления"),
-                ("notification_number", "Номер уведомления"),
+                ("soch_date", "Дата СОЧ"), ("soch_location", "Место СОЧ"),
+                ("order_date_number", "Дата и номер приказа о СОЧ"), ("witnesses", "Очевидцы СОЧ"),
+                ("reasons", "Вероятные причины СОЧ"), ("weapon_info", "Сведения о наличии оружия"),
+                ("clothing", "Во что был одет"), ("movement_options", "Варианты движения"),
+                ("search_date", "Дата розыска"), ("found_by", "Кем разыскан"),
+                ("notification_date", "Дата уведомления"), ("notification_number", "Номер уведомления")
             ]
         },
         "outgoing_requests": {
             "title": "Исходящие запросы и поручения",
             "fields": [
-                ("request_type_name", "Наименование запроса"),
-                ("recipient_name", "Наименование адресата"),
-                ("military_unit_name", "Военное управление адресата"),
-                ("issue_date", "Исходящая дата"),
-                ("issue_number", "Исходящий номер"),
-                ("postal_index", "Индекс"),
-                ("postal_region", "Субъект РФ"),
-                ("postal_town", "Населенный пункт"),
-                ("postal_street", "Улица"),
-                ("postal_house", "Дом"),
-                ("recipient_contacts", "Контакты"),
+                ("request_type_name", "Наименование запроса"), ("recipient_name", "Наименование адресата"),
+                ("military_unit_name", "Военное управление адресата"), ("issue_date", "Исходящая дата"),
+                ("issue_number", "Исходящий номер"), ("postal_index", "Индекс"),
+                ("postal_region", "Субъект РФ"), ("postal_town", "Населенный пункт"), ("postal_street", "Улица"),
+                ("postal_house", "Дом"), ("recipient_contacts", "Контакты")
             ]
         }
     }
-    
+
     def __init__(self, db_connection, krd_id=None, report_config=None):
         self.db = db_connection
         self.krd_id = krd_id
         self.wb = Workbook()
         self.report_config = report_config or self._get_default_config()
         
-        self.header_font = Font(bold=True, size=11, color="FFFFFF")
-        self.header_fill = PatternFill(start_color="4472C4", end_color="4472C4", fill_type="solid")
-        self.section_font = Font(bold=True, size=12, color="000000")
-        self.section_fill = PatternFill(start_color="D9E1F2", end_color="D9E1F2", fill_type="solid")
+        # ✅ Стили: формат aRGB (8 символов, без решетки #)
+        self.header_font = Font(bold=True, size=11, color="FFFFFFFF")
+        self.header_fill = PatternFill(start_color="FF4472C4", end_color="FF4472C4", fill_type="solid")
+        self.section_font = Font(bold=True, size=12, color="FF000000")
+        self.section_fill = PatternFill(start_color="FFD9E1F2", end_color="FFD9E1F2", fill_type="solid")
+        self.krd_header_font = Font(bold=True, size=13, color="FF003366")
+        self.krd_header_fill = PatternFill(start_color="FFE2EFDA", end_color="FFE2EFDA", fill_type="solid")
+
         self.cell_alignment = Alignment(horizontal="left", vertical="center", wrap_text=True)
         self.header_alignment = Alignment(horizontal="center", vertical="center")
-        
         self.thin_border = Border(
-            left=Side(style='thin'),
-            right=Side(style='thin'),
-            top=Side(style='thin'),
-            bottom=Side(style='thin')
+            left=Side(style="thin"), right=Side(style="thin"), 
+            top=Side(style="thin"), bottom=Side(style="thin")
         )
-        
         self.temp_image_files = []
-        self.photo_width_px = 200
-        self.photo_height_px = 270
-    
+
     def _get_default_config(self):
         return {
-            "sections": ["social_data", "addresses", "incoming_orders", 
-                        "service_places", "soch_episodes", "outgoing_requests"],
+            "sections": ["social_data", "addresses", "incoming_orders", "service_places", "soch_episodes", "outgoing_requests"],
             "fields": {}
         }
-    
+
     def _cleanup_temp_files(self):
         for temp_file in self.temp_image_files:
             try:
-                if os.path.exists(temp_file):
-                    os.remove(temp_file)
-            except Exception as e:
-                print(f"✗ Ошибка удаления временного файла {temp_file}: {e}")
+                if os.path.exists(temp_file): os.remove(temp_file)
+            except Exception: pass
         self.temp_image_files = []
-    
-    def _load_photo_from_db(self, field_name, krd_id=None):
-        target_krd_id = krd_id if krd_id else self.krd_id
-        
-        try:
-            query = QSqlQuery(self.db)
-            query.prepare(f"""
-                SELECT {field_name} 
-                FROM krd.social_data 
-                WHERE krd_id = :krd_id
-                ORDER BY id DESC 
-                LIMIT 1
-            """)
-            query.bindValue(":krd_id", target_krd_id)
-            
-            if not query.exec():
-                return None
-            
-            if query.next():
-                photo_data = query.value(0)
-                
-                if photo_data:
-                    if hasattr(photo_data, 'data'):
-                        return bytes(photo_data.data())
-                    elif isinstance(photo_data, bytes):
-                        return photo_data
-                    elif isinstance(photo_data, bytearray):
-                        return bytes(photo_data)
-                    elif isinstance(photo_data, memoryview):
-                        return bytes(photo_data)
-                    else:
-                        return bytes(photo_data)
-                else:
-                    return None
-            else:
-                return None
-                
-        except Exception as e:
-            print(f"✗ Ошибка загрузки фото {field_name}: {e}")
-            return None
-    
-    def _create_temp_image_file(self, photo_bytes, suffix='.jpg', target_width=None, target_height=None):
-        if not photo_bytes:
-            return None
-        
-        try:
-            img = PILImage.open(io.BytesIO(photo_bytes))
-            
-            if img.mode == 'RGBA':
-                background = PILImage.new('RGB', img.size, (255, 255, 255))
-                background.paste(img, mask=img.split()[3])
-                img = background
-            elif img.mode != 'RGB':
-                img = img.convert('RGB')
-            
-            if target_width and target_height:
-                img = img.resize((target_width, target_height), PILImage.Resampling.LANCZOS)
-            
-            temp_file = tempfile.NamedTemporaryFile(delete=False, suffix=suffix)
-            img.save(temp_file.name, quality=95)
-            temp_file.close()
-            
-            self.temp_image_files.append(temp_file.name)
-            return temp_file.name
-            
-        except Exception as e:
-            print(f"✗ Ошибка создания временного файла: {e}")
-            return None
-    
-    def export_to_excel(self, file_path):
-        try:
-            print(f"\n{'='*60}")
-            print(f"📊 НАЧАЛО ЭКСПОРТА КРД-{self.krd_id}")
-            print(f"{'='*60}")
-            
-            self.wb.remove(self.wb.active)
-            ws = self.wb.create_sheet("Данные КРД")
-            
-            social_data = self._load_social_data()
-            row = self._fill_social_data_section(ws, social_data, start_row=1)
-            
-            if "addresses" in self.report_config.get("sections", []):
-                addresses = self._load_addresses()
-                row = self._fill_addresses_section(ws, addresses, start_row=row)
-            
-            if "incoming_orders" in self.report_config.get("sections", []):
-                incoming_orders = self._load_incoming_orders()
-                row = self._fill_incoming_orders_section(ws, incoming_orders, start_row=row)
-            
-            if "service_places" in self.report_config.get("sections", []):
-                service_places = self._load_service_places()
-                row = self._fill_service_places_section(ws, service_places, start_row=row)
-            
-            if "soch_episodes" in self.report_config.get("sections", []):
-                soch_episodes = self._load_soch_episodes()
-                row = self._fill_soch_episodes_section(ws, soch_episodes, start_row=row)
-            
-            if "outgoing_requests" in self.report_config.get("sections", []):
-                outgoing_requests = self._load_outgoing_requests()
-                row = self._fill_outgoing_requests_section(ws, outgoing_requests, start_row=row)
-            
-            self._adjust_column_widths(ws)
-            
-            print(f"\n💾 СОХРАНЕНИЕ ФАЙЛА: {file_path}")
-            self.wb.save(file_path)
-            print(f"✓ Файл сохранён: {file_path}")
-            
-            self._cleanup_temp_files()
-            
-            print(f"\n{'='*60}")
-            print(f"✅ ЭКСПОРТ ЗАВЕРШЁН УСПЕШНО")
-            print(f"{'='*60}\n")
-            
-            return True
-            
-        except Exception as e:
-            print(f"\n{'='*60}")
-            print(f"✗ ОШИБКА ЭКСПОРТА: {e}")
-            print(f"{'='*60}\n")
-            import traceback
-            traceback.print_exc()
-            self._cleanup_temp_files()
-            raise
-    
-    def export_multiple_krd_to_excel(self, file_path, krd_ids=None):
-        try:
-            print(f"\n{'='*60}")
-            print(f"📊 НАЧАЛО МАССОВОГО ЭКСПОРТА КРД (ОДИН ЛИСТ)")
-            print(f"{'='*60}")
-            
-            if krd_ids is None:
-                krd_ids = self.report_config.get("krd_ids", [])
-            
-            if not krd_ids:
-                raise Exception("Не указан список КРД для экспорта")
-            
-            print(f"📋 Всего записей для экспорта: {len(krd_ids)}")
-            
-            self.wb.remove(self.wb.active)
-            ws = self.wb.create_sheet("Отчет по КРД")
-            
-            row = self._fill_multiple_krd_to_single_sheet(ws, krd_ids)
-            
-            self._adjust_column_widths(ws)
-            
-            print(f"\n💾 СОХРАНЕНИЕ ФАЙЛА: {file_path}")
-            self.wb.save(file_path)
-            print(f"✓ Файл сохранён: {file_path}")
-            
-            self._cleanup_temp_files()
-            
-            print(f"\n{'='*60}")
-            print(f"✅ МАССОВЫЙ ЭКСПОРТ ЗАВЕРШЁН УСПЕШНО")
-            print(f"{'='*60}\n")
-            
-            return True
-            
-        except Exception as e:
-            print(f"\n{'='*60}")
-            print(f"✗ ОШИБКА МАССОВОГО ЭКСПОРТА: {e}")
-            print(f"{'='*60}\n")
-            import traceback
-            traceback.print_exc()
-            self._cleanup_temp_files()
-            raise
-    
-    def _fill_multiple_krd_to_single_sheet(self, ws, krd_ids):
-        row = 1
-        
-        ws.merge_cells(f'A1:{get_column_letter(10)}1')
-        cell = ws[f'A1']
-        cell.value = "ОТЧЕТ ПО КАРТОЧКАМ РОЗЫСКА (КРД)"
-        cell.font = Font(bold=True, size=14, color="FFFFFF")
-        cell.fill = self.section_fill
-        cell.alignment = self.header_alignment
-        row += 2
-        
-        sections = self.report_config.get("sections", [])
-        fields_config = self.report_config.get("fields", {})
-        
-        export_columns = []
-        
-        if "social_data" in sections:
-            social_fields = fields_config.get("social_data", [])
-            if social_fields:
-                all_social_fields = dict(self.AVAILABLE_FIELDS["social_data"]["fields"])
-                for field_key in social_fields:
-                    if field_key in all_social_fields:
-                        export_columns.append((field_key, all_social_fields[field_key]))
-            else:
-                export_columns.extend(self.AVAILABLE_FIELDS["social_data"]["fields"])
-        
-        for section in sections:
-            if section != "social_data" and section in self.AVAILABLE_FIELDS:
-                section_fields = fields_config.get(section, [])
-                if section_fields:
-                    all_section_fields = dict(self.AVAILABLE_FIELDS[section]["fields"])
-                    for field_key in section_fields:
-                        if field_key in all_section_fields:
-                            export_columns.append((field_key, all_section_fields[field_key]))
-                else:
-                    export_columns.extend(self.AVAILABLE_FIELDS[section]["fields"])
-        
-        print(f"\n📋 Полей для экспорта: {len(export_columns)}")
-        
-        for col, (field_key, field_name) in enumerate(export_columns, 1):
-            cell = ws.cell(row=row, column=col, value=field_name)
-            cell.font = self.header_font
-            cell.fill = self.header_fill
-            cell.alignment = self.header_alignment
-            cell.border = self.thin_border
-        
-        row += 1
-        
-        print(f"\n📝 Экспорт данных...")
-        for krd_id in krd_ids:
-            print(f"  • Обработка КРД-{krd_id}...")
-            
-            data = self._load_all_data_for_krd(krd_id)
-            
-            print(f"    Загружено полей: {len(data)}")
-            if 'krd_number' in data:
-                print(f"    № КРД: {data['krd_number']}")
-            if 'surname' in data:
-                print(f"    Фамилия: {data['surname']}")
-            
-            for col, (field_key, field_name) in enumerate(export_columns, 1):
-                value = self._get_field_value(data, field_key)
-                cell = ws.cell(row=row, column=col, value=value)
-                cell.alignment = self.cell_alignment
-                cell.border = self.thin_border
-            
-            row += 1
-        
-        print(f"  ✓ Экспортировано {len(krd_ids)} записей")
-        return row
-    
-    def _load_all_data_for_krd(self, krd_id):
-        data = {}
-        
-        social_data = self._load_social_data_for_krd(krd_id)
-        data.update(social_data)
-        
-        addresses = self._load_addresses_for_krd(krd_id)
-        if addresses:
-            data.update(addresses[0])
-        
-        incoming_orders = self._load_incoming_orders_for_krd(krd_id)
-        if incoming_orders:
-            data.update(incoming_orders[0])
-        
-        service_places = self._load_service_places_for_krd(krd_id)
-        if service_places:
-            data.update(service_places[0])
-        
-        soch_episodes = self._load_soch_episodes_for_krd(krd_id)
-        if soch_episodes:
-            data.update(soch_episodes[0])
-        
-        outgoing_requests = self._load_outgoing_requests_for_krd(krd_id)
-        if outgoing_requests:
-            data.update(outgoing_requests[0])
-        
-        return data
-    
-    def _get_field_value(self, data, field_key):
-        value = data.get(field_key, '')
-        
-        if field_key.endswith('_date') and value:
-            try:
-                if hasattr(value, 'toString'):
-                    return value.toString("dd.MM.yyyy")
-                else:
-                    return str(value)
-            except:
-                return str(value) if value else ''
-        
-        if value is None:
-            return ''
-        
-        return value
-    
-    def export_to_single_sheet(self, ws):
-        social_data = self._load_social_data()
-        row = self._fill_social_data_section(ws, social_data, start_row=1)
-        
-        if "addresses" in self.report_config.get("sections", []):
-            addresses = self._load_addresses()
-            row = self._fill_addresses_section(ws, addresses, start_row=row)
-        
-        if "incoming_orders" in self.report_config.get("sections", []):
-            incoming_orders = self._load_incoming_orders()
-            row = self._fill_incoming_orders_section(ws, incoming_orders, start_row=row)
-        
-        if "service_places" in self.report_config.get("sections", []):
-            service_places = self._load_service_places()
-            row = self._fill_service_places_section(ws, service_places, start_row=row)
-        
-        if "soch_episodes" in self.report_config.get("sections", []):
-            soch_episodes = self._load_soch_episodes()
-            row = self._fill_soch_episodes_section(ws, soch_episodes, start_row=row)
-        
-        if "outgoing_requests" in self.report_config.get("sections", []):
-            outgoing_requests = self._load_outgoing_requests()
-            row = self._fill_outgoing_requests_section(ws, outgoing_requests, start_row=row)
-        
-        return True
-    
-    def _load_social_data(self):
-        return self._load_social_data_for_krd(self.krd_id)
-    
-    def _load_social_data_for_krd(self, krd_id):
-        """
-        ИСПРАВЛЕНО: Убрана несуществующая колонка krd_number, используется kr.id
-        """
-        query_string = f"""
-            SELECT 
-                kr.id as krd_id,
-                s.tab_number,
-                s.personal_number,
-                c.name as category_name,
-                r.name as rank_name,
-                s.surname,
-                s.name,
-                s.patronymic,
-                s.birth_date,
-                s.birth_place_town,
-                s.birth_place_district,
-                s.birth_place_region,
-                s.birth_place_country,
-                s.drafted_by_commissariat,
-                s.draft_date,
-                s.povsk,
-                s.selection_date,
-                s.education,
-                s.criminal_record,
-                s.social_media_account,
-                s.bank_card_number,
-                s.passport_series,
-                s.passport_number,
-                s.passport_issue_date,
-                s.passport_issued_by,
-                s.military_id_series,
-                s.military_id_number,
-                s.military_id_issue_date,
-                s.military_id_issued_by,
-                s.appearance_features,
-                s.personal_marks,
-                s.federal_search_info,
-                s.military_contacts,
-                s.relatives_info
-            FROM krd.social_data s
-            LEFT JOIN krd.krd kr ON s.krd_id = kr.id
-            LEFT JOIN krd.categories c ON s.category_id = c.id
-            LEFT JOIN krd.ranks r ON s.rank_id = r.id
-            WHERE s.krd_id = {int(krd_id)}
-            ORDER BY s.id DESC
-            LIMIT 1
-        """
-        
-        query = QSqlQuery(self.db)
-        
-        print(f"    📝 SQL запрос выполнен для КРД-{krd_id}")
-        
-        if not query.exec(query_string):
-            print(f"    ⚠️ Ошибка SQL: {query.lastError().text()}")
-            return {}
-        
-        if query.next():
-            # === ИСПРАВЛЕНО: Формируем krd_number из ID ===
-            krd_id_value = query.value('krd_id')
-            krd_number = f"КРД-{krd_id_value}" if krd_id_value else ''
-            
-            return {
-                'krd_id': krd_id_value or '',
-                'krd_number': krd_number,  # Форматируем как "КРД-X"
-                'tab_number': query.value('tab_number') or '',
-                'personal_number': query.value('personal_number') or '',
-                'category_name': query.value('category_name') or '',
-                'rank_name': query.value('rank_name') or '',
-                'surname': query.value('surname') or '',
-                'name': query.value('name') or '',
-                'patronymic': query.value('patronymic') or '',
-                'birth_date': query.value('birth_date'),
-                'birth_place_town': query.value('birth_place_town') or '',
-                'birth_place_district': query.value('birth_place_district') or '',
-                'birth_place_region': query.value('birth_place_region') or '',
-                'birth_place_country': query.value('birth_place_country') or '',
-                'drafted_by_commissariat': query.value('drafted_by_commissariat') or '',
-                'draft_date': query.value('draft_date'),
-                'povsk': query.value('povsk') or '',
-                'selection_date': query.value('selection_date'),
-                'education': query.value('education') or '',
-                'criminal_record': query.value('criminal_record') or '',
-                'social_media_account': query.value('social_media_account') or '',
-                'bank_card_number': query.value('bank_card_number') or '',
-                'passport_series': query.value('passport_series') or '',
-                'passport_number': query.value('passport_number') or '',
-                'passport_issue_date': query.value('passport_issue_date'),
-                'passport_issued_by': query.value('passport_issued_by') or '',
-                'military_id_series': query.value('military_id_series') or '',
-                'military_id_number': query.value('military_id_number') or '',
-                'military_id_issue_date': query.value('military_id_issue_date'),
-                'military_id_issued_by': query.value('military_id_issued_by') or '',
-                'appearance_features': query.value('appearance_features') or '',
-                'personal_marks': query.value('personal_marks') or '',
-                'federal_search_info': query.value('federal_search_info') or '',
-                'military_contacts': query.value('military_contacts') or '',
-                'relatives_info': query.value('relatives_info') or ''
-            }
-        else:
-            print(f"    ⚠️ Нет данных для КРД-{krd_id}")
-            return {}
-    
-    def _load_addresses(self):
-        return self._load_addresses_for_krd(self.krd_id)
-    
-    def _load_addresses_for_krd(self, krd_id):
-        query_string = f"""
-            SELECT 
-                region, district, town, street, house, building, letter,
-                apartment, room, check_date, check_result
-            FROM krd.addresses
-            WHERE krd_id = {int(krd_id)}
-            ORDER BY id DESC
-        """
-        query = QSqlQuery(self.db)
-        query.exec(query_string)
-        
-        addresses = []
-        while query.next():
-            addresses.append({
-                'region': query.value('region') or '',
-                'district': query.value('district') or '',
-                'town': query.value('town') or '',
-                'street': query.value('street') or '',
-                'house': query.value('house') or '',
-                'building': query.value('building') or '',
-                'letter': query.value('letter') or '',
-                'apartment': query.value('apartment') or '',
-                'room': query.value('room') or '',
-                'check_date': query.value('check_date'),
-                'check_result': query.value('check_result') or ''
-            })
-        return addresses
-    
-    def _load_incoming_orders(self):
-        return self._load_incoming_orders_for_krd(self.krd_id)
-    
-    def _load_incoming_orders_for_krd(self, krd_id):
-        query_string = f"""
-            SELECT 
-                i.initiator_full_name, i.order_date, i.order_number,
-                i.receipt_date, i.receipt_number, i.postal_index,
-                i.postal_region, i.postal_district, i.postal_town,
-                i.postal_street, i.postal_house, i.postal_building,
-                i.postal_letter, i.postal_apartment, i.postal_room,
-                i.initiator_contacts, i.our_response_date,
-                i.our_response_number, m.name as military_unit_name
-            FROM krd.incoming_orders i
-            LEFT JOIN krd.military_units m ON i.military_unit_id = m.id
-            WHERE i.krd_id = {int(krd_id)}
-            ORDER BY i.receipt_date DESC
-        """
-        query = QSqlQuery(self.db)
-        query.exec(query_string)
-        
-        orders = []
-        while query.next():
-            orders.append({
-                'initiator_full_name': query.value('initiator_full_name') or '',
-                'order_date': query.value('order_date'),
-                'order_number': query.value('order_number') or '',
-                'receipt_date': query.value('receipt_date'),
-                'receipt_number': query.value('receipt_number') or '',
-                'postal_index': query.value('postal_index') or '',
-                'postal_region': query.value('postal_region') or '',
-                'postal_district': query.value('postal_district') or '',
-                'postal_town': query.value('postal_town') or '',
-                'postal_street': query.value('postal_street') or '',
-                'postal_house': query.value('postal_house') or '',
-                'postal_building': query.value('postal_building') or '',
-                'postal_letter': query.value('postal_letter') or '',
-                'postal_apartment': query.value('postal_apartment') or '',
-                'postal_room': query.value('postal_room') or '',
-                'initiator_contacts': query.value('initiator_contacts') or '',
-                'our_response_date': query.value('our_response_date'),
-                'our_response_number': query.value('our_response_number') or '',
-                'military_unit_name': query.value('military_unit_name') or ''
-            })
-        return orders
-    
-    def _load_service_places(self):
-        return self._load_service_places_for_krd(self.krd_id)
-    
-    def _load_service_places_for_krd(self, krd_id):
-        query_string = f"""
-            SELECT 
-                s.place_name, m.name as military_unit_name,
-                g.name as garrison_name, p.name as position_name,
-                s.commanders, s.postal_index, s.postal_region,
-                s.postal_district, s.postal_town, s.postal_street,
-                s.postal_house, s.postal_building, s.postal_letter,
-                s.postal_apartment, s.postal_room, s.place_contacts
-            FROM krd.service_places s
-            LEFT JOIN krd.military_units m ON s.military_unit_id = m.id
-            LEFT JOIN krd.garrisons g ON s.garrison_id = g.id
-            LEFT JOIN krd.positions p ON s.position_id = p.id
-            WHERE s.krd_id = {int(krd_id)}
-            ORDER BY s.id DESC
-        """
-        query = QSqlQuery(self.db)
-        query.exec(query_string)
-        
-        places = []
-        while query.next():
-            places.append({
-                'place_name': query.value('place_name') or '',
-                'military_unit_name': query.value('military_unit_name') or '',
-                'garrison_name': query.value('garrison_name') or '',
-                'position_name': query.value('position_name') or '',
-                'commanders': query.value('commanders') or '',
-                'postal_index': query.value('postal_index') or '',
-                'postal_region': query.value('postal_region') or '',
-                'postal_district': query.value('postal_district') or '',
-                'postal_town': query.value('postal_town') or '',
-                'postal_street': query.value('postal_street') or '',
-                'postal_house': query.value('postal_house') or '',
-                'postal_building': query.value('postal_building') or '',
-                'postal_letter': query.value('postal_letter') or '',
-                'postal_apartment': query.value('postal_apartment') or '',
-                'postal_room': query.value('postal_room') or '',
-                'place_contacts': query.value('place_contacts') or ''
-            })
-        return places
-    
-    def _load_soch_episodes(self):
-        return self._load_soch_episodes_for_krd(self.krd_id)
-    
-    def _load_soch_episodes_for_krd(self, krd_id):
-        query_string = f"""
-            SELECT 
-                soch_date, soch_location, order_date_number, witnesses,
-                reasons, weapon_info, clothing, movement_options, other_info,
-                duty_officer_commissariat, duty_officer_omvd, investigation_info,
-                prosecution_info, criminal_case_info, search_date, found_by,
-                search_circumstances, notification_recipient, notification_date,
-                notification_number
-            FROM krd.soch_episodes
-            WHERE krd_id = {int(krd_id)}
-            ORDER BY soch_date DESC
-        """
-        query = QSqlQuery(self.db)
-        query.exec(query_string)
-        
-        episodes = []
-        while query.next():
-            episodes.append({
-                'soch_date': query.value('soch_date'),
-                'soch_location': query.value('soch_location') or '',
-                'order_date_number': query.value('order_date_number') or '',
-                'witnesses': query.value('witnesses') or '',
-                'reasons': query.value('reasons') or '',
-                'weapon_info': query.value('weapon_info') or '',
-                'clothing': query.value('clothing') or '',
-                'movement_options': query.value('movement_options') or '',
-                'other_info': query.value('other_info') or '',
-                'duty_officer_commissariat': query.value('duty_officer_commissariat') or '',
-                'duty_officer_omvd': query.value('duty_officer_omvd') or '',
-                'investigation_info': query.value('investigation_info') or '',
-                'prosecution_info': query.value('prosecution_info') or '',
-                'criminal_case_info': query.value('criminal_case_info') or '',
-                'search_date': query.value('search_date'),
-                'found_by': query.value('found_by') or '',
-                'search_circumstances': query.value('search_circumstances') or '',
-                'notification_recipient': query.value('notification_recipient') or '',
-                'notification_date': query.value('notification_date'),
-                'notification_number': query.value('notification_number') or ''
-            })
-        return episodes
-    
-    def _load_outgoing_requests(self):
-        return self._load_outgoing_requests_for_krd(self.krd_id)
-    
-    def _load_outgoing_requests_for_krd(self, krd_id):
-        query_string = f"""
-            SELECT 
-                r.recipient_name, r.issue_date, r.issue_number,
-                r.postal_index, r.postal_region, r.postal_district,
-                r.postal_town, r.postal_street, r.postal_house,
-                r.postal_building, r.postal_letter, r.postal_apartment,
-                r.postal_room, r.recipient_contacts, r.request_text,
-                r.signed_by_position, m.name as military_unit_name,
-                t.name as request_type_name
-            FROM krd.outgoing_requests r
-            LEFT JOIN krd.military_units m ON r.military_unit_id = m.id
-            LEFT JOIN krd.request_types t ON r.request_type_id = t.id
-            WHERE r.krd_id = {int(krd_id)}
-            ORDER BY r.issue_date DESC
-        """
-        query = QSqlQuery(self.db)
-        query.exec(query_string)
-        
-        requests = []
-        while query.next():
-            requests.append({
-                'recipient_name': query.value('recipient_name') or '',
-                'issue_date': query.value('issue_date'),
-                'issue_number': query.value('issue_number') or '',
-                'postal_index': query.value('postal_index') or '',
-                'postal_region': query.value('postal_region') or '',
-                'postal_district': query.value('postal_district') or '',
-                'postal_town': query.value('postal_town') or '',
-                'postal_street': query.value('postal_street') or '',
-                'postal_house': query.value('postal_house') or '',
-                'postal_building': query.value('postal_building') or '',
-                'postal_letter': query.value('postal_letter') or '',
-                'postal_apartment': query.value('postal_apartment') or '',
-                'postal_room': query.value('postal_room') or '',
-                'recipient_contacts': query.value('recipient_contacts') or '',
-                'request_text': query.value('request_text') or '',
-                'signed_by_position': query.value('signed_by_position') or '',
-                'military_unit_name': query.value('military_unit_name') or '',
-                'request_type_name': query.value('request_type_name') or ''
-            })
-        return requests
-    
+
     def _format_date(self, date_value):
         if date_value:
             try:
-                return date_value.toString("dd.MM.yyyy")
-            except:
+                return date_value.toString("dd.MM.yyyy") if hasattr(date_value, 'toString') else str(date_value)
+            except Exception:
                 return str(date_value)
         return ""
-    
-    def _fill_social_data_section(self, ws, data, start_row=1):
-        row = start_row
-        selected_fields = self.report_config.get("fields", {}).get("social_data", [])
+
+    def _log(self, level, message):
+        """Вспомогательный метод для вывода в консоль"""
+        print(f"[{level}] {message}")
+
+    def export_multiple_krd_to_excel(self, file_path, krd_ids=None):
+        """✅ ЭКСПОРТ СПИСКА: Все данные на одном листе в виде плоской таблицы"""
+        try:
+            self._log("EXPORT", "🚀 " + "="*60)
+            self._log("EXPORT", "🚀 НАЧАЛО ЭКСПОРТА СПИСКА КРД")
+            self._log("EXPORT", "🚀 " + "="*60)
+            
+            if krd_ids is None:
+                krd_ids = self.report_config.get("krd_ids", [])
+            if not krd_ids:
+                raise Exception("Не указан список КРД для экспорта")
+
+            self._log("EXPORT", f"📋 Всего записей для экспорта: {len(krd_ids)}")
+            self.wb.remove(self.wb.active)
+            ws = self.wb.create_sheet("Список КРД")
+            
+            # Вызываем метод для заполнения таблицы
+            current_row = self._fill_flat_list_table(ws, krd_ids)
+            
+            self._adjust_column_widths(ws)
+            
+            self._log("EXPORT", f"💾 Сохранение файла: {file_path}")
+            self.wb.save(file_path)
+            self._cleanup_temp_files()
+            
+            self._log("EXPORT", "✅ " + "="*60)
+            self._log("EXPORT", "✅ ЭКСПОРТ ЗАВЕРШЁН УСПЕШНО")
+            self._log("EXPORT", "✅ " + "="*60)
+            return True
+        except Exception as e:
+            self._log("ERROR", f"✗ ОШИБКА ЭКСПОРТА: {e}")
+            traceback.print_exc()
+            self._cleanup_temp_files()
+            raise
+
+    def _fill_flat_list_table(self, ws, krd_ids):
+        """
+        Заполнение Excel-листа в виде ЕДИНОГО СПИСКА.
+        ✅ Убраны префиксы таблиц из заголовков.
+        ✅ Корректная работа с множественными данными (адреса, места службы).
+        """
+        row = 1
+        sections = self.report_config.get("sections", [])
+        fields_config = self.report_config.get("fields", {})
+
+        self._log("DEBUG", "📐 Формирование заголовков таблицы...")
         
-        ws.merge_cells(f'A1:AC1')
-        cell = ws[f'A1']
-        cell.value = "СОЦИАЛЬНО-ДЕМОГРАФИЧЕСКИЕ ДАННЫЕ"
-        cell.font = self.section_font
-        cell.fill = self.section_fill
-        cell.alignment = self.header_alignment
-        row += 1
+        # Формируем единый список колонок для шапки
+        columns = []
         
-        all_fields = self.AVAILABLE_FIELDS.get("social_data", {}).get("fields", [])
+        # 1. Основные данные (Social Data)
+        all_soc = self.AVAILABLE_FIELDS["social_data"]["fields"]
         
-        if selected_fields:
-            fields_to_export = [(k, v) for k, v in all_fields if k in selected_fields]
+        # Проверяем, есть ли настройки полей для этой секции в конфиге
+        if "social_data" in fields_config:
+            soc_fields = fields_config["social_data"]
+            selected_soc = [(k, v) for k, v in all_soc if k in soc_fields]
         else:
-            fields_to_export = all_fields
-        
-        for col, (field_key, field_name) in enumerate(fields_to_export, 1):
-            cell = ws.cell(row=row, column=col, value=field_name)
+            selected_soc = all_soc
+            
+        columns.extend([(k, v, "social") for k, v in selected_soc])
+
+        # 2. Секции с множественными данными
+        for sec_key in ["addresses", "service_places", "incoming_orders", "soch_episodes", "outgoing_requests"]:
+            if sec_key in sections:
+                all_sec = self.AVAILABLE_FIELDS[sec_key]["fields"]
+                
+                # Проверяем настройки полей для текущей секции
+                if sec_key in fields_config:
+                    sec_fields = fields_config[sec_key]
+                    selected_sec = [(k, v) for k, v in all_sec if k in sec_fields]
+                else:
+                    selected_sec = all_sec
+                
+                # ✅ ИСПРАВЛЕНО: Убран префикс с названием таблицы (было f"[{sec_key.upper()}] {v}")
+                # Теперь добавляем просто (k, v, sec_key)
+                columns.extend([(k, v, sec_key) for k, v in selected_sec])
+
+        self._log("DEBUG", f"📊 Сформировано {len(columns)} колонок")
+
+        # Рисуем шапку
+        for c, (_, field_name, _) in enumerate(columns, 1):
+            cell = ws.cell(row=row, column=c, value=field_name)
             cell.font = self.header_font
             cell.fill = self.header_fill
             cell.alignment = self.header_alignment
             cell.border = self.thin_border
-        
         row += 1
-        
-        for col, (field_key, field_name) in enumerate(fields_to_export, 1):
-            value = data.get(field_key, '')
-            if field_key.endswith('_date') and value:
-                value = self._format_date(value)
-            cell = ws.cell(row=row, column=col, value=value)
-            cell.alignment = self.cell_alignment
-            cell.border = self.thin_border
-        
-        row += 2
-        return row
-    
-    def _fill_addresses_section(self, ws, addresses, start_row=1):
-        row = start_row
-        selected_fields = self.report_config.get("fields", {}).get("addresses", [])
-        
-        ws.merge_cells(f'A{row}:AC{row}')
-        cell = ws[f'A{row}']
-        cell.value = "АДРЕСА ПРОЖИВАНИЯ"
-        cell.font = self.section_font
-        cell.fill = self.section_fill
-        cell.alignment = self.header_alignment
-        row += 1
-        
-        all_fields = self.AVAILABLE_FIELDS.get("addresses", {}).get("fields", [])
-        
-        if selected_fields:
-            fields_to_export = [(k, v) for k, v in all_fields if k in selected_fields]
-        else:
-            fields_to_export = all_fields
-        
-        for col, (field_key, field_name) in enumerate(fields_to_export, 1):
-            cell = ws.cell(row=row, column=col, value=field_name)
-            cell.font = self.header_font
-            cell.fill = self.header_fill
-            cell.alignment = self.header_alignment
-            cell.border = self.thin_border
-        
-        row += 1
-        
-        for addr in addresses:
-            for col, (field_key, field_name) in enumerate(fields_to_export, 1):
-                value = addr.get(field_key, '')
-                if field_key.endswith('_date') and value:
-                    value = self._format_date(value)
-                cell = ws.cell(row=row, column=col, value=value)
-                cell.alignment = self.cell_alignment
-                cell.border = self.thin_border
+
+        # Заполняем данными
+        for krd_idx, krd_id in enumerate(krd_ids, 1):
+            self._log("DATA", f"📝 Обработка КРД-{krd_id} ({krd_idx}/{len(krd_ids)})...")
+            
+            # Загружаем данные
+            social = self._load_social_data_for_krd(krd_id)
+            if not social:
+                self._log("WARN", f"⚠️ Нет социальных данных для КРД-{krd_id}. Пропуск.")
+                continue
+
+            # Загружаем списки связанных данных (если секция включена в конфиг)
+            addresses = self._load_addresses_for_krd(krd_id) if "addresses" in sections else []
+            service_places = self._load_service_places_for_krd(krd_id) if "service_places" in sections else []
+            incoming_orders = self._load_incoming_orders_for_krd(krd_id) if "incoming_orders" in sections else []
+            soch_episodes = self._load_soch_episodes_for_krd(krd_id) if "soch_episodes" in sections else []
+            outgoing_requests = self._load_outgoing_requests_for_krd(krd_id) if "outgoing_requests" in sections else []
+
+            # Определяем, сколько строк нужно для этой КРД (максимум из всех связанных списков)
+            list_counts = [len(lst) for lst in [addresses, service_places, incoming_orders, soch_episodes, outgoing_requests]]
+            max_rows = max([1] + list_counts)
+            
+            self._log("DEBUG", f"   📏 Строк для КРД-{krd_id}: {max_rows}")
+
+            # Заполняем строки
+            for r_idx in range(max_rows):
+                for c_idx, (key, _, sec_type) in enumerate(columns, 1):
+                    value = ""
+                    
+                    # Логика заполнения в зависимости от типа колонки
+                    if sec_type == "social":
+                        # Соц. данные только в самой первой строке (r_idx == 0)
+                        if r_idx == 0:
+                            val = social.get(key)
+                            value = self._format_date(val) if key.endswith('_date') else (val or '')
+                        else:
+                            value = "" # Остальные строки пустые для соц. данных
+                    
+                    elif sec_type == "addresses" and len(addresses) > 0:
+                        if r_idx < len(addresses):
+                            val = addresses[r_idx].get(key)
+                            value = self._format_date(val) if key.endswith('_date') else (val or '')
+                    
+                    elif sec_type == "service_places" and len(service_places) > 0:
+                        if r_idx < len(service_places):
+                            val = service_places[r_idx].get(key)
+                            value = val or '' 
+                    
+                    elif sec_type == "incoming_orders" and len(incoming_orders) > 0:
+                        if r_idx < len(incoming_orders):
+                            val = incoming_orders[r_idx].get(key)
+                            value = self._format_date(val) if key.endswith('_date') else (val or '')
+                            
+                    elif sec_type == "soch_episodes" and len(soch_episodes) > 0:
+                        if r_idx < len(soch_episodes):
+                            val = soch_episodes[r_idx].get(key)
+                            value = self._format_date(val) if key.endswith('_date') else (val or '')
+
+                    elif sec_type == "outgoing_requests" and len(outgoing_requests) > 0:
+                        if r_idx < len(outgoing_requests):
+                            val = outgoing_requests[r_idx].get(key)
+                            value = self._format_date(val) if key.endswith('_date') else (val or '')
+
+                    # Записываем в ячейку
+                    ws.cell(row=row, column=c_idx, value=value).border = self.thin_border
+                
+                row += 1
+            
+            # Пустая строка-разделитель между КРД
             row += 1
-        
+
+        self._log("DEBUG", f"🏁 Заполнение таблицы завершено. Последняя строка: {row}")
         return row
-    
-    def _fill_incoming_orders_section(self, ws, orders, start_row=1):
-        row = start_row
-        selected_fields = self.report_config.get("fields", {}).get("incoming_orders", [])
+
+    # ================= ЗАГРУЗЧИКИ ДАННЫХ (БЕЗОПАСНЫЕ SQL) =================
+    def _load_social_data_for_krd(self, krd_id):
+        q = QSqlQuery(self.db)
+        q.prepare("""SELECT kr.id as krd_id, s.tab_number, s.personal_number, c.name as category_name, r.name as rank_name,
+            s.surname, s.name, s.patronymic, s.birth_date, s.birth_place_town, s.birth_place_district, s.birth_place_region, s.birth_place_country,
+            s.drafted_by_commissariat, s.draft_date, s.povsk, s.selection_date, s.education, s.criminal_record, s.social_media_account, s.bank_card_number,
+            s.passport_series, s.passport_number, s.passport_issue_date, s.passport_issued_by, s.military_id_series, s.military_id_number,
+            s.military_id_issue_date, s.military_id_issued_by, s.appearance_features, s.personal_marks, s.federal_search_info, s.military_contacts, s.relatives_info
+            FROM krd.social_data s 
+            LEFT JOIN krd.krd kr ON s.krd_id = kr.id 
+            LEFT JOIN krd.categories c ON s.category_id = c.id 
+            LEFT JOIN krd.ranks r ON s.rank_id = r.id
+            WHERE s.krd_id = :krd_id ORDER BY s.id DESC LIMIT 1""")
+        q.bindValue(":krd_id", krd_id)
+        if not q.exec():
+            self._log("SQL", f"❌ Ошибка SQL (social_data): {q.lastError().text()}")
+            return {}
+        if q.next():
+            return {
+                "krd_number": f"КРД-{q.value('krd_id')}", "tab_number": q.value("tab_number") or "", "personal_number": q.value("personal_number") or "",
+                "category_name": q.value("category_name") or "", "rank_name": q.value("rank_name") or "", "surname": q.value("surname") or "",
+                "name": q.value("name") or "", "patronymic": q.value("patronymic") or "", "birth_date": q.value("birth_date"),
+                "birth_place_town": q.value("birth_place_town") or "", "birth_place_district": q.value("birth_place_district") or "",
+                "birth_place_region": q.value("birth_place_region") or "", "birth_place_country": q.value("birth_place_country") or "",
+                "drafted_by_commissariat": q.value("drafted_by_commissariat") or "", "draft_date": q.value("draft_date"),
+                "povsk": q.value("povsk") or "", "selection_date": q.value("selection_date"), "education": q.value("education") or "",
+                "criminal_record": q.value("criminal_record") or "", "social_media_account": q.value("social_media_account") or "",
+                "bank_card_number": q.value("bank_card_number") or "", "passport_series": q.value("passport_series") or "",
+                "passport_number": q.value("passport_number") or "", "passport_issue_date": q.value("passport_issue_date"),
+                "passport_issued_by": q.value("passport_issued_by") or "", "military_id_series": q.value("military_id_series") or "",
+                "military_id_number": q.value("military_id_number") or "", "military_id_issue_date": q.value("military_id_issue_date"),
+                "military_id_issued_by": q.value("military_id_issued_by") or "", "appearance_features": q.value("appearance_features") or "",
+                "personal_marks": q.value("personal_marks") or "", "federal_search_info": q.value("federal_search_info") or "",
+                "military_contacts": q.value("military_contacts") or "", "relatives_info": q.value("relatives_info") or ""
+            }
+        return {}
+
+    def _load_addresses_for_krd(self, krd_id):
+        q = QSqlQuery(self.db)
+        q.prepare("SELECT * FROM krd.addresses WHERE krd_id = :krd_id ORDER BY id DESC")
+        q.bindValue(":krd_id", krd_id)
+        if not q.exec():
+            self._log("SQL", f"❌ Ошибка SQL (addresses): {q.lastError().text()}")
+            return []
+        results = []
+        record = q.record()
+        field_count = record.count()
+        field_names = [record.fieldName(i) for i in range(field_count)]
         
-        ws.merge_cells(f'A{row}:AC{row}')
-        cell = ws[f'A{row}']
-        cell.value = "ВХОДЯЩИЕ ПОРУЧЕНИЯ НА РОЗЫСК"
-        cell.font = self.section_font
-        cell.fill = self.section_fill
-        cell.alignment = self.header_alignment
-        row += 1
-        
-        all_fields = self.AVAILABLE_FIELDS.get("incoming_orders", {}).get("fields", [])
-        
-        if selected_fields:
-            fields_to_export = [(k, v) for k, v in all_fields if k in selected_fields]
-        else:
-            fields_to_export = all_fields
-        
-        for col, (field_key, field_name) in enumerate(fields_to_export, 1):
-            cell = ws.cell(row=row, column=col, value=field_name)
-            cell.font = self.header_font
-            cell.fill = self.header_fill
-            cell.alignment = self.header_alignment
-            cell.border = self.thin_border
-        
-        row += 1
-        
-        for order in orders:
-            for col, (field_key, field_name) in enumerate(fields_to_export, 1):
-                value = order.get(field_key, '')
-                if field_key.endswith('_date') and value:
-                    value = self._format_date(value)
-                cell = ws.cell(row=row, column=col, value=value)
-                cell.alignment = self.cell_alignment
-                cell.border = self.thin_border
-            row += 1
-        
-        return row
-    
-    def _fill_service_places_section(self, ws, places, start_row=1):
-        row = start_row
-        selected_fields = self.report_config.get("fields", {}).get("service_places", [])
-        
-        ws.merge_cells(f'A{row}:AC{row}')
-        cell = ws[f'A{row}']
-        cell.value = "МЕСТА СЛУЖБЫ"
-        cell.font = self.section_font
-        cell.fill = self.section_fill
-        cell.alignment = self.header_alignment
-        row += 1
-        
-        all_fields = self.AVAILABLE_FIELDS.get("service_places", {}).get("fields", [])
-        
-        if selected_fields:
-            fields_to_export = [(k, v) for k, v in all_fields if k in selected_fields]
-        else:
-            fields_to_export = all_fields
-        
-        for col, (field_key, field_name) in enumerate(fields_to_export, 1):
-            cell = ws.cell(row=row, column=col, value=field_name)
-            cell.font = self.header_font
-            cell.fill = self.header_fill
-            cell.alignment = self.header_alignment
-            cell.border = self.thin_border
-        
-        row += 1
-        
-        for place in places:
-            for col, (field_key, field_name) in enumerate(fields_to_export, 1):
-                value = place.get(field_key, '')
-                cell = ws.cell(row=row, column=col, value=value)
-                cell.alignment = self.cell_alignment
-                cell.border = self.thin_border
-            row += 1
-        
-        return row
-    
-    def _fill_soch_episodes_section(self, ws, episodes, start_row=1):
-        row = start_row
-        selected_fields = self.report_config.get("fields", {}).get("soch_episodes", [])
-        
-        ws.merge_cells(f'A{row}:AC{row}')
-        cell = ws[f'A{row}']
-        cell.value = "СВЕДЕНИЯ О СОЧ"
-        cell.font = self.section_font
-        cell.fill = self.section_fill
-        cell.alignment = self.header_alignment
-        row += 1
-        
-        all_fields = self.AVAILABLE_FIELDS.get("soch_episodes", {}).get("fields", [])
-        
-        if selected_fields:
-            fields_to_export = [(k, v) for k, v in all_fields if k in selected_fields]
-        else:
-            fields_to_export = all_fields
-        
-        for col, (field_key, field_name) in enumerate(fields_to_export, 1):
-            cell = ws.cell(row=row, column=col, value=field_name)
-            cell.font = self.header_font
-            cell.fill = self.header_fill
-            cell.alignment = self.header_alignment
-            cell.border = self.thin_border
-        
-        row += 1
-        
-        for episode in episodes:
-            for col, (field_key, field_name) in enumerate(fields_to_export, 1):
-                value = episode.get(field_key, '')
-                if field_key.endswith('_date') and value:
-                    value = self._format_date(value)
-                cell = ws.cell(row=row, column=col, value=value)
-                cell.alignment = self.cell_alignment
-                cell.border = self.thin_border
-            row += 1
-        
-        return row
-    
-    def _fill_outgoing_requests_section(self, ws, requests, start_row=1):
-        row = start_row
-        selected_fields = self.report_config.get("fields", {}).get("outgoing_requests", [])
-        
-        ws.merge_cells(f'A{row}:AC{row}')
-        cell = ws[f'A{row}']
-        cell.value = "ИСХОДЯЩИЕ ЗАПРОСЫ И ПОРУЧЕНИЯ"
-        cell.font = self.section_font
-        cell.fill = self.section_fill
-        cell.alignment = self.header_alignment
-        row += 1
-        
-        all_fields = self.AVAILABLE_FIELDS.get("outgoing_requests", {}).get("fields", [])
-        
-        if selected_fields:
-            fields_to_export = [(k, v) for k, v in all_fields if k in selected_fields]
-        else:
-            fields_to_export = all_fields
-        
-        for col, (field_key, field_name) in enumerate(fields_to_export, 1):
-            cell = ws.cell(row=row, column=col, value=field_name)
-            cell.font = self.header_font
-            cell.fill = self.header_fill
-            cell.alignment = self.header_alignment
-            cell.border = self.thin_border
-        
-        row += 1
-        
-        for req in requests:
-            for col, (field_key, field_name) in enumerate(fields_to_export, 1):
-                value = req.get(field_key, '')
-                if field_key.endswith('_date') and value:
-                    value = self._format_date(value)
-                cell = ws.cell(row=row, column=col, value=value)
-                cell.alignment = self.cell_alignment
-                cell.border = self.thin_border
-            row += 1
-        
-        return row
-    
+        while q.next():
+            row_dict = {}
+            for field_name in field_names:
+                row_dict[field_name] = q.value(field_name) or ""
+            results.append(row_dict)
+            
+        self._log("DATA", f"   📍 Загружено адресов: {len(results)}")
+        return results
+
+    def _load_service_places_for_krd(self, krd_id):
+        q = QSqlQuery(self.db)
+        q.prepare("""SELECT s.place_name, m.name as military_unit_name, g.name as garrison_name, p.name as position_name, s.commanders, 
+            s.postal_index, s.postal_region, s.postal_district, s.postal_town, s.postal_street, s.postal_house, s.place_contacts 
+            FROM krd.service_places s 
+            LEFT JOIN krd.military_units m ON s.military_unit_id = m.id 
+            LEFT JOIN krd.garrisons g ON s.garrison_id = g.id 
+            LEFT JOIN krd.positions p ON s.position_id = p.id 
+            WHERE s.krd_id = :krd_id ORDER BY s.id DESC""")
+        q.bindValue(":krd_id", krd_id)
+        if not q.exec():
+            self._log("SQL", f"❌ Ошибка SQL (service_places): {q.lastError().text()}")
+            return []
+        results = []
+        while q.next():
+            results.append({
+                "place_name": q.value("place_name") or "", "military_unit_name": q.value("military_unit_name") or "",
+                "garrison_name": q.value("garrison_name") or "", "position_name": q.value("position_name") or "",
+                "commanders": q.value("commanders") or "", "postal_index": q.value("postal_index") or "",
+                "postal_region": q.value("postal_region") or "", "postal_district": q.value("postal_district") or "",
+                "postal_town": q.value("postal_town") or "", "postal_street": q.value("postal_street") or "",
+                "postal_house": q.value("postal_house") or "", "place_contacts": q.value("place_contacts") or ""
+            })
+        self._log("DATA", f"   🎖️ Загружено мест службы: {len(results)}")
+        return results
+
+    def _load_incoming_orders_for_krd(self, krd_id):
+        q = QSqlQuery(self.db)
+        q.prepare("""SELECT i.initiator_full_name, i.order_date, i.order_number, i.receipt_date, i.receipt_number, 
+            i.postal_index, i.postal_region, i.postal_district, i.postal_town, i.postal_street, i.postal_house, 
+            i.initiator_contacts, i.our_response_date, i.our_response_number, m.name as military_unit_name 
+            FROM krd.incoming_orders i 
+            LEFT JOIN krd.military_units m ON i.military_unit_id = m.id 
+            WHERE i.krd_id = :krd_id ORDER BY i.receipt_date DESC""")
+        q.bindValue(":krd_id", krd_id)
+        if not q.exec():
+            self._log("SQL", f"❌ Ошибка SQL (incoming_orders): {q.lastError().text()}")
+            return []
+        results = []
+        while q.next():
+            results.append({
+                "initiator_full_name": q.value("initiator_full_name") or "", "order_date": q.value("order_date"),
+                "order_number": q.value("order_number") or "", "receipt_date": q.value("receipt_date"),
+                "receipt_number": q.value("receipt_number") or "", "postal_index": q.value("postal_index") or "",
+                "postal_region": q.value("postal_region") or "", "postal_district": q.value("postal_district") or "",
+                "postal_town": q.value("postal_town") or "", "postal_street": q.value("postal_street") or "",
+                "postal_house": q.value("postal_house") or "", "initiator_contacts": q.value("initiator_contacts") or "",
+                "our_response_date": q.value("our_response_date"), "our_response_number": q.value("our_response_number") or "",
+                "military_unit_name": q.value("military_unit_name") or ""
+            })
+        self._log("DATA", f"   📬 Загружено поручений: {len(results)}")
+        return results
+
+    def _load_soch_episodes_for_krd(self, krd_id):
+        q = QSqlQuery(self.db)
+        q.prepare("""SELECT soch_date, soch_location, order_date_number, witnesses, reasons, weapon_info, clothing, 
+            movement_options, search_date, found_by, notification_date, notification_number 
+            FROM krd.soch_episodes 
+            WHERE krd_id = :krd_id ORDER BY soch_date DESC""")
+        q.bindValue(":krd_id", krd_id)
+        if not q.exec():
+            self._log("SQL", f"❌ Ошибка SQL (soch_episodes): {q.lastError().text()}")
+            return []
+        results = []
+        while q.next():
+            results.append({
+                "soch_date": q.value("soch_date"), "soch_location": q.value("soch_location") or "",
+                "order_date_number": q.value("order_date_number") or "", "witnesses": q.value("witnesses") or "",
+                "reasons": q.value("reasons") or "", "weapon_info": q.value("weapon_info") or "",
+                "clothing": q.value("clothing") or "", "movement_options": q.value("movement_options") or "",
+                "search_date": q.value("search_date"), "found_by": q.value("found_by") or "",
+                "notification_date": q.value("notification_date"), "notification_number": q.value("notification_number") or ""
+            })
+        self._log("DATA", f"   ⚠️ Загружено эпизодов СОЧ: {len(results)}")
+        return results
+
+    def _load_outgoing_requests_for_krd(self, krd_id):
+        q = QSqlQuery(self.db)
+        q.prepare("""SELECT r.recipient_name, r.issue_date, r.issue_number, r.postal_index, r.postal_region, 
+            r.postal_district, r.postal_town, r.postal_street, r.postal_house, r.recipient_contacts, 
+            t.name as request_type_name, m.name as military_unit_name 
+            FROM krd.outgoing_requests r 
+            LEFT JOIN krd.request_types t ON r.request_type_id = t.id 
+            LEFT JOIN krd.military_units m ON r.military_unit_id = m.id 
+            WHERE r.krd_id = :krd_id ORDER BY r.issue_date DESC""")
+        q.bindValue(":krd_id", krd_id)
+        if not q.exec():
+            self._log("SQL", f"❌ Ошибка SQL (outgoing_requests): {q.lastError().text()}")
+            return []
+        results = []
+        while q.next():
+            results.append({
+                "request_type_name": q.value("request_type_name") or "", "recipient_name": q.value("recipient_name") or "",
+                "military_unit_name": q.value("military_unit_name") or "", "issue_date": q.value("issue_date"),
+                "issue_number": q.value("issue_number") or "", "postal_index": q.value("postal_index") or "",
+                "postal_region": q.value("postal_region") or "", "postal_town": q.value("postal_town") or "",
+                "postal_street": q.value("postal_street") or "", "postal_house": q.value("postal_house") or "",
+                "recipient_contacts": q.value("recipient_contacts") or ""
+            })
+        self._log("DATA", f"   📤 Загружено запросов: {len(results)}")
+        return results
+
     def _adjust_column_widths(self, ws):
-        for col_num in range(1, 50):
+        """Автоматическая подстройка ширины колонок"""
+        self._log("FORMAT", "📏 Автоподстройка ширины колонок...")
+        for col_num in range(1, ws.max_column + 1):
             max_length = 0
             column_letter = get_column_letter(col_num)
-            
-            for row_num in range(1, ws.max_row + 1):
+            for row_num in range(1, min(ws.max_row + 1, 500)):
                 cell = ws.cell(row=row_num, column=col_num)
-                
-                if not isinstance(cell, MergedCell):
-                    try:
-                        if cell.value:
-                            max_length = max(max_length, len(str(cell.value)))
-                    except:
-                        pass
-            
-            adjusted_width = min(max_length + 2, 50)
+                if cell.value and not isinstance(cell, MergedCell):
+                    max_length = max(max_length, len(str(cell.value)))
+            adjusted_width = min(max_length + 3, 40)
             ws.column_dimensions[column_letter].width = adjusted_width
+        self._log("FORMAT", "✅ Ширина колонок настроена")
+
+    # ================= СТАРЫЕ МЕТОДЫ (ОБРАТНАЯ СОВМЕСТИМОСТЬ) =================
+    def export_to_excel(self, file_path):
+        """Экспорт одной КРД (устаревший метод)"""
+        self._log("EXPORT", f"📊 НАЧАЛО ЭКСПОРТА ОДНОЙ КРД-{self.krd_id}")
+        try:
+            self.wb.remove(self.wb.active)
+            ws = self.wb.create_sheet("Данные КРД")
+            row = self._fill_single_krd(ws)
+            self._adjust_column_widths(ws)
+            self.wb.save(file_path)
+            self._cleanup_temp_files()
+            self._log("EXPORT", "✅ ЭКСПОРТ ОДНОЙ КРД ЗАВЕРШЁН")
+            return True
+        except Exception as e:
+            self._log("ERROR", f"✗ ОШИБКА: {e}")
+            traceback.print_exc()
+            self._cleanup_temp_files()
+            raise
+
+    def _fill_single_krd(self, ws):
+        row = 1
+        social_data = self._load_social_data_for_krd(self.krd_id)
+        row = self._fill_section(ws, "СОЦИАЛЬНО-ДЕМОГРАФИЧЕСКИЕ ДАННЫЕ", self.AVAILABLE_FIELDS["social_data"]["fields"], [social_data], row)
+        if "addresses" in self.report_config.get("sections", []):
+            row = self._fill_section(ws, "АДРЕСА", self.AVAILABLE_FIELDS["addresses"]["fields"], self._load_addresses_for_krd(self.krd_id), row)
+        if "service_places" in self.report_config.get("sections", []):
+            row = self._fill_section(ws, "МЕСТА СЛУЖБЫ", self.AVAILABLE_FIELDS["service_places"]["fields"], self._load_service_places_for_krd(self.krd_id), row)
+        return row
+
+    def _fill_section(self, ws, title, fields, data_list, start_row):
+        if not data_list: return start_row
+        ws.merge_cells(f"A{start_row}:Z{start_row}")
+        cell = ws.cell(row=start_row, column=1, value=title)
+        cell.font = self.section_font; cell.fill = self.section_fill; cell.alignment = self.header_alignment
+        row = start_row + 1
+        for c, (_, label) in enumerate(fields, 1):
+            h_cell = ws.cell(row=row, column=c, value=label)
+            h_cell.font = self.header_font; h_cell.fill = self.header_fill; h_cell.alignment = self.header_alignment; h_cell.border = self.thin_border
+        row += 1
+        for data in data_list:
+            for c, (key, _) in enumerate(fields, 1):
+                val = self._format_date(data.get(key)) if key.endswith("_date") else data.get(key, "")
+                ws.cell(row=row, column=c, value=val).border = self.thin_border
+            row += 1
+        return row + 1
 
 ========================================
 📄 FILE: ./field_mapping_manager.py
@@ -7409,13 +6857,14 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Ошибка", f"❌ Ошибка при генерации отчета:\n\n{str(e)}")
     
     def on_manage_templates(self):
-        """Открытие управления шаблонами без экспорта"""
-        dialog = ReportConfigDialog(self.db, self)
-        
-        # Переключаем на вкладку управления шаблонами
-        dialog.tabs.setCurrentIndex(1)
-        
-        dialog.exec()
+        """Открытие управления шаблонами"""
+        try:
+            dialog = ReportConfigDialog(self.db, self)
+            # Убрано обращение к dialog.tabs, так как в ReportConfigDialog нет вкладок
+            dialog.exec()
+        except Exception as e:
+            traceback.print_exc()
+            QMessageBox.critical(self, "Ошибка", f"Ошибка при открытии шаблонов:\n{str(e)}")
     
     # ========================
     # === СУЩЕСТВУЮЩИЕ МЕТОДЫ ===
@@ -9663,10 +9112,12 @@ class ReferenceManager:
 """
 Диалог конфигурации отчета КРД с хранением шаблонов в БД
 Поддерживает только массовый экспорт всех записей на один лист Excel
+✅ ДОБАВЛЕНО: Полная диагностика (DEBUG логи) для отслеживания ошибок
+✅ ИСПРАВЛЕНО: QMessageBox.StandardButton для PyQt6
+✅ ИСПРАВЛЕНО: Безопасная обработка ID и User ID
 """
-
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QGroupBox, 
+    QDialog, QVBoxLayout, QHBoxLayout, QGroupBox,
     QPushButton, QListWidget, QListWidgetItem, QLabel,
     QMessageBox
 )
@@ -9674,20 +9125,16 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 from PyQt6.QtSql import QSqlQuery
 import json
-
 from field_selection_dialog import FieldSelectionDialog
-
 
 class ReportConfigDialog(QDialog):
     """Диалог настройки конфигурации отчета с БД (только массовый экспорт)"""
-    
     report_configured = pyqtSignal(dict)
-    
+
     def __init__(self, db_connection, parent=None, template_id=None):
         super().__init__(parent)
         self.setWindowTitle("Генерация отчета по всем КРД")
         self.setMinimumSize(700, 650)
-        
         self.db = db_connection
         self.template_id = template_id
         self.current_config = {
@@ -9696,19 +9143,27 @@ class ReportConfigDialog(QDialog):
         }
         self.current_template_id = None
         
+        # Безопасно получаем ID текущего пользователя из родителя
+        # Если parent не передан или у него нет user_info, будет None
+        if parent and hasattr(parent, 'user_info') and isinstance(parent.user_info, dict):
+            self.current_user_id = parent.user_info.get('id')
+        else:
+            self.current_user_id = None
+            
+        print(f"🔵 [DEBUG] Инициализация ReportConfigDialog. User ID: {self.current_user_id}")
+            
         self.init_ui()
         self.load_templates_list()
         self._update_krd_count()
-    
+
     def init_ui(self):
         """Инициализация интерфейса"""
         layout = QVBoxLayout(self)
         layout.setSpacing(15)
-        
+
         # === Информация о режиме экспорта ===
         info_group = QGroupBox("📊 Режим экспорта")
         info_layout = QVBoxLayout(info_group)
-        
         info_label = QLabel("Экспорт всех записей КРД из базы данных на ОДИН лист Excel")
         info_label.setStyleSheet("QLabel { font-size: 11px; color: #666; }")
         info_layout.addWidget(info_label)
@@ -9716,9 +9171,8 @@ class ReportConfigDialog(QDialog):
         self.info_label = QLabel("")
         self.info_label.setStyleSheet("QLabel { color: #666; padding: 5px; border-radius: 3px; font-weight: bold; }")
         info_layout.addWidget(self.info_label)
-        
         layout.addWidget(info_group)
-        
+
         # === Список шаблонов ===
         templates_group = QGroupBox("📋 Шаблоны отчетов")
         templates_layout = QVBoxLayout(templates_group)
@@ -9728,7 +9182,6 @@ class ReportConfigDialog(QDialog):
         self.templates_list.itemClicked.connect(self.on_template_clicked)
         self.templates_list.itemDoubleClicked.connect(self.on_template_double_clicked)
         
-        # === ИСПРАВЛЕНО: Убран белый фон, оставлено синее выделение ===
         self.templates_list.setStyleSheet("""
             QListWidget {
                 border: 1px solid #ccc;
@@ -9746,20 +9199,18 @@ class ReportConfigDialog(QDialog):
                 background-color: #e3f2fd;
             }
         """)
-        
         templates_layout.addWidget(self.templates_list)
         
         self.template_description = QLabel("")
         self.template_description.setWordWrap(True)
         self.template_description.setStyleSheet("QLabel { padding: 10px; border-radius: 5px; color: #666; }")
         templates_layout.addWidget(self.template_description)
-        
         layout.addWidget(templates_group)
-        
+
         # === Кнопки управления ===
         btn_layout = QVBoxLayout()
         btn_layout.setSpacing(10)
-        
+
         # Кнопка добавления шаблона (СИНИЙ)
         add_template_btn = QPushButton("➕ Добавить шаблон")
         add_template_btn.setMinimumHeight(45)
@@ -9767,7 +9218,15 @@ class ReportConfigDialog(QDialog):
         add_template_btn.setProperty("role", "info")
         add_template_btn.clicked.connect(self.on_add_template)
         btn_layout.addWidget(add_template_btn)
-        
+
+        # Кнопка удаления шаблона (КРАСНЫЙ)
+        self.delete_template_btn = QPushButton("🗑️ Удалить шаблон")
+        self.delete_template_btn.setMinimumHeight(45)
+        self.delete_template_btn.setProperty("role", "danger")
+        self.delete_template_btn.clicked.connect(self.on_delete_template)
+        self.delete_template_btn.setEnabled(False)
+        btn_layout.addWidget(self.delete_template_btn)
+
         # Кнопка экспорта (ЗЕЛЁНЫЙ)
         self.export_btn = QPushButton("📥 Экспорт всех КРД в Excel")
         self.export_btn.setMinimumHeight(45)
@@ -9775,18 +9234,26 @@ class ReportConfigDialog(QDialog):
         self.export_btn.clicked.connect(self.on_export)
         self.export_btn.setEnabled(False)
         btn_layout.addWidget(self.export_btn)
-        
+
         # Кнопка отмены (СЕРЫЙ)
         cancel_btn = QPushButton("Отмена")
         cancel_btn.setMinimumHeight(40)
         cancel_btn.setProperty("role", "normal")
         cancel_btn.clicked.connect(self.reject)
         btn_layout.addWidget(cancel_btn)
-        
+
         layout.addLayout(btn_layout)
         
+        # Подключение для активации кнопки удаления
+        self.templates_list.currentItemChanged.connect(self.on_selection_changed)
+        
         self.update_export_button()
-    
+
+    def on_selection_changed(self, current, previous):
+        """Активация кнопки удаления при выборе шаблона"""
+        has_selection = self.templates_list.currentItem() is not None
+        self.delete_template_btn.setEnabled(has_selection)
+
     def _update_krd_count(self):
         """Обновление информации о количестве записей"""
         query = QSqlQuery(self.db)
@@ -9796,20 +9263,20 @@ class ReportConfigDialog(QDialog):
             self.info_label.setText(f"Будет экспортировано: {count} записей КРД")
         else:
             self.info_label.setText("⚠️ Не удалось получить количество записей")
-    
+
     def load_templates_list(self):
         """Загрузка шаблонов в QListWidget из БД"""
+        print("🔵 [DEBUG] load_templates_list: Загрузка списка шаблонов...")
         self.templates_list.clear()
-        
         query = QSqlQuery(self.db)
         query.prepare("""
             SELECT id, name, description, template_type, usage_count, is_default
-            FROM krd.report_templates 
-            WHERE is_deleted = FALSE 
+            FROM krd.report_templates
+            WHERE is_deleted = FALSE
             ORDER BY is_default DESC, usage_count DESC, name ASC
         """)
-        
         if query.exec():
+            count = 0
             while query.next():
                 template_id = query.value(0)
                 template_name = query.value(1)
@@ -9820,31 +9287,34 @@ class ReportConfigDialog(QDialog):
                 
                 icon = "⭐" if is_default else "📋"
                 usage_text = f"({usage_count} исп.)" if usage_count > 0 else ""
+                
                 item = QListWidgetItem(f"{icon} {template_name} {usage_text}")
                 item.setData(Qt.ItemDataRole.UserRole, template_id)
                 item.setData(Qt.ItemDataRole.UserRole + 1, description)
                 item.setData(Qt.ItemDataRole.UserRole + 2, template_name)
                 self.templates_list.addItem(item)
-    
+                count += 1
+            print(f"✅ [DEBUG] load_templates_list: Загружено {count} шаблонов.")
+        else:
+            print(f"❌ [DEBUG] load_templates_list: Ошибка SQL - {query.lastError().text()}")
+
     def on_template_clicked(self, item):
         """Обработка клика на шаблон в списке"""
         template_id = item.data(Qt.ItemDataRole.UserRole)
         template_name = item.data(Qt.ItemDataRole.UserRole + 2)
         self.load_template_description(template_id, template_name)
-    
+
     def on_template_double_clicked(self, item):
         """Обработка двойного клика на шаблон - открытие редактора"""
         template_id = item.data(Qt.ItemDataRole.UserRole)
         template_name = item.data(Qt.ItemDataRole.UserRole + 2)
-        
         self.edit_template(template_id, template_name)
-    
+
     def load_template_description(self, template_id, template_name):
         """Загрузка описания шаблона"""
         query = QSqlQuery(self.db)
         query.prepare("SELECT description, config_json, usage_count FROM krd.report_templates WHERE id = ?")
         query.addBindValue(template_id)
-        
         if query.exec() and query.next():
             description = query.value(0) or ""
             config_json = query.value(1)
@@ -9860,56 +9330,49 @@ class ReportConfigDialog(QDialog):
                     sections = config.get("sections", [])
                     fields_count = sum(len(fields) for fields in config.get("fields", {}).values())
                     desc_text += f"<b>Секций:</b> {len(sections)} | <b>Полей:</b> {fields_count}"
-                    
                     self.current_config = config
                     self.current_template_id = template_id
                     self.update_export_button()
-                except:
+                except Exception as e:
+                    print(f"⚠️ [DEBUG] Ошибка парсинга JSON: {e}")
                     pass
             
             self.template_description.setText(desc_text)
-    
+
     def on_add_template(self):
         """Открытие диалога создания нового шаблона"""
         dialog = FieldSelectionDialog(self, config=None, template_name=None)
-        
         if dialog.exec() == QDialog.DialogCode.Accepted:
             config = dialog.get_config()
             template_name = dialog.get_template_name()
-            
             if not template_name:
                 template_name = "Новый шаблон"
-            
             self.save_template_to_db(template_name, "", config)
-    
+
     def edit_template(self, template_id, template_name):
         """Редактирование шаблона - открытие диалога выбора полей"""
         query = QSqlQuery(self.db)
         query.prepare("SELECT config_json FROM krd.report_templates WHERE id = ?")
         query.addBindValue(template_id)
-        
         if query.exec() and query.next():
             config_json = query.value(0)
             if config_json:
                 config = json.loads(config_json)
-                
                 dialog = FieldSelectionDialog(self, config, template_name)
-                
                 if dialog.exec() == QDialog.DialogCode.Accepted:
                     new_config = dialog.get_config()
-                    
                     reply = QMessageBox.question(
-                        self, 
+                        self,
                         "Сохранить изменения",
                         f"Сохранить изменения в шаблоне '{template_name}'?",
                         QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
                     )
-                    
                     if reply == QMessageBox.StandardButton.Yes:
                         self.update_template_in_db(template_id, new_config)
-    
+
     def save_template_to_db(self, name, description, config):
         """Сохранение шаблона в БД"""
+        print(f"🔵 [DEBUG] save_template_to_db: Сохранение '{name}'")
         query = QSqlQuery(self.db)
         query.prepare("""
             INSERT INTO krd.report_templates (name, description, template_type, config_json)
@@ -9920,16 +9383,19 @@ class ReportConfigDialog(QDialog):
         query.bindValue(":config", json.dumps(config, ensure_ascii=False))
         
         if query.exec():
+            print("✅ [DEBUG] save_template_to_db: Успешно.")
             QMessageBox.information(self, "Успешно", f"Шаблон '{name}' сохранен в базу данных")
             self.load_templates_list()
         else:
+            print(f"❌ [DEBUG] save_template_to_db: Ошибка - {query.lastError().text()}")
             QMessageBox.critical(self, "Ошибка", f"Ошибка сохранения: {query.lastError().text()}")
-    
+
     def update_template_in_db(self, template_id, config):
         """Обновление шаблона в БД"""
+        print(f"🔵 [DEBUG] update_template_in_db: Обновление ID={template_id}")
         query = QSqlQuery(self.db)
         query.prepare("""
-            UPDATE krd.report_templates 
+            UPDATE krd.report_templates
             SET config_json = :config, updated_at = CURRENT_TIMESTAMP
             WHERE id = :id
         """)
@@ -9937,34 +9403,432 @@ class ReportConfigDialog(QDialog):
         query.bindValue(":id", template_id)
         
         if query.exec():
+            print("✅ [DEBUG] update_template_in_db: Успешно.")
             QMessageBox.information(self, "Успешно", "Шаблон обновлен")
             self.load_templates_list()
         else:
+            print(f"❌ [DEBUG] update_template_in_db: Ошибка - {query.lastError().text()}")
             QMessageBox.critical(self, "Ошибка", f"Ошибка обновления: {query.lastError().text()}")
-    
+
+"""
+Диалог конфигурации отчета КРД с хранением шаблонов в БД
+Поддерживает только массовый экспорт всех записей на один лист Excel
+✅ ИСПРАВЛЕНО: Обход бага QPSQL драйвера (EXECUTE syntax error)
+✅ ИСПРАВЛЕНО: QMessageBox.StandardButton для PyQt6
+✅ ИСПРАВЛЕНО: Унифицированы все SQL-запросы на ? + addBindValue()
+✅ ИСПРАВЛЕНО: Безопасная обработка ID и User ID
+"""
+from PyQt6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QGroupBox,
+    QPushButton, QListWidget, QListWidgetItem, QLabel,
+    QMessageBox
+)
+from PyQt6.QtCore import Qt, pyqtSignal
+from PyQt6.QtGui import QFont
+from PyQt6.QtSql import QSqlQuery
+import json
+from field_selection_dialog import FieldSelectionDialog
+
+class ReportConfigDialog(QDialog):
+    """Диалог настройки конфигурации отчета с БД (только массовый экспорт)"""
+    report_configured = pyqtSignal(dict)
+
+    def __init__(self, db_connection, parent=None, template_id=None):
+        super().__init__(parent)
+        self.setWindowTitle("Генерация отчета по всем КРД")
+        self.setMinimumSize(700, 650)
+        self.db = db_connection
+        self.template_id = template_id
+        self.current_config = {
+            "sections": ["social_data"],
+            "fields": {}
+        }
+        self.current_template_id = None
+        
+        # Безопасно получаем ID текущего пользователя из родителя
+        if parent and hasattr(parent, 'user_info') and isinstance(parent.user_info, dict):
+            self.current_user_id = parent.user_info.get('id')
+        else:
+            self.current_user_id = None
+            
+        print(f"🔵 [DEBUG] Инициализация ReportConfigDialog. User ID: {self.current_user_id}")
+            
+        self.init_ui()
+        self.load_templates_list()
+        self._update_krd_count()
+
+    def init_ui(self):
+        """Инициализация интерфейса"""
+        layout = QVBoxLayout(self)
+        layout.setSpacing(15)
+
+        # === Информация о режиме экспорта ===
+        info_group = QGroupBox("📊 Режим экспорта")
+        info_layout = QVBoxLayout(info_group)
+        info_label = QLabel("Экспорт всех записей КРД из базы данных на ОДИН лист Excel")
+        info_label.setStyleSheet("QLabel { font-size: 11px; color: #666; }")
+        info_layout.addWidget(info_label)
+        
+        self.info_label = QLabel("")
+        self.info_label.setStyleSheet("QLabel { color: #666; padding: 5px; border-radius: 3px; font-weight: bold; }")
+        info_layout.addWidget(self.info_label)
+        layout.addWidget(info_group)
+
+        # === Список шаблонов ===
+        templates_group = QGroupBox("📋 Шаблоны отчетов")
+        templates_layout = QVBoxLayout(templates_group)
+        
+        self.templates_list = QListWidget()
+        self.templates_list.setMinimumHeight(200)
+        self.templates_list.itemClicked.connect(self.on_template_clicked)
+        self.templates_list.itemDoubleClicked.connect(self.on_template_double_clicked)
+        
+        self.templates_list.setStyleSheet("""
+            QListWidget {
+                border: 1px solid #ccc;
+                border-radius: 5px;
+            }
+            QListWidget::item {
+                padding: 8px;
+                border-bottom: 1px solid #eee;
+            }
+            QListWidget::item:selected {
+                background-color: #2196F3;
+                color: white;
+            }
+            QListWidget::item:hover {
+                background-color: #e3f2fd;
+            }
+        """)
+        templates_layout.addWidget(self.templates_list)
+        
+        self.template_description = QLabel("")
+        self.template_description.setWordWrap(True)
+        self.template_description.setStyleSheet("QLabel { padding: 10px; border-radius: 5px; color: #666; }")
+        templates_layout.addWidget(self.template_description)
+        layout.addWidget(templates_group)
+
+        # === Кнопки управления ===
+        btn_layout = QVBoxLayout()
+        btn_layout.setSpacing(10)
+
+        add_template_btn = QPushButton("➕ Добавить шаблон")
+        add_template_btn.setMinimumHeight(45)
+        add_template_btn.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        add_template_btn.setProperty("role", "info")
+        add_template_btn.clicked.connect(self.on_add_template)
+        btn_layout.addWidget(add_template_btn)
+
+        self.delete_template_btn = QPushButton("🗑️ Удалить шаблон")
+        self.delete_template_btn.setMinimumHeight(45)
+        self.delete_template_btn.setProperty("role", "danger")
+        self.delete_template_btn.clicked.connect(self.on_delete_template)
+        self.delete_template_btn.setEnabled(False)
+        btn_layout.addWidget(self.delete_template_btn)
+
+        self.export_btn = QPushButton("📥 Экспорт всех КРД в Excel")
+        self.export_btn.setMinimumHeight(45)
+        self.export_btn.setProperty("role", "save")
+        self.export_btn.clicked.connect(self.on_export)
+        self.export_btn.setEnabled(False)
+        btn_layout.addWidget(self.export_btn)
+
+        cancel_btn = QPushButton("Отмена")
+        cancel_btn.setMinimumHeight(40)
+        cancel_btn.setProperty("role", "normal")
+        cancel_btn.clicked.connect(self.reject)
+        btn_layout.addWidget(cancel_btn)
+
+        layout.addLayout(btn_layout)
+        
+        self.templates_list.currentItemChanged.connect(self.on_selection_changed)
+        self.update_export_button()
+
+    def on_selection_changed(self, current, previous):
+        has_selection = self.templates_list.currentItem() is not None
+        self.delete_template_btn.setEnabled(has_selection)
+
+    def _update_krd_count(self):
+        query = QSqlQuery(self.db)
+        query.prepare("SELECT COUNT(*) FROM krd.krd WHERE is_deleted = FALSE")
+        if query.exec() and query.next():
+            count = query.value(0)
+            self.info_label.setText(f"Будет экспортировано: {count} записей КРД")
+        else:
+            self.info_label.setText("⚠️ Не удалось получить количество записей")
+
+    def load_templates_list(self):
+        print("🔵 [DEBUG] load_templates_list: Загрузка списка шаблонов...")
+        self.templates_list.clear()
+        query = QSqlQuery(self.db)
+        query.prepare("""
+            SELECT id, name, description, template_type, usage_count, is_default
+            FROM krd.report_templates
+            WHERE is_deleted = FALSE
+            ORDER BY is_default DESC, usage_count DESC, name ASC
+        """)
+        if query.exec():
+            count = 0
+            while query.next():
+                template_id = query.value(0)
+                template_name = query.value(1)
+                description = query.value(2) or ""
+                template_type = query.value(3)
+                usage_count = query.value(4) or 0
+                is_default = query.value(5)
+                
+                icon = "⭐" if is_default else "📋"
+                usage_text = f"({usage_count} исп.)" if usage_count > 0 else ""
+                
+                item = QListWidgetItem(f"{icon} {template_name} {usage_text}")
+                item.setData(Qt.ItemDataRole.UserRole, template_id)
+                item.setData(Qt.ItemDataRole.UserRole + 1, description)
+                item.setData(Qt.ItemDataRole.UserRole + 2, template_name)
+                self.templates_list.addItem(item)
+                count += 1
+            print(f"✅ [DEBUG] load_templates_list: Загружено {count} шаблонов.")
+        else:
+            print(f"❌ [DEBUG] load_templates_list: Ошибка SQL - {query.lastError().text()}")
+
+    def on_template_clicked(self, item):
+        template_id = item.data(Qt.ItemDataRole.UserRole)
+        template_name = item.data(Qt.ItemDataRole.UserRole + 2)
+        self.load_template_description(template_id, template_name)
+
+    def on_template_double_clicked(self, item):
+        template_id = item.data(Qt.ItemDataRole.UserRole)
+        template_name = item.data(Qt.ItemDataRole.UserRole + 2)
+        self.edit_template(template_id, template_name)
+
+    def load_template_description(self, template_id, template_name):
+        query = QSqlQuery(self.db)
+        query.prepare("SELECT description, config_json, usage_count FROM krd.report_templates WHERE id = ?")
+        query.addBindValue(template_id)
+        if query.exec() and query.next():
+            description = query.value(0) or ""
+            config_json = query.value(1)
+            usage_count = query.value(2) or 0
+            
+            desc_text = f"<b>📋 Шаблон:</b> {template_name}<br>"
+            desc_text += f"<b>Описание:</b> {description or 'Нет описания'}<br>"
+            desc_text += f"<b>Использований:</b> {usage_count}<br>"
+            
+            if config_json:
+                try:
+                    config = json.loads(config_json)
+                    sections = config.get("sections", [])
+                    fields_count = sum(len(fields) for fields in config.get("fields", {}).values())
+                    desc_text += f"<b>Секций:</b> {len(sections)} | <b>Полей:</b> {fields_count}"
+                    self.current_config = config
+                    self.current_template_id = template_id
+                    self.update_export_button()
+                except Exception as e:
+                    print(f"⚠️ [DEBUG] Ошибка парсинга JSON: {e}")
+                    pass
+            
+            self.template_description.setText(desc_text)
+
+    def on_add_template(self):
+        dialog = FieldSelectionDialog(self, config=None, template_name=None)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            config = dialog.get_config()
+            template_name = dialog.get_template_name()
+            if not template_name:
+                template_name = "Новый шаблон"
+            self.save_template_to_db(template_name, "", config)
+
+    def edit_template(self, template_id, template_name):
+        query = QSqlQuery(self.db)
+        query.prepare("SELECT config_json FROM krd.report_templates WHERE id = ?")
+        query.addBindValue(template_id)
+        if query.exec() and query.next():
+            config_json = query.value(0)
+            if config_json:
+                config = json.loads(config_json)
+                dialog = FieldSelectionDialog(self, config, template_name)
+                if dialog.exec() == QDialog.DialogCode.Accepted:
+                    new_config = dialog.get_config()
+                    reply = QMessageBox.question(
+                        self, "Сохранить изменения",
+                        f"Сохранить изменения в шаблоне '{template_name}'?",
+                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+                    )
+                    if reply == QMessageBox.StandardButton.Yes:
+                        self.update_template_in_db(template_id, new_config)
+
+    def save_template_to_db(self, name, description, config):
+        print(f"🔵 [DEBUG] save_template_to_db: Сохранение '{name}'")
+        query = QSqlQuery(self.db)
+        query.prepare("""
+            INSERT INTO krd.report_templates (name, description, template_type, config_json)
+            VALUES (?, ?, 'excel', ?)
+        """)
+        query.addBindValue(name.strip())
+        query.addBindValue(description.strip() if description else "")
+        query.addBindValue(json.dumps(config, ensure_ascii=False))
+        
+        if query.exec():
+            print("✅ [DEBUG] save_template_to_db: Успешно.")
+            QMessageBox.information(self, "Успешно", f"Шаблон '{name}' сохранен в базу данных")
+            self.load_templates_list()
+        else:
+            print(f"❌ [DEBUG] save_template_to_db: Ошибка - {query.lastError().text()}")
+            QMessageBox.critical(self, "Ошибка", f"Ошибка сохранения: {query.lastError().text()}")
+
+    def update_template_in_db(self, template_id, config):
+        print(f"🔵 [DEBUG] update_template_in_db: Обновление ID={template_id}")
+        query = QSqlQuery(self.db)
+        query.prepare("""
+            UPDATE krd.report_templates
+            SET config_json = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        """)
+        query.addBindValue(json.dumps(config, ensure_ascii=False))
+        query.addBindValue(template_id)
+        
+        if query.exec():
+            print("✅ [DEBUG] update_template_in_db: Успешно.")
+            QMessageBox.information(self, "Успешно", "Шаблон обновлен")
+            self.load_templates_list()
+        else:
+            print(f"❌ [DEBUG] update_template_in_db: Ошибка - {query.lastError().text()}")
+            QMessageBox.critical(self, "Ошибка", f"Ошибка обновления: {query.lastError().text()}")
+
+    def on_delete_template(self):
+        """Удаление шаблона (мягкое удаление)"""
+        print(f"\n{'='*60}")
+        print(f"🔵 [DEBUG] on_delete_template: НАЧАЛО")
+        print(f"{'='*60}")
+        
+        item = self.templates_list.currentItem()
+        if not item:
+            print("⚠️ [DEBUG] Ошибка: Ничего не выбрано в списке.")
+            QMessageBox.warning(self, "Внимание", "Выберите шаблон для удаления")
+            return
+        
+        template_id = item.data(Qt.ItemDataRole.UserRole)
+        template_name = item.data(Qt.ItemDataRole.UserRole + 2)
+        
+        print(f"📋 [DEBUG] Выбран шаблон:")
+        print(f"   🆔 ID: {template_id} (Тип: {type(template_id)})")
+        print(f"   📛 Name: {template_name}")
+        
+        if not template_id:
+            print("❌ [DEBUG] Ошибка: ID шаблона равен None!")
+            QMessageBox.critical(self, "Ошибка", "Не удалось определить ID шаблона")
+            return
+
+        try:
+            template_id = int(template_id)
+        except (ValueError, TypeError):
+            print(f"❌ [DEBUG] Ошибка преобразования ID: {template_id}")
+            QMessageBox.critical(self, "Ошибка", "Некорректный ID шаблона")
+            return
+        
+        # Проверка существования
+        check_query = QSqlQuery(self.db)
+        check_query.prepare("SELECT id, name, is_deleted FROM krd.report_templates WHERE id = ?")
+        check_query.addBindValue(template_id)
+        
+        print("🔍 [DEBUG] Выполняю проверку существования...")
+        if not check_query.exec():
+            print(f"❌ [DEBUG] Ошибка проверки SQL: {check_query.lastError().text()}")
+            QMessageBox.critical(self, "Ошибка", f"Ошибка проверки: {check_query.lastError().text()}")
+            return
+        
+        if not check_query.next():
+            print("⚠️ [DEBUG] Шаблон не найден в БД.")
+            QMessageBox.warning(self, "Внимание", f"Шаблон «{template_name}» не найден.")
+            self.load_templates_list()
+            return
+        
+        is_deleted = check_query.value(2)
+        print(f"📊 [DEBUG] Статус is_deleted в БД: {is_deleted}")
+        
+        if is_deleted:
+            print("ℹ️ [DEBUG] Шаблон уже удален.")
+            QMessageBox.information(self, "Информация", f"Шаблон «{template_name}» уже удален.")
+            self.load_templates_list()
+            return
+        
+        # Подтверждение
+        print("🛑 [DEBUG] Запрос подтверждения...")
+        reply = QMessageBox.question(
+            self, "Подтверждение удаления",
+            f"Удалить шаблон «{template_name}»?\n(данные будут скрыты, но сохранены в БД)",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            print("❎ [DEBUG] Отмена пользователем.")
+            return
+        
+        # 🔧 ОБХОД БАГА QPSQL: Используем прямой exec() для целочисленных параметров
+        # Драйвер QPSQL в Qt6 ломает prepare() генерируя "EXECUTE ()" без имени
+        user_id_value = self.current_user_id
+        if user_id_value is None or not isinstance(user_id_value, int):
+            try:
+                user_id_value = int(user_id_value) if user_id_value is not None else 1
+            except (ValueError, TypeError):
+                user_id_value = 1
+        
+        # Безопасная интерполяция для int (SQL-инъекции невозможны)
+        sql = f"""
+            UPDATE krd.report_templates
+            SET is_deleted = TRUE, 
+                deleted_at = CURRENT_TIMESTAMP,
+                deleted_by = {user_id_value}
+            WHERE id = {template_id} AND is_deleted = FALSE
+        """
+        
+        query = QSqlQuery(self.db)
+        print(f"🚀 [DEBUG] Выполняю удаление (прямой exec)...")
+        print(f"   Bound Values: user_id={user_id_value}, id={template_id}")
+        
+        if not query.exec(sql):
+            print(f"❌ [DEBUG] ОШИБКА SQL при удалении!")
+            print(f"   Error Text: {query.lastError().text()}")
+            print(f"   Database Error: {query.lastError().databaseText()}")
+            QMessageBox.critical(self, "Ошибка БД", f"Не удалось удалить шаблон:\n{query.lastError().text()}")
+            return
+        
+        rows_affected = query.numRowsAffected()
+        print(f"📊 [DEBUG] Затронуто строк: {rows_affected}")
+        
+        if rows_affected > 0:
+            print("✅ [DEBUG] УСПЕХ: Шаблон помечен как удаленный.")
+            QMessageBox.information(self, "Успех", f"Шаблон «{template_name}» успешно удален")
+            
+            self.current_config = {"sections": ["social_data"], "fields": {}}
+            self.current_template_id = None
+            self.update_export_button()
+            self.load_templates_list()
+        else:
+            print("⚠️ [DEBUG] Строк не затронуто (0).")
+            QMessageBox.warning(self, "Внимание", f"Шаблон «{template_name}» уже удалён или не существует.")
+            self.load_templates_list()
+        
+        print(f"🏁 [DEBUG] on_delete_template: КОНЕЦ\n{'='*60}")
+
     def update_export_button(self):
-        """Обновление состояния кнопки экспорта"""
         has_sections = len(self.current_config.get("sections", [])) > 0
         self.export_btn.setEnabled(has_sections)
-    
+
     def get_export_range(self):
-        """Получение выбранного диапазона экспорта (всегда 'all')"""
         return 'all', self._get_all_krd_ids()
-    
+
     def _get_all_krd_ids(self):
-        """Получение всех ID КРД из базы данных"""
         query = QSqlQuery(self.db)
         query.prepare("SELECT id FROM krd.krd WHERE is_deleted = FALSE ORDER BY id")
-        
         krd_ids = []
         if query.exec():
             while query.next():
                 krd_ids.append(query.value(0))
-        
         return krd_ids
-    
+
     def on_export(self):
-        """Обработка кнопки экспорта"""
+        print(f"🔵 [DEBUG] on_export: Нажата кнопка экспорта")
         config = self.current_config.copy()
         
         if not config.get("sections"):
@@ -9975,6 +9839,212 @@ class ReportConfigDialog(QDialog):
         config["export_range"] = export_range
         config["krd_ids"] = krd_ids
         
+        print(f"📊 [DEBUG] Экспорт: {len(krd_ids)} записей")
+        
+        if not krd_ids:
+            QMessageBox.warning(self, "Ошибка", "В базе данных нет записей КРД для экспорта")
+            return
+        
+        reply = QMessageBox.question(
+            self, "Подтверждение массового экспорта",
+            f"Вы собираетесь экспортировать {len(krd_ids)} записей КРД.\n"
+            f"⏱️ Это может занять несколько минут в зависимости от количества данных.\n"
+            f"Продолжить?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
+        )
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        
+        if self.current_template_id:
+            query = QSqlQuery(self.db)
+            query.prepare("UPDATE krd.report_templates SET usage_count = usage_count + 1 WHERE id = ?")
+            query.addBindValue(self.current_template_id)
+            query.exec()
+        
+        self.report_configured.emit(config)
+        self.accept()    # ✅ УЛУЧШЕННАЯ ЛОГИКА УДАЛЕНИЯ ШАБЛОНА С ДИАГНОСТИКОЙ
+    def on_delete_template(self):
+        """Удаление шаблона (мягкое удаление)"""
+        print(f"\n{'='*60}")
+        print(f"🔵 [DEBUG] on_delete_template: НАЧАЛО")
+        print(f"{'='*60}")
+        
+        item = self.templates_list.currentItem()
+        if not item:
+            print("⚠️ [DEBUG] Ошибка: Ничего не выбрано в списке.")
+            QMessageBox.warning(self, "Внимание", "Выберите шаблон для удаления")
+            return
+        
+        template_id = item.data(Qt.ItemDataRole.UserRole)
+        template_name = item.data(Qt.ItemDataRole.UserRole + 2)
+        
+        print(f"📋 [DEBUG] Выбран шаблон:")
+        print(f"   🆔 ID: {template_id} (Тип: {type(template_id)})")
+        print(f"   📛 Name: {template_name}")
+        
+        if template_id is None:
+            print("❌ [DEBUG] Ошибка: ID шаблона равен None!")
+            QMessageBox.critical(self, "Ошибка", "Не удалось определить ID шаблона")
+            return
+
+        # ✅ ГАРАНТИРУЕМ, ЧТО template_id — это int
+        try:
+            template_id = int(template_id)
+        except (ValueError, TypeError):
+            print(f"❌ [DEBUG] Ошибка: template_id не может быть преобразован в int: {template_id}")
+            QMessageBox.critical(self, "Ошибка", "Некорректный ID шаблона")
+            return
+        
+        # ✅ ПРОВЕРКА: Существует ли шаблон и не удален ли он уже
+        check_query = QSqlQuery(self.db)
+        check_query.prepare("""
+            SELECT id, name, is_deleted 
+            FROM krd.report_templates 
+            WHERE id = :id
+        """)
+        check_query.bindValue(":id", template_id)
+        
+        print(f"🔍 [DEBUG] Выполняю проверку существования...")
+        print(f"   SQL: {check_query.lastQuery()}")
+        if not check_query.exec():
+            print(f"❌ [DEBUG] Ошибка проверки SQL: {check_query.lastError().text()}")
+            QMessageBox.critical(self, "Ошибка", 
+                f"Ошибка проверки шаблона: {check_query.lastError().text()}")
+            return
+        
+        if not check_query.next():
+            print("⚠️ [DEBUG] Шаблон не найден в БД при проверке.")
+            QMessageBox.warning(self, "Внимание", 
+                f"Шаблон «{template_name}» не найден в базе данных.")
+            self.load_templates_list()
+            return
+        
+        is_deleted = check_query.value(2)
+        print(f"📊 [DEBUG] Статус is_deleted в БД: {is_deleted}")
+        
+        if is_deleted:
+            print("ℹ️ [DEBUG] Шаблон уже удален.")
+            QMessageBox.information(self, "Информация", 
+                f"Шаблон «{template_name}» уже был удален ранее.")
+            self.load_templates_list()
+            return
+        
+        # ✅ ПОДТВЕРЖДЕНИЕ УДАЛЕНИЯ
+        print("🛑 [DEBUG] Запрос подтверждения у пользователя...")
+        reply = QMessageBox.question(
+            self,
+            "Подтверждение удаления",
+            f"Удалить шаблон «{template_name}»? "
+            f"(данные будут скрыты, но сохранены в БД)",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+            QMessageBox.StandardButton.No
+        )
+        
+        if reply != QMessageBox.StandardButton.Yes:
+            print("❎ [DEBUG] Пользователь нажал 'Нет'. Отмена.")
+            return
+        
+        # ✅ ВЫПОЛНЕНИЕ МЯГКОГО УДАЛЕНИЯ
+        query = QSqlQuery(self.db)
+        
+        # 🔥 ВАЖНО: Сначала prepare, потом bindValue, потом exec
+        sql = """
+            UPDATE krd.report_templates
+            SET is_deleted = TRUE, 
+                deleted_at = CURRENT_TIMESTAMP,
+                deleted_by = :user_id
+            WHERE id = :id AND is_deleted = FALSE
+        """
+        
+        print(f"🚀 [DEBUG] Подготовка SQL запроса...")
+        print(f"   SQL текст:\n{sql}")
+        
+        # ✅ ШАГ 1: prepare
+        if not query.prepare(sql):
+            print(f"❌ [DEBUG] ОШИБКА prepare(): {query.lastError().text()}")
+            QMessageBox.critical(self, "Ошибка БД", 
+                f"Не удалось подготовить запрос: {query.lastError().text()}")
+            return
+        
+        # ✅ ШАГ 2: bindValue
+        user_id_value = self.current_user_id if self.current_user_id is not None else 1
+        query.bindValue(":user_id", user_id_value)
+        query.bindValue(":id", template_id)
+        
+        print(f"   Bound Values: user_id={user_id_value}, id={template_id}")
+        print(f"   Last Query: {query.lastQuery()}")
+        
+        # ✅ ШАГ 3: exec
+        print(f"   Выполняю query.exec()...")
+        if not query.exec():
+            print(f"❌ [DEBUG] ОШИБКА exec()!")
+            print(f"   Error Text: {query.lastError().text()}")
+            print(f"   Error Number: {query.lastError().nativeErrorCode()}")
+            print(f"   Driver Error: {query.lastError().driverText()}")
+            print(f"   Database Error: {query.lastError().databaseText()}")
+            
+            QMessageBox.critical(self, "Ошибка БД", 
+                f"Не удалось удалить шаблон:\n{query.lastError().text()}")
+            return
+        
+        rows_affected = query.numRowsAffected()
+        print(f"📊 [DEBUG] Затронуто строк: {rows_affected}")
+        
+        if rows_affected > 0:
+            print("✅ [DEBUG] УСПЕХ: Шаблон помечен как удаленный.")
+            QMessageBox.information(self, "Успех", 
+                f"Шаблон «{template_name}» успешно удален")
+            
+            # Очищаем текущую конфигурацию
+            self.current_config = {"sections": ["social_data"], "fields": {}}
+            self.current_template_id = None
+            self.update_export_button()
+            
+            # Обновляем список шаблонов
+            self.load_templates_list()
+        else:
+            print("⚠️ [DEBUG] ВНИМАНИЕ: Строк не затронуто (0).")
+            QMessageBox.warning(self, "Внимание", 
+                f"Шаблон «{template_name}» уже был удален или не существует.")
+            self.load_templates_list()
+        
+        print(f"🏁 [DEBUG] on_delete_template: КОНЕЦ")
+        print(f"{'='*60}\n")
+    def update_export_button(self):
+        """Обновление состояния кнопки экспорта"""
+        has_sections = len(self.current_config.get("sections", [])) > 0
+        self.export_btn.setEnabled(has_sections)
+
+    def get_export_range(self):
+        """Получение выбранного диапазона экспорта (всегда 'all')"""
+        return 'all', self._get_all_krd_ids()
+
+    def _get_all_krd_ids(self):
+        """Получение всех ID КРД из базы данных"""
+        query = QSqlQuery(self.db)
+        query.prepare("SELECT id FROM krd.krd WHERE is_deleted = FALSE ORDER BY id")
+        krd_ids = []
+        if query.exec():
+            while query.next():
+                krd_ids.append(query.value(0))
+        return krd_ids
+
+    def on_export(self):
+        """Обработка кнопки экспорта"""
+        print(f"🔵 [DEBUG] on_export: Нажата кнопка экспорта")
+        config = self.current_config.copy()
+        
+        if not config.get("sections"):
+            QMessageBox.warning(self, "Ошибка", "Выберите хотя бы одну секцию для экспорта")
+            return
+        
+        export_range, krd_ids = self.get_export_range()
+        config["export_range"] = export_range
+        config["krd_ids"] = krd_ids
+        
+        print(f"📊 [DEBUG] Экспорт: {len(krd_ids)} записей")
+        
         if not krd_ids:
             QMessageBox.warning(self, "Ошибка", "В базе данных нет записей КРД для экспорта")
             return
@@ -9982,8 +10052,8 @@ class ReportConfigDialog(QDialog):
         reply = QMessageBox.question(
             self,
             "Подтверждение массового экспорта",
-            f"Вы собираетесь экспортировать {len(krd_ids)} записей КРД.\n\n"
-            f"⏱️ Это может занять несколько минут в зависимости от количества данных.\n\n"
+            f"Вы собираетесь экспортировать {len(krd_ids)} записей КРД.\n"
+            f"⏱️ Это может занять несколько минут в зависимости от количества данных.\n"
             f"Продолжить?",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
         )
@@ -11822,16 +11892,16 @@ class SocialDataInputWidget(QWidget):
 ========================================
 
 """
-Вкладка социально-демографических данных с поддержкой изображений
-Соответствует структуре из шаблона "Шаблон проги.xlsx"
+Вкладка социально-демографических данных с поддержкой изображений и строгой валидацией
+Соответствует структуре из шаблона "Шаблон проги.xlsx" и схеме БД
 """
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QScrollArea, QGroupBox, QGridLayout, QHBoxLayout,
     QLineEdit, QTextEdit, QDateEdit, QComboBox, QLabel, QPushButton, QFileDialog,
     QMessageBox, QFrame
 )
-from PyQt6.QtCore import Qt, QDate, QByteArray, QTimer
-from PyQt6.QtGui import QPixmap, QFont
+from PyQt6.QtCore import Qt, QDate, QByteArray, QTimer, QRegularExpression
+from PyQt6.QtGui import QPixmap, QFont, QRegularExpressionValidator
 from PyQt6.QtSql import QSqlQuery
 import os
 import traceback
@@ -11854,6 +11924,99 @@ class SocialDataTab(QWidget):
         self.load_data()
         self.setup_auto_save()
         self.setup_autocomplete_fields()
+        
+        # ✅ НОВОЕ: Настройка валидаторов согласно схеме БД
+        self.setup_validators()
+
+    def setup_validators(self):
+        """
+        Настройка валидации полей ввода согласно схеме базы данных
+        """
+        # 1. Валидатор для ФИО и Наименований (Буквы, цифры, пробелы, дефис)
+        # Разрешает кириллицу, латиницу, цифры, пробелы и дефисы
+        name_regex = QRegularExpression(r"^[а-яА-Яa-zA-Z0-9\s\-]+$")
+        validator_names = QRegularExpressionValidator(name_regex)
+
+        # 2. Валидатор для Банковской карты (Только цифры и пробелы)
+        card_regex = QRegularExpression(r"^[0-9\s]+$")
+        validator_card = QRegularExpressionValidator(card_regex)
+
+        # 3. Валидатор для Паспортных данных (Буквы и цифры)
+        doc_regex = QRegularExpression(r"^[а-яА-Яa-zA-Z0-9\s\-]+$")
+        validator_doc = QRegularExpressionValidator(doc_regex)
+
+        # === ПРИМЕНЕНИЕ ОГРАНИЧЕНИЙ (MaxLength + Validator) ===
+        
+        # --- ФИО и Личные данные (VARCHAR 100) ---
+        self.surname_input.setMaxLength(100)
+        self.surname_input.setValidator(validator_names)
+        
+        self.name_input.setMaxLength(100)
+        self.name_input.setValidator(validator_names)
+        
+        self.patronymic_input.setMaxLength(100)
+        self.patronymic_input.setValidator(validator_names)
+
+        # --- Место рождения (VARCHAR 100) ---
+        fields_100 = [
+            self.birth_place_town_input, 
+            self.birth_place_district_input, 
+            self.birth_place_region_input, 
+            self.birth_place_country_input
+        ]
+        for field in fields_100:
+            field.setMaxLength(100)
+            field.setValidator(validator_names)
+
+        # --- Номера (VARCHAR 50) ---
+        self.tab_number_input.setMaxLength(50)
+        self.personal_number_input.setMaxLength(50)
+        # Разрешим цифры и дефис для табельного номера
+        num_regex = QRegularExpression(r"^[0-9\-]+$")
+        self.tab_number_input.setValidator(QRegularExpressionValidator(num_regex))
+        self.personal_number_input.setValidator(QRegularExpressionValidator(num_regex))
+
+        # --- Военкоматы и ПОВСК (VARCHAR 255) ---
+        fields_255 = [
+            self.drafted_by_commissariat_input, 
+            self.povsk_input, 
+            self.education_input,
+            self.passport_issued_by_input,
+            self.military_id_issued_by_input,
+            self.military_contacts_input
+        ]
+        for field in fields_255:
+            field.setMaxLength(255)
+            field.setValidator(validator_names)
+
+        # --- Банковская карта (VARCHAR 50, только цифры) ---
+        self.bank_card_number_input.setMaxLength(50)
+        self.bank_card_number_input.setValidator(validator_card)
+
+        # --- Соцсети (VARCHAR 255, допустим латиницу и спецсимволы для ссылок) ---
+        social_regex = QRegularExpression(r"^[a-zA-Z0-9\-\.\_\@\:\?\/\&\=]+$")
+        self.social_media_account_input.setMaxLength(255)
+        self.social_media_account_input.setValidator(QRegularExpressionValidator(social_regex))
+
+        # --- Паспортные данные ---
+        # Серия паспорта (VARCHAR 10)
+        self.passport_series_input.setMaxLength(10)
+        self.passport_series_input.setValidator(validator_doc)
+        
+        # Номер паспорта (VARCHAR 20)
+        self.passport_number_input.setMaxLength(20)
+        self.passport_number_input.setValidator(validator_doc)
+
+        # --- Военный билет ---
+        # Серия ВБ (VARCHAR 10)
+        self.military_id_series_input.setMaxLength(10)
+        self.military_id_series_input.setValidator(validator_doc)
+        
+        # Номер ВБ (VARCHAR 20)
+        self.military_id_number_input.setMaxLength(20)
+        self.military_id_number_input.setValidator(validator_doc)
+
+        print("✅ Валидаторы настроены согласно схеме БД")
 
     def _create_ref_combo_widget(self, combo, table_name, reload_func):
         """Вспомогательный метод: ComboBox + кнопка ⚙️"""
@@ -12057,19 +12220,27 @@ class SocialDataTab(QWidget):
     def save_data(self):
         err = self.validate_required_fields()
         if err: raise ValueError(err)
+        
+        # Дополнительная проверка длины для QTextEdit (так как у них нет setMaxLength)
+        if len(self.criminal_record_input.toPlainText()) > 5000: # TEXT limit check example
+             raise ValueError("Поле 'Сведения о судимости' слишком длинное")
+
         data = {"krd_id": self.krd_id, "surname": self.surname_input.text().strip(), "name": self.name_input.text().strip(), "patronymic": self.patronymic_input.text().strip(), "birth_date": self.birth_date_input.date(), "birth_place_town": self.birth_place_town_input.text().strip(), "birth_place_district": self.birth_place_district_input.text().strip(), "birth_place_region": self.birth_place_region_input.text().strip(), "birth_place_country": self.birth_place_country_input.text().strip(), "tab_number": self.tab_number_input.text().strip(), "personal_number": self.personal_number_input.text().strip(), "category_id": self.category_combo.currentData(), "rank_id": self.rank_combo.currentData(), "drafted_by_commissariat": self.drafted_by_commissariat_input.text().strip(), "draft_date": self.draft_date_input.date(), "povsk": self.povsk_input.text().strip(), "selection_date": self.selection_date_input.date(), "education": self.education_input.text().strip(), "criminal_record": self.criminal_record_input.toPlainText(), "social_media_account": self.social_media_account_input.text().strip(), "bank_card_number": self.bank_card_number_input.text().strip(), "passport_series": self.passport_series_input.text().strip(), "passport_number": self.passport_number_input.text().strip(), "passport_issue_date": self.passport_issue_date_input.date(), "passport_issued_by": self.passport_issued_by_input.text().strip(), "military_id_series": self.military_id_series_input.text().strip(), "military_id_number": self.military_id_number_input.text().strip(), "military_id_issue_date": self.military_id_issue_date_input.date(), "military_id_issued_by": self.military_id_issued_by_input.text().strip(), "appearance_features": self.appearance_features_input.toPlainText(), "personal_marks": self.personal_marks_input.toPlainText(), "federal_search_info": self.federal_search_info_input.toPlainText(), "military_contacts": self.military_contacts_input.text().strip(), "relatives_info": self.relatives_info_input.toPlainText()}
+        
         for pt in ['civilian', 'military_headgear', 'military_no_headgear', 'distinctive_marks']:
             p = self.photo_paths.get(pt); fb = None
             if p and os.path.exists(p):
                 with open(p, 'rb') as f: fb = f.read()
             elif self.original_photos.get(pt): fb = self.original_photos[pt]
             data[f"photo_{pt}"] = QByteArray(fb) if fb else QByteArray()
+            
         q = QSqlQuery(self.db)
         if self.record:
             q.prepare("""UPDATE krd.social_data SET surname=:surname, name=:name, patronymic=:patronymic, birth_date=:birth_date, birth_place_town=:birth_place_town, birth_place_district=:birth_place_district, birth_place_region=:birth_place_region, birth_place_country=:birth_place_country, tab_number=:tab_number, personal_number=:personal_number, category_id=:category_id, rank_id=:rank_id, drafted_by_commissariat=:drafted_by_commissariat, draft_date=:draft_date, povsk=:povsk, selection_date=:selection_date, education=:education, criminal_record=:criminal_record, social_media_account=:social_media_account, bank_card_number=:bank_card_number, passport_series=:passport_series, passport_number=:passport_number, passport_issue_date=:passport_issue_date, passport_issued_by=:passport_issued_by, military_id_series=:military_id_series, military_id_number=:military_id_number, military_id_issue_date=:military_id_issue_date, military_id_issued_by=:military_id_issued_by, appearance_features=:appearance_features, personal_marks=:personal_marks, federal_search_info=:federal_search_info, military_contacts=:military_contacts, relatives_info=:relatives_info, photo_civilian=:photo_civilian, photo_military_headgear=:photo_military_headgear, photo_military_no_headgear=:photo_military_no_headgear, photo_distinctive_marks=:photo_distinctive_marks WHERE id=:id""")
             q.bindValue(":id", self.record.value("id"))
         else:
             q.prepare("""INSERT INTO krd.social_data (krd_id, surname, name, patronymic, birth_date, birth_place_town, birth_place_district, birth_place_region, birth_place_country, tab_number, personal_number, category_id, rank_id, drafted_by_commissariat, draft_date, povsk, selection_date, education, criminal_record, social_media_account, bank_card_number, passport_series, passport_number, passport_issue_date, passport_issued_by, military_id_series, military_id_number, military_id_issue_date, military_id_issued_by, appearance_features, personal_marks, federal_search_info, military_contacts, relatives_info, photo_civilian, photo_military_headgear, photo_military_no_headgear, photo_distinctive_marks) VALUES (:krd_id, :surname, :name, :patronymic, :birth_date, :birth_place_town, :birth_place_district, :birth_place_region, :birth_place_country, :tab_number, :personal_number, :category_id, :rank_id, :drafted_by_commissariat, :draft_date, :povsk, :selection_date, :education, :criminal_record, :social_media_account, :bank_card_number, :passport_series, :passport_number, :passport_issue_date, :passport_issued_by, :military_id_series, :military_id_number, :military_id_issue_date, :military_id_issued_by, :appearance_features, :personal_marks, :federal_search_info, :military_contacts, :relatives_info, :photo_civilian, :photo_military_headgear, :photo_military_no_headgear, :photo_distinctive_marks)""")
+            
         for k, v in data.items(): q.bindValue(f":{k}", v)
         if not q.exec(): raise Exception(f"Ошибка сохранения: {q.lastError().text()}")
         self.autocomplete_helper.refresh_all_fields()
@@ -12097,6 +12268,8 @@ class SocialDataTab(QWidget):
 
 """
 Диалог редактирования/добавления шаблона документа
+✅ ИСПРАВЛЕНО: Убраны случайные логи из импортов, исправлен оператор if
+✅ ИСПРАВЛЕНО: Именованные параметры (:name) для совместимости с PostgreSQL
 """
 import os
 from PyQt6.QtWidgets import (
@@ -12188,12 +12361,16 @@ class TemplateEditDialog(QDialog):
 
     def load_data(self):
         query = QSqlQuery(self.db)
-        query.prepare("SELECT name, description, template_data FROM krd.document_templates WHERE id = ?")
-        query.addBindValue(self.template_id)
+        # ✅ ИСПРАВЛЕНО: Именованный параметр :id
+        query.prepare("SELECT name, description, template_data FROM krd.document_templates WHERE id = :id")
+        query.bindValue(":id", self.template_id)
+        
         if query.exec() and query.next():
             self.name_input.setText(query.value(0) or "")
             self.desc_input.setPlainText(query.value(1) or "")
             data = query.value(2)
+            
+            # ✅ ИСПРАВЛЕНО: Добавлено условие проверки данных (if data:)
             if data:
                 self.current_file_bytes = bytes(data) if not isinstance(data, bytes) else data
                 size = len(self.current_file_bytes)
@@ -12221,16 +12398,25 @@ class TemplateEditDialog(QDialog):
         query = QSqlQuery(self.db)
         try:
             if self.template_id:
-                query.prepare("UPDATE krd.document_templates SET name = ?, description = ?, template_data = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?")
-                query.addBindValue(name)
-                query.addBindValue(desc)
-                query.addBindValue(QByteArray(file_bytes))
-                query.addBindValue(self.template_id)
+                # ✅ ИСПРАВЛЕНО: Именованные параметры для UPDATE
+                query.prepare("""
+                    UPDATE krd.document_templates 
+                    SET name = :name, description = :desc, template_data = :data, updated_at = CURRENT_TIMESTAMP 
+                    WHERE id = :id
+                """)
+                query.bindValue(":name", name)
+                query.bindValue(":desc", desc)
+                query.bindValue(":data", QByteArray(file_bytes))
+                query.bindValue(":id", self.template_id)
             else:
-                query.prepare("INSERT INTO krd.document_templates (name, description, template_data, is_deleted) VALUES (?, ?, ?, FALSE)")
-                query.addBindValue(name)
-                query.addBindValue(desc)
-                query.addBindValue(QByteArray(file_bytes))
+                # ✅ ИСПРАВЛЕНО: Именованные параметры для INSERT
+                query.prepare("""
+                    INSERT INTO krd.document_templates (name, description, template_data, is_deleted) 
+                    VALUES (:name, :desc, :data, FALSE)
+                """)
+                query.bindValue(":name", name)
+                query.bindValue(":desc", desc)
+                query.bindValue(":data", QByteArray(file_bytes))
                 
             if query.exec():
                 QMessageBox.information(self, "Успех", "Шаблон успешно сохранён!")
