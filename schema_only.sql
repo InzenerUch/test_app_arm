@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict KA9bfZExERd5NgF80Tv5aabEXjEtL1CgYouyZzOF7K4xde66K5twN3lh71Oi3HP
+\restrict OcfW9nMH5vsuxThezNpbrbo8WbQNRMQWXSGO8P29rCircYS8zvJY3zlJMgc1wQX
 
 -- Dumped from database version 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)
 -- Dumped by pg_dump version 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)
@@ -655,7 +655,10 @@ CREATE TABLE krd.krd (
     last_service_place_id integer,
     is_deleted boolean DEFAULT false,
     deleted_at timestamp without time zone,
-    deleted_by integer
+    deleted_by integer,
+    is_locked boolean DEFAULT false,
+    locked_by integer,
+    locked_at timestamp without time zone
 );
 
 
@@ -2406,6 +2409,14 @@ ALTER TABLE ONLY krd.incoming_orders
 
 
 --
+-- Name: krd krd_locked_by_fkey; Type: FK CONSTRAINT; Schema: krd; Owner: postgres
+--
+
+ALTER TABLE ONLY krd.krd
+    ADD CONSTRAINT krd_locked_by_fkey FOREIGN KEY (locked_by) REFERENCES krd.users(id);
+
+
+--
 -- Name: krd krd_status_id_fkey; Type: FK CONSTRAINT; Schema: krd; Owner: postgres
 --
 
@@ -2946,5 +2957,5 @@ ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA krd GRANT SELECT,INSERT,DEL
 -- PostgreSQL database dump complete
 --
 
-\unrestrict KA9bfZExERd5NgF80Tv5aabEXjEtL1CgYouyZzOF7K4xde66K5twN3lh71Oi3HP
+\unrestrict OcfW9nMH5vsuxThezNpbrbo8WbQNRMQWXSGO8P29rCircYS8zvJY3zlJMgc1wQX
 

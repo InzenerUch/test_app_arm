@@ -6030,18 +6030,19 @@ if __name__ == "__main__":
 
 """
 Модуль для окна просмотра и редактирования данных КРД
-✅ ИСПРАВЛЕНО: Обход бага драйвера QPSQL (ошибка EXECUTE syntax error)
-✅ ИСПРАВЛЕНО: Используется прямое выполнение SQL для целочисленных ID
+✅ РЕАЛИЗОВАНО: PostgreSQL Advisory Locks (Уровень 3)
+✅ АВТОСБРОС: Блокировка снимается мгновенно при разрыве соединения/крахе
+✅ БЕЗОПАСНО: Используются именованные параметры (:krd_id) для обхода бага QPSQL
 """
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QTabWidget, QMessageBox
 )
 from PyQt6.QtGui import QCloseEvent
 from PyQt6.QtSql import QSqlQuery
+from PyQt6.QtCore import pyqtSignal
 import traceback
-from datetime import datetime, timedelta
 
-# Импорт всех вкладок (убедитесь, что пути верные)
+# Импорт всех вкладок
 from social_data_tab import SocialDataTab
 from addresses_tab import AddressesTab
 from incoming_orders_tab import IncomingOrdersTab
@@ -6051,10 +6052,8 @@ from outgoing_requests_tab import OutgoingRequestsTab
 from document_generator_tab import DocumentGeneratorTab
 
 class KrdDetailsWindow(QDialog):
-    """Окно просмотра и редактирования данных КРД с поддержкой блокировок"""
-    
-    # Максимальное время удержания блокировки (в минутах), если приложение упало
-    LOCK_TIMEOUT_MINUTES = 15
+    """Окно просмотра и редактирования данных КРД с Advisory Locks"""
+    krd_window_closed = pyqtSignal()
 
     def __init__(self, krd_id, db_connection, user_info, audit_logger=None):
         super().__init__()
@@ -6063,16 +6062,15 @@ class KrdDetailsWindow(QDialog):
         self.user_info = user_info
         self.audit_logger = audit_logger
         
-        # Текущий пользователь
         self.current_user_id = user_info.get('id')
         self.current_username = user_info.get('username', 'Неизвестный')
-        self.previous_tab_index = -1  # Для отслеживания предыдущей вкладки
+        self.previous_tab_index = -1
         
         self.setWindowTitle(f"Карточка розыска №{krd_id}")
-        self.setModal(True)
+        self.setModal(True) # Не модальное, чтобы можно было переключаться между окнами (если разрешено)
         self.resize(1100, 750)
 
-        # ✅ 1. Пытаемся установить блокировку ПЕРЕД инициализацией
+        # ✅ 1. Пытаемся установить Advisory Lock ПЕРЕД созданием интерфейса
         lock_success, lock_message = self.try_acquire_lock()
         
         if not lock_success:
@@ -6082,8 +6080,6 @@ class KrdDetailsWindow(QDialog):
 
         # Если блокировка успешна — инициализируем интерфейс
         self.init_ui()
-        
-        # Добавляем иконку или статус в заголовок, что мы редактируем
         self.setWindowTitle(f"Карточка розыска №{krd_id} — [Редактирование]")
 
     def init_ui(self):
@@ -6093,7 +6089,6 @@ class KrdDetailsWindow(QDialog):
         
         self.tabs = QTabWidget()
         
-        # Передаем audit_logger в вкладки, если нужно
         self.tabs.addTab(SocialDataTab(self.krd_id, self.db, self.audit_logger), "👤 Социально-демографические данные")
         self.tabs.addTab(AddressesTab(self.krd_id, self.db, self.audit_logger), "🏠 Адреса проживания")
         self.tabs.addTab(IncomingOrdersTab(self.krd_id, self.db, self.audit_logger), "📬 Входящие поручения")
@@ -6102,120 +6097,71 @@ class KrdDetailsWindow(QDialog):
         self.tabs.addTab(OutgoingRequestsTab(self.krd_id, self.db, self.audit_logger), "📤 Запросы и поручения")
         self.tabs.addTab(DocumentGeneratorTab(self.krd_id, self.db, self.audit_logger), "📄 Генерация документов")
         
-        # Отслеживаем переключение вкладок для автосохранения
         self.tabs.currentChanged.connect(self._on_tab_switched)
         main_layout.addWidget(self.tabs)
 
     def try_acquire_lock(self):
         """
-        Пытается установить блокировку на запись КРД.
+        Захватывает Advisory Lock через встроенные функции PostgreSQL.
         Возвращает (True, "") если успешно, или (False, "Причина отказа").
         """
         try:
-            # 🔥 ИСПРАВЛЕНИЕ: Используем прямой exec() вместо prepare/bindValue
-            # Это обходит баг драйвера QPSQL с EXECUTE syntax error
             query = QSqlQuery(self.db)
-            sql_check = f"SELECT user_id, username, locked_at FROM krd.krd_locks WHERE krd_id = {int(self.krd_id)}"
-            if not query.exec(sql_check):
+            # pg_try_advisory_lock возвращает TRUE, если блокировка захвачена, и FALSE, если уже занята
+            query.prepare("SELECT pg_try_advisory_lock(:krd_id)")
+            query.bindValue(":krd_id", int(self.krd_id))
+            
+            if not query.exec():
                 return False, f"Ошибка БД: {query.lastError().text()}"
                 
-            is_locked = False
-            lock_data = {}
             if query.next():
-                is_locked = True
-                lock_data = {
-                    'user_id': query.value(0),
-                    'username': query.value(1),
-                    'locked_at': query.value(2)
-                }
-                
-            # Сценарий 1: Запись НЕ заблокирована
-            if not is_locked:
-                return self._insert_lock()
-                
-            # Сценарий 2: Запись заблокирована ДРУГИМ пользователем
-            if lock_data['user_id'] != self.current_user_id:
-                if self._is_lock_stale(lock_data['locked_at']):
-                    return self._update_lock()
+                is_locked = query.value(0)
+                if is_locked:
+                    return True, ""
                 else:
-                    time_str = lock_data['locked_at'].toString("dd.MM.yyyy hh:mm") if hasattr(lock_data['locked_at'], 'toString') else str(lock_data['locked_at'])
                     return False, (
-                        f"Запись №{self.krd_id} сейчас редактирует пользователь:\n"
-                        f"👤 {lock_data['username']}\n"
-                        f"⏰ С: {time_str}\n\n"
-                        f"Пожалуйста, дождитесь завершения или свяжитесь с ним."
+                        f"Запись №{self.krd_id} сейчас открыта в другой сессии или окне.\n"
+                        f"Закройте её в другом приложении или дождитесь освобождения."
                     )
-            
-            # Сценарий 3: Запись заблокирована МНОЙ (повторное открытие)
-            return self._update_lock()
-            
+            return False, "Не удалось проверить статус блокировки."
         except Exception as e:
             return False, f"Исключение при блокировке: {str(e)}"
 
-    def _is_lock_stale(self, locked_at):
-        """Проверяет, прошло ли больше LOCK_TIMEOUT_MINUTES с момента блокировки"""
-        if not locked_at:
-            return True
-        
-        if hasattr(locked_at, 'toPyDateTime'):
-            lock_time = locked_at.toPyDateTime()
-        else:
-            lock_time = locked_at
-            
-        now = datetime.now()
-        diff = now - lock_time
-        
-        return diff > timedelta(minutes=self.LOCK_TIMEOUT_MINUTES)
-
-    def _insert_lock(self):
-        """Создает новую запись о блокировке"""
-        query = QSqlQuery(self.db)
-        # Безопасное экранирование имени пользователя
-        username_safe = str(self.current_username).replace("'", "''")
-        sql = f"""
-            INSERT INTO krd.krd_locks (krd_id, user_id, username, locked_at)
-            VALUES ({int(self.krd_id)}, {int(self.current_user_id)}, '{username_safe}', CURRENT_TIMESTAMP)
-        """
-        if query.exec(sql):
-            return True, ""
-        return False, f"Не удалось создать блокировку: {query.lastError().text()}"
-
-    def _update_lock(self):
-        """Обновляет время существующей блокировки (продление)"""
-        query = QSqlQuery(self.db)
-        username_safe = str(self.current_username).replace("'", "''")
-        sql = f"""
-            UPDATE krd.krd_locks
-            SET locked_at = CURRENT_TIMESTAMP, user_id = {int(self.current_user_id)}, username = '{username_safe}'
-            WHERE krd_id = {int(self.krd_id)}
-        """
-        if query.exec(sql):
-            return True, ""
-        return False, f"Не удалось обновить блокировку: {query.lastError().text()}"
-
     def release_lock(self):
-        """Снимает блокировку с записи"""
+        """Снимает Advisory Lock. Безопасно: если блокировки нет, PostgreSQL просто проигнорирует."""
         try:
+            print(f"🔓 [Lock] Попытка снять блокировку для КРД-{self.krd_id}...")
             query = QSqlQuery(self.db)
-            sql = f"DELETE FROM krd.krd_locks WHERE krd_id = {int(self.krd_id)} AND user_id = {int(self.current_user_id)}"
-            query.exec(sql)
+            # Используем prepare для стабильности
+            query.prepare("SELECT pg_advisory_unlock(:krd_id)")
+            query.bindValue(":krd_id", int(self.krd_id))
+            
+            if query.exec():
+                print(f"✅ [Lock] Блокировка на КРД-{self.krd_id} успешно снята.")
+            else:
+                print(f"⚠️ [Lock] Ошибка SQL при снятии блокировки: {query.lastError().text()}")
         except Exception as e:
-            print(f"⚠️ Ошибка снятия блокировки: {e}")
+            print(f"⚠️ [Lock] Исключение при снятии блокировки: {e}")
 
     def closeEvent(self, event: QCloseEvent):
         """
         Обработка закрытия окна.
-        1. Сохраняет текущую вкладку.
-        2. Снимает блокировку.
+        Испускает сигнал перед закрытием, чтобы MainWindow мог перехватить управление.
         """
-        # 1. Автосохранение перед выходом
-        current_widget = self.tabs.currentWidget()
-        if current_widget:
-            self._save_widget_silent(current_widget)
+        # 1. Сохранение и снятие блокировки
+        if hasattr(self, 'tabs') and self.tabs is not None:
+            current_widget = self.tabs.currentWidget()
+            if current_widget:
+                self._save_widget_silent(current_widget)
         
-        # 2. Снятие блокировки
         self.release_lock()
+        print(f"🔓 [Lock] Блокировка на КРД-{self.krd_id} снята.")
+
+        # 2. ИСПУСКАЕМ СИГНАЛ
+        print("📡 [Signal] Испускаю krd_window_closed...")
+        self.krd_window_closed.emit()
         
+        # 3. Принимаем событие закрытия
         event.accept()
 
     def _on_tab_switched(self, new_index):
@@ -6232,9 +6178,7 @@ class KrdDetailsWindow(QDialog):
             try:
                 widget.save_data()
             except ValueError as e:
-                # Ошибки валидации (например, пустое обязательное поле)
-                # Не блокируем закрытие окна, просто не сохраняем битые данные
-                pass
+                pass # Ошибки валидации не блокируют закрытие
             except Exception as e:
                 print(f"⚠️ Ошибка автосохранения вкладки {widget.__class__.__name__}: {e}")
                 traceback.print_exc()
@@ -7196,36 +7140,31 @@ class MainWindow(QMainWindow):
     def on_krd_double_clicked(self, index):
         """Обработка двойного клика по строке в таблице КРД"""
         krd_id = self.table_model_krd.data(self.table_model_krd.index(index.row(), 0))
-        
         if not krd_id:
             return
 
-        # 1. Проверяем, открыто ли уже окно редактирования
+        # Если окно уже открыто — поднимаем его
         if self.current_krd_window is not None:
-            # Если окно открыто, просто поднимаем его наверх и делаем активным
             self.current_krd_window.raise_()
             self.current_krd_window.activateWindow()
             return
 
-        # 2. Если окна нет — создаем новое
+        # Создаем новое окно
         from krd_details_window import KrdDetailsWindow
-        
-        # Важно: передаем user_info, так как он нужен для блокировок в новом окне
         self.current_krd_window = KrdDetailsWindow(
-            int(krd_id), 
-            self.db, 
-            self.user_info, 
+            int(krd_id),
+            self.db,
+            self.user_info,
             self.audit_logger
         )
-        
-        # 3. Подключаем сигнал закрытия к нашему методу очистки
-        self.current_krd_window.finished.connect(self._on_krd_window_closed)
-        
-        # 4. Показываем окно (используем show() для безмодального режима, 
-        # чтобы можно было переключаться между окнами)
+
+        # 1. ПОДКЛЮЧАЕМ СИГНАЛ ЗАКРЫТИЯ К НАШЕМУ СЛОТУ
+        # Лямбда нужна, чтобы не передавать лишние аргументы, если они есть
+        self.current_krd_window.krd_window_closed.connect(self._on_krd_window_closed)
+
+        # Показываем окно
         self.current_krd_window.show()
         
-        # Логирование просмотра
         self.audit_logger.log_krd_view(int(krd_id))
     
     def show_about_dialog(self):
@@ -7259,14 +7198,20 @@ class MainWindow(QMainWindow):
         deleted_window.exec()
     def _on_krd_window_closed(self):
         """
-        Вызывается автоматически при закрытии окна КРД.
-        Сбрасывает ссылку на окно, чтобы можно было открыть новое.
+        Слот, вызываемый сигналом из KrdDetailsWindow.
+        Гарантирует возврат фокуса и обновление данных.
         """
-        # Очищаем ссылку на старое окно
+        print("🔄 [Main] Получен сигнал закрытия КРД. Восстанавливаю фокус...")
+        
+        # Очищаем ссылку
         self.current_krd_window = None
         
-        # Опционально: Обновляем главную таблицу, 
-        # так как данные в КРД могли измениться
+        # 🔥 ПРИНУДИТЕЛЬНО ВОЗВРАЩАЕМ ФОКУС
+        self.raise_()              # Поднять главное окно на передний план
+        self.activateWindow()      # Сделать его активным (чтобы клавиатура работала)
+        self.setFocus()            # Передать фокус виджетам внутри
+        
+        # Обновляем таблицу
         self.load_krd_data()
 
 
