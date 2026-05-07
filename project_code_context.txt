@@ -2481,6 +2481,81 @@ class DatabaseHandler:
             raise Exception(f"Ошибка сохранения простого поля: {ins_query.lastError().text()}")
 
 ========================================
+📄 FILE: ./db_connector.py
+========================================
+
+"""
+Модуль для безопасного подключения к PostgreSQL с поддержкой SSL
+"""
+import sys
+from PyQt6.QtSql import QSqlDatabase, QSqlQuery
+from PyQt6.QtWidgets import QMessageBox
+
+class DatabaseConnector:
+    """
+    Класс для управления подключением к базе данных.
+    По умолчанию включает SSL-шифрование трафика.
+    """
+    def __init__(self, host="localhost", port=5432, dbname="krd_system", 
+                 user="arm_user", password="", ssl_mode="require"):
+        self.host = host
+        self.port = port
+        self.dbname = dbname
+        self.user = user
+        self.password = password
+        self.ssl_mode = ssl_mode
+        self.db = None
+
+    def connect(self):
+        """
+        Устанавливает подключение к БД.
+        Returns:
+            tuple: (bool, str) - (Успех, Сообщение)
+        """
+        try:
+            self.db = QSqlDatabase.addDatabase("QPSQL")
+            self.db.setHostName(self.host)
+            self.db.setPort(self.port)
+            self.db.setDatabaseName(self.dbname)
+            self.db.setUserName(self.user)
+            self.db.setPassword(self.password)
+            
+            # ✅ НАСТРОЙКА SSL ШИФРОВАНИЯ
+            # require: Обязательно использовать SSL. Если сервер не поддерживает - ошибка.
+            # verify-full: Обязательно SSL + проверка сертификата сервера (требует настройки сертификатов).
+            if self.ssl_mode:
+                print(f"🔒 [DB] Включаю SSL-шифрование (sslmode={self.ssl_mode})...")
+                self.db.setConnectOptions(f"sslmode={self.ssl_mode}")
+            
+            if not self.db.open():
+                error_text = self.db.lastError().text()
+                # Специальная обработка ошибок SSL
+                if "SSL" in error_text or "sslmode" in error_text.lower():
+                    error_text += "\n\n💡 Возможно, на сервере PostgreSQL не настроен SSL."
+                return False, f"Ошибка подключения: {error_text}"
+            
+            # ✅ ТЕСТОВОЕ ЗАПИСЬ ДЛЯ ПРОВЕРКИ СОЕДИНЕНИЯ
+            query = QSqlQuery(self.db)
+            if not query.exec("SELECT 1"):
+                return False, "База данных не отвечает на запросы."
+                
+            print("✅ [DB] Подключение к базе данных установлено успешно.")
+            return True, "Подключено"
+            
+        except Exception as e:
+            return False, f"Критическая ошибка: {str(e)}"
+
+    def get_connection(self):
+        """Возвращает объект подключения QSqlDatabase"""
+        return self.db
+
+    def close(self):
+        """Закрывает подключение"""
+        if self.db and self.db.isOpen():
+            self.db.close()
+            print("🔌 [DB] Подключение закрыто.")
+
+========================================
 📄 FILE: ./debug_app.py
 ========================================
 
@@ -5955,16 +6030,18 @@ if __name__ == "__main__":
 
 """
 Модуль для окна просмотра и редактирования данных КРД
-✅ УБРАНЫ КНОПКИ СОХРАНЕНИЯ/ЗАКРЫТИЯ
-✅ АВТОСОХРАНЕНИЕ ПРИ ПЕРЕКЛЮЧЕНИИ ВКЛАДОК И ЗАКРЫТИИ ОКНА
+✅ ИСПРАВЛЕНО: Обход бага драйвера QPSQL (ошибка EXECUTE syntax error)
+✅ ИСПРАВЛЕНО: Используется прямое выполнение SQL для целочисленных ID
 """
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QTabWidget, QMessageBox
 )
 from PyQt6.QtGui import QCloseEvent
+from PyQt6.QtSql import QSqlQuery
 import traceback
+from datetime import datetime, timedelta
 
-# Импорт всех вкладок
+# Импорт всех вкладок (убедитесь, что пути верные)
 from social_data_tab import SocialDataTab
 from addresses_tab import AddressesTab
 from incoming_orders_tab import IncomingOrdersTab
@@ -5973,22 +6050,42 @@ from soch_episodes_tab import SochEpisodesTab
 from outgoing_requests_tab import OutgoingRequestsTab
 from document_generator_tab import DocumentGeneratorTab
 
-
 class KrdDetailsWindow(QDialog):
-    """Окно просмотра и редактирования данных КРД"""
+    """Окно просмотра и редактирования данных КРД с поддержкой блокировок"""
     
-    def __init__(self, krd_id, db_connection, audit_logger=None):
+    # Максимальное время удержания блокировки (в минутах), если приложение упало
+    LOCK_TIMEOUT_MINUTES = 15
+
+    def __init__(self, krd_id, db_connection, user_info, audit_logger=None):
         super().__init__()
         self.krd_id = krd_id
         self.db = db_connection
+        self.user_info = user_info
         self.audit_logger = audit_logger
+        
+        # Текущий пользователь
+        self.current_user_id = user_info.get('id')
+        self.current_username = user_info.get('username', 'Неизвестный')
         self.previous_tab_index = -1  # Для отслеживания предыдущей вкладки
         
         self.setWindowTitle(f"Карточка розыска №{krd_id}")
         self.setModal(True)
-        self.resize(1000, 700)
+        self.resize(1100, 750)
+
+        # ✅ 1. Пытаемся установить блокировку ПЕРЕД инициализацией
+        lock_success, lock_message = self.try_acquire_lock()
+        
+        if not lock_success:
+            QMessageBox.warning(self, "Доступ запрещен", lock_message)
+            self.reject() # Закрываем окно, не создавая интерфейс
+            return
+
+        # Если блокировка успешна — инициализируем интерфейс
         self.init_ui()
-    
+        
+        # Добавляем иконку или статус в заголовок, что мы редактируем
+        self.setWindowTitle(f"Карточка розыска №{krd_id} — [Редактирование]")
+
     def init_ui(self):
         """Инициализация пользовательского интерфейса"""
         main_layout = QVBoxLayout(self)
@@ -5996,42 +6093,150 @@ class KrdDetailsWindow(QDialog):
         
         self.tabs = QTabWidget()
         
-        # Добавляем вкладки (убраны кнопки внизу)
+        # Передаем audit_logger в вкладки, если нужно
         self.tabs.addTab(SocialDataTab(self.krd_id, self.db, self.audit_logger), "👤 Социально-демографические данные")
         self.tabs.addTab(AddressesTab(self.krd_id, self.db, self.audit_logger), "🏠 Адреса проживания")
         self.tabs.addTab(IncomingOrdersTab(self.krd_id, self.db, self.audit_logger), "📬 Входящие поручения")
         self.tabs.addTab(ServicePlacesTab(self.krd_id, self.db, self.audit_logger), "🎖️ Места службы")
         self.tabs.addTab(SochEpisodesTab(self.krd_id, self.db, self.audit_logger), "⚠️ Сведения о СОЧ")
         self.tabs.addTab(OutgoingRequestsTab(self.krd_id, self.db, self.audit_logger), "📤 Запросы и поручения")
+        self.tabs.addTab(DocumentGeneratorTab(self.krd_id, self.db, self.audit_logger), "📄 Генерация документов")
         
-        # Отслеживаем переключение вкладок
+        # Отслеживаем переключение вкладок для автосохранения
         self.tabs.currentChanged.connect(self._on_tab_switched)
-        
         main_layout.addWidget(self.tabs)
-    
+
+    def try_acquire_lock(self):
+        """
+        Пытается установить блокировку на запись КРД.
+        Возвращает (True, "") если успешно, или (False, "Причина отказа").
+        """
+        try:
+            # 🔥 ИСПРАВЛЕНИЕ: Используем прямой exec() вместо prepare/bindValue
+            # Это обходит баг драйвера QPSQL с EXECUTE syntax error
+            query = QSqlQuery(self.db)
+            sql_check = f"SELECT user_id, username, locked_at FROM krd.krd_locks WHERE krd_id = {int(self.krd_id)}"
+            if not query.exec(sql_check):
+                return False, f"Ошибка БД: {query.lastError().text()}"
+                
+            is_locked = False
+            lock_data = {}
+            if query.next():
+                is_locked = True
+                lock_data = {
+                    'user_id': query.value(0),
+                    'username': query.value(1),
+                    'locked_at': query.value(2)
+                }
+                
+            # Сценарий 1: Запись НЕ заблокирована
+            if not is_locked:
+                return self._insert_lock()
+                
+            # Сценарий 2: Запись заблокирована ДРУГИМ пользователем
+            if lock_data['user_id'] != self.current_user_id:
+                if self._is_lock_stale(lock_data['locked_at']):
+                    return self._update_lock()
+                else:
+                    time_str = lock_data['locked_at'].toString("dd.MM.yyyy hh:mm") if hasattr(lock_data['locked_at'], 'toString') else str(lock_data['locked_at'])
+                    return False, (
+                        f"Запись №{self.krd_id} сейчас редактирует пользователь:\n"
+                        f"👤 {lock_data['username']}\n"
+                        f"⏰ С: {time_str}\n\n"
+                        f"Пожалуйста, дождитесь завершения или свяжитесь с ним."
+                    )
+            
+            # Сценарий 3: Запись заблокирована МНОЙ (повторное открытие)
+            return self._update_lock()
+            
+        except Exception as e:
+            return False, f"Исключение при блокировке: {str(e)}"
+
+    def _is_lock_stale(self, locked_at):
+        """Проверяет, прошло ли больше LOCK_TIMEOUT_MINUTES с момента блокировки"""
+        if not locked_at:
+            return True
+        
+        if hasattr(locked_at, 'toPyDateTime'):
+            lock_time = locked_at.toPyDateTime()
+        else:
+            lock_time = locked_at
+            
+        now = datetime.now()
+        diff = now - lock_time
+        
+        return diff > timedelta(minutes=self.LOCK_TIMEOUT_MINUTES)
+
+    def _insert_lock(self):
+        """Создает новую запись о блокировке"""
+        query = QSqlQuery(self.db)
+        # Безопасное экранирование имени пользователя
+        username_safe = str(self.current_username).replace("'", "''")
+        sql = f"""
+            INSERT INTO krd.krd_locks (krd_id, user_id, username, locked_at)
+            VALUES ({int(self.krd_id)}, {int(self.current_user_id)}, '{username_safe}', CURRENT_TIMESTAMP)
+        """
+        if query.exec(sql):
+            return True, ""
+        return False, f"Не удалось создать блокировку: {query.lastError().text()}"
+
+    def _update_lock(self):
+        """Обновляет время существующей блокировки (продление)"""
+        query = QSqlQuery(self.db)
+        username_safe = str(self.current_username).replace("'", "''")
+        sql = f"""
+            UPDATE krd.krd_locks
+            SET locked_at = CURRENT_TIMESTAMP, user_id = {int(self.current_user_id)}, username = '{username_safe}'
+            WHERE krd_id = {int(self.krd_id)}
+        """
+        if query.exec(sql):
+            return True, ""
+        return False, f"Не удалось обновить блокировку: {query.lastError().text()}"
+
+    def release_lock(self):
+        """Снимает блокировку с записи"""
+        try:
+            query = QSqlQuery(self.db)
+            sql = f"DELETE FROM krd.krd_locks WHERE krd_id = {int(self.krd_id)} AND user_id = {int(self.current_user_id)}"
+            query.exec(sql)
+        except Exception as e:
+            print(f"⚠️ Ошибка снятия блокировки: {e}")
+
+    def closeEvent(self, event: QCloseEvent):
+        """
+        Обработка закрытия окна.
+        1. Сохраняет текущую вкладку.
+        2. Снимает блокировку.
+        """
+        # 1. Автосохранение перед выходом
+        current_widget = self.tabs.currentWidget()
+        if current_widget:
+            self._save_widget_silent(current_widget)
+        
+        # 2. Снятие блокировки
+        self.release_lock()
+        
+        event.accept()
+
     def _on_tab_switched(self, new_index):
         """Автосохранение предыдущей вкладки при переключении"""
         if self.previous_tab_index != -1 and self.previous_tab_index != new_index:
             prev_widget = self.tabs.widget(self.previous_tab_index)
-            self._save_widget_silent(prev_widget)
-        self.previous_tab_index = new_index
-    
-    def closeEvent(self, event: QCloseEvent):
-        """Сохранение текущей вкладки перед закрытием окна"""
-        current_widget = self.tabs.currentWidget()
-        self._save_widget_silent(current_widget)
-        event.accept()
-    
+            if prev_widget:
+                self._save_widget_silent(prev_widget)
+            self.previous_tab_index = new_index
+
     def _save_widget_silent(self, widget):
         """Тихое сохранение данных виджета (без вывода сообщений об успехе)"""
         if hasattr(widget, 'save_data'):
             try:
                 widget.save_data()
-                # Логирование можно добавить сюда при необходимости
             except ValueError as e:
-                # Ошибки валидации не блокируют переключение вкладок
+                # Ошибки валидации (например, пустое обязательное поле)
+                # Не блокируем закрытие окна, просто не сохраняем битые данные
                 pass
             except Exception as e:
+                print(f"⚠️ Ошибка автосохранения вкладки {widget.__class__.__name__}: {e}")
                 traceback.print_exc()
 
 ========================================
@@ -6183,57 +6388,57 @@ if __name__ == "__main__":
 
 """
 Основной файл запуска приложения
+✅ ИСПРАВЛЕНО: Использование DatabaseConnector с SSL
 """
-
 import sys
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from PyQt6.QtSql import QSqlDatabase
 
+# Импорт коннектора
+from db_connector import DatabaseConnector
 from login_window import LoginWindow
 from main_window import MainWindow
 
-
 def main():
-    """
-    Основная функция запуска приложения
-    """
     app = QApplication(sys.argv)
-
-    # Подключение к базе данных
-    db = QSqlDatabase.addDatabase("QPSQL")
-    db.setHostName("localhost")
-    db.setDatabaseName("krd_system")
-    db.setUserName("arm_user")
-    db.setPassword("ArmUserSecurePass2026!")
-
-    if not db.open():
-        QMessageBox.critical(None, "Ошибка", f"Не удалось подключиться к базе данных:\n{db.lastError().text()}")
+    
+    # ✅ СОЗДАНИЕ КОННЕКТОРА С SSL
+    # ssl_mode="require" заставит Qt использовать шифрованный канал.
+    connector = DatabaseConnector(
+        host="localhost",
+        port=5432,
+        dbname="krd_system",
+        user="arm_user",
+        password="ArmUserSecurePass2026!",
+        ssl_mode="require"  # 🔒 Включено шифрование
+    )
+    
+    # Попытка подключения
+    success, msg = connector.connect()
+    
+    if not success:
+        QMessageBox.critical(None, "Ошибка подключения к БД", msg)
         sys.exit(1)
-
+        
+    db = connector.get_connection()
+    print(f"📡 [Network] Данные передаются через защищенный SSL-туннель.")
+    
     # Создание и отображение окна авторизации
     login_window = LoginWindow(db)
-
-    # Создаем переменную для хранения главного окна
     main_window = None
-
-    # Подключение сигнала успешной авторизации к открытию главного окна
+    
     def open_main_window(user_info):
         nonlocal main_window
-        # Создаем главное окно с информацией о пользователе
+        # Создаем главное окно с информацией о пользователе и передаем DB
         main_window = MainWindow(user_info, db)
         main_window.show()
-
-        # Закрываем окно авторизации
         login_window.close()
-
+        
     login_window.login_successful.connect(open_main_window)
-
-    # Показываем окно авторизации
     login_window.show()
-
+    
     # Запускаем цикл событий
     sys.exit(app.exec())
-
 
 if __name__ == "__main__":
     main()
@@ -6327,8 +6532,12 @@ class MainWindow(QMainWindow):
         self.search_timer.setSingleShot(True)
         self.search_timer.timeout.connect(self._perform_search)
         self.user_id = user_info.get('id')
-     
         
+        
+        # ✅ НОВОЕ: Переменная для хранения ссылки на открытое окно КРД
+        self.current_krd_window = None
+
+     
         # Инициализация интерфейса
         self.init_ui()
         
@@ -6987,15 +7196,37 @@ class MainWindow(QMainWindow):
     def on_krd_double_clicked(self, index):
         """Обработка двойного клика по строке в таблице КРД"""
         krd_id = self.table_model_krd.data(self.table_model_krd.index(index.row(), 0))
+        
+        if not krd_id:
+            return
 
-        if krd_id:
-            self.audit_logger.log_krd_view(int(krd_id))
-            
-            from krd_details_window import KrdDetailsWindow
-            details_window = KrdDetailsWindow(int(krd_id), self.db, self.audit_logger)
+        # 1. Проверяем, открыто ли уже окно редактирования
+        if self.current_krd_window is not None:
+            # Если окно открыто, просто поднимаем его наверх и делаем активным
+            self.current_krd_window.raise_()
+            self.current_krd_window.activateWindow()
+            return
 
-            if details_window.exec() == QDialog.DialogCode.Accepted:
-                self.load_krd_data()
+        # 2. Если окна нет — создаем новое
+        from krd_details_window import KrdDetailsWindow
+        
+        # Важно: передаем user_info, так как он нужен для блокировок в новом окне
+        self.current_krd_window = KrdDetailsWindow(
+            int(krd_id), 
+            self.db, 
+            self.user_info, 
+            self.audit_logger
+        )
+        
+        # 3. Подключаем сигнал закрытия к нашему методу очистки
+        self.current_krd_window.finished.connect(self._on_krd_window_closed)
+        
+        # 4. Показываем окно (используем show() для безмодального режима, 
+        # чтобы можно было переключаться между окнами)
+        self.current_krd_window.show()
+        
+        # Логирование просмотра
+        self.audit_logger.log_krd_view(int(krd_id))
     
     def show_about_dialog(self):
         """Показ диалога "О программе" """
@@ -7026,6 +7257,17 @@ class MainWindow(QMainWindow):
         
         deleted_window = DeletedRecordsWindow(self.db)
         deleted_window.exec()
+    def _on_krd_window_closed(self):
+        """
+        Вызывается автоматически при закрытии окна КРД.
+        Сбрасывает ссылку на окно, чтобы можно было открыть новое.
+        """
+        # Очищаем ссылку на старое окно
+        self.current_krd_window = None
+        
+        # Опционально: Обновляем главную таблицу, 
+        # так как данные в КРД могли измениться
+        self.load_krd_data()
 
 
 def main():
@@ -10076,64 +10318,53 @@ class ReportConfigDialog(QDialog):
 
 """
 Файл запуска приложения АРМ Сотрудника дознания
+✅ ИСПРАВЛЕНО: Использование DatabaseConnector с SSL
 """
-
 import sys
 from PyQt6.QtWidgets import QApplication, QMessageBox
-from PyQt6.QtSql import QSqlDatabase
-
+from db_connector import DatabaseConnector
 from login_window import LoginWindow
 from main_window import MainWindow
 
-
 def main():
-    """
-    Основная функция запуска приложения
-    """
     app = QApplication(sys.argv)
-
-    # Подключение к базе данных
-    db = QSqlDatabase.addDatabase("QPSQL")
-    db.setHostName("localhost")
-    db.setDatabaseName("krd_system")
-    db.setUserName("arm_user")
-    db.setPassword("ArmUserSecurePass2026!")
-
-    if not db.open():
-        QMessageBox.critical(None, "Ошибка", f"Не удалось подключиться к базе данных:\n{db.lastError().text()}")
+    
+    # ✅ Подключение через коннектор с SSL
+    connector = DatabaseConnector(
+        host="localhost",
+        port=5432,
+        dbname="krd_system",
+        user="arm_user",
+        password="ArmUserSecurePass2026!",
+        ssl_mode="require"
+    )
+    
+    success, msg = connector.connect()
+    if not success:
+        QMessageBox.critical(None, "Ошибка", msg)
         sys.exit(1)
+        
+    db = connector.get_connection()
 
     # Создание и отображение окна авторизации
     login_window = LoginWindow(db)
-
-    # Создаем переменную для хранения главного окна
     main_window = None
 
-    # Подключение сигнала успешной авторизации к открытию главного окна
     def open_main_window(user_info):
         nonlocal main_window
-        
-        # ✅ ДОБАВЬТЕ ЭТИ СТРОКИ
         from theme_manager import ThemeManager
         user_id = user_info.get('id')
         print(f"🔍 [DEBUG] user_id из user_info: {user_id}")
-        
         tm = ThemeManager(db, user_id)
-        tm.load_and_apply()  # <-- ЭТОТ ВЫЗОВ ОБЯЗАТЕЛЕН!
-        
+        tm.load_and_apply()
         main_window = MainWindow(user_info, db)
         main_window.theme_manager = tm
         main_window.show()
         login_window.close()
 
     login_window.login_successful.connect(open_main_window)
-
-    # Показываем окно авторизации
     login_window.show()
-
-    # Запускаем цикл событий
     sys.exit(app.exec())
-
 
 if __name__ == "__main__":
     main()

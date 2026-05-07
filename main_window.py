@@ -83,8 +83,12 @@ class MainWindow(QMainWindow):
         self.search_timer.setSingleShot(True)
         self.search_timer.timeout.connect(self._perform_search)
         self.user_id = user_info.get('id')
-     
         
+        
+        # ✅ НОВОЕ: Переменная для хранения ссылки на открытое окно КРД
+        self.current_krd_window = None
+
+     
         # Инициализация интерфейса
         self.init_ui()
         
@@ -743,15 +747,32 @@ class MainWindow(QMainWindow):
     def on_krd_double_clicked(self, index):
         """Обработка двойного клика по строке в таблице КРД"""
         krd_id = self.table_model_krd.data(self.table_model_krd.index(index.row(), 0))
+        if not krd_id:
+            return
 
-        if krd_id:
-            self.audit_logger.log_krd_view(int(krd_id))
-            
-            from krd_details_window import KrdDetailsWindow
-            details_window = KrdDetailsWindow(int(krd_id), self.db, self.audit_logger)
+        # Если окно уже открыто — поднимаем его
+        if self.current_krd_window is not None:
+            self.current_krd_window.raise_()
+            self.current_krd_window.activateWindow()
+            return
 
-            if details_window.exec() == QDialog.DialogCode.Accepted:
-                self.load_krd_data()
+        # Создаем новое окно
+        from krd_details_window import KrdDetailsWindow
+        self.current_krd_window = KrdDetailsWindow(
+            int(krd_id),
+            self.db,
+            self.user_info,
+            self.audit_logger
+        )
+
+        # 1. ПОДКЛЮЧАЕМ СИГНАЛ ЗАКРЫТИЯ К НАШЕМУ СЛОТУ
+        # Лямбда нужна, чтобы не передавать лишние аргументы, если они есть
+        self.current_krd_window.krd_window_closed.connect(self._on_krd_window_closed)
+
+        # Показываем окно
+        self.current_krd_window.show()
+        
+        self.audit_logger.log_krd_view(int(krd_id))
     
     def show_about_dialog(self):
         """Показ диалога "О программе" """
@@ -782,6 +803,23 @@ class MainWindow(QMainWindow):
         
         deleted_window = DeletedRecordsWindow(self.db)
         deleted_window.exec()
+    def _on_krd_window_closed(self):
+        """
+        Слот, вызываемый сигналом из KrdDetailsWindow.
+        Гарантирует возврат фокуса и обновление данных.
+        """
+        print("🔄 [Main] Получен сигнал закрытия КРД. Восстанавливаю фокус...")
+        
+        # Очищаем ссылку
+        self.current_krd_window = None
+        
+        # 🔥 ПРИНУДИТЕЛЬНО ВОЗВРАЩАЕМ ФОКУС
+        self.raise_()              # Поднять главное окно на передний план
+        self.activateWindow()      # Сделать его активным (чтобы клавиатура работала)
+        self.setFocus()            # Передать фокус виджетам внутри
+        
+        # Обновляем таблицу
+        self.load_krd_data()
 
 
 def main():
