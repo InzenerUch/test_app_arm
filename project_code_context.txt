@@ -2364,6 +2364,64 @@ class CompositeFieldWidget:
         return db_columns
 
 ========================================
+📄 FILE: ./config_manager.py
+========================================
+
+import os
+import json
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+import base64
+import sys
+
+class ConfigManager:
+    def __init__(self):
+        # Путь к файлу конфига (рядом с exe или в %APPDATA%)
+        if getattr(sys, 'frozen', False):
+            self.config_path = os.path.join(sys._MEIPASS, 'db_config.enc')
+        else:
+            self.config_path = 'db_config.enc'
+        
+        self.key = self._get_or_create_key()
+
+    def _get_or_create_key(self):
+        # В реальном проекте ключ лучше брать из защищенного хранилища ОС
+        # Для простоты здесь используем фиксированный salt, привязанный к "секрету" приложения
+        # В идеале используйте Windows DPAPI, но это сложнее.
+        password = b"my_super_secret_app_salt_do_not_share" 
+        kdf = PBKDF2HMAC(algorithm=hashes.SHA256(), length=32, salt=password, iterations=100000)
+        return base64.urlsafe_b64encode(kdf.derive(password))
+
+    def save_config(self, host, port, dbname, user, password):
+        data = {
+            "host": host,
+            "port": port,
+            "dbname": dbname,
+            "user": user,
+            "password": password
+        }
+        f = Fernet(self.key)
+        token = f.encrypt(json.dumps(data).encode('utf-8'))
+        
+        with open(self.config_path, 'wb') as file:
+            file.write(token)
+
+    def load_config(self):
+        if not os.path.exists(self.config_path):
+            return None
+        
+        try:
+            with open(self.config_path, 'rb') as file:
+                token = file.read()
+            
+            f = Fernet(self.key)
+            decrypted_data = f.decrypt(token).decode('utf-8')
+            return json.loads(decrypted_data)
+        except Exception:
+            return None
+
+========================================
 📄 FILE: ./database_handler.py
 ========================================
 
@@ -2486,6 +2544,7 @@ class DatabaseHandler:
 
 """
 Модуль для безопасного подключения к PostgreSQL с поддержкой SSL
+✅ ИСПРАВЛЕНО: Гарантированное преобразование port к int
 """
 import sys
 from PyQt6.QtSql import QSqlDatabase, QSqlQuery
@@ -2496,10 +2555,11 @@ class DatabaseConnector:
     Класс для управления подключением к базе данных.
     По умолчанию включает SSL-шифрование трафика.
     """
-    def __init__(self, host="localhost", port=5432, dbname="krd_system", 
+    def __init__(self, host="localhost", port=5432, dbname="krd_system",
                  user="arm_user", password="", ssl_mode="require"):
         self.host = host
-        self.port = port
+        # ✅ Гарантируем, что port — это int
+        self.port = int(port) if port is not None else 5432
         self.dbname = dbname
         self.user = user
         self.password = password
@@ -2515,33 +2575,35 @@ class DatabaseConnector:
         try:
             self.db = QSqlDatabase.addDatabase("QPSQL")
             self.db.setHostName(self.host)
-            self.db.setPort(self.port)
+            
+            # ✅ Явное преобразование к int перед вызовом setPort
+            self.db.setPort(int(self.port))
+            
             self.db.setDatabaseName(self.dbname)
             self.db.setUserName(self.user)
             self.db.setPassword(self.password)
-            
+
             # ✅ НАСТРОЙКА SSL ШИФРОВАНИЯ
-            # require: Обязательно использовать SSL. Если сервер не поддерживает - ошибка.
-            # verify-full: Обязательно SSL + проверка сертификата сервера (требует настройки сертификатов).
             if self.ssl_mode:
                 print(f"🔒 [DB] Включаю SSL-шифрование (sslmode={self.ssl_mode})...")
                 self.db.setConnectOptions(f"sslmode={self.ssl_mode}")
-            
+
             if not self.db.open():
                 error_text = self.db.lastError().text()
-                # Специальная обработка ошибок SSL
                 if "SSL" in error_text or "sslmode" in error_text.lower():
-                    error_text += "\n\n💡 Возможно, на сервере PostgreSQL не настроен SSL."
+                    error_text += "\n💡 Возможно, на сервере PostgreSQL не настроен SSL."
                 return False, f"Ошибка подключения: {error_text}"
-            
-            # ✅ ТЕСТОВОЕ ЗАПИСЬ ДЛЯ ПРОВЕРКИ СОЕДИНЕНИЯ
+
+            # ✅ ТЕСТОВОЕ ЗАПРОС ДЛЯ ПРОВЕРКИ СОЕДИНЕНИЯ
             query = QSqlQuery(self.db)
             if not query.exec("SELECT 1"):
                 return False, "База данных не отвечает на запросы."
-                
+
             print("✅ [DB] Подключение к базе данных установлено успешно.")
             return True, "Подключено"
-            
+
+        except ValueError as e:
+            return False, f"Ошибка типа данных (порт): {str(e)}\n💡 Убедитесь, что порт указан как число (например, 5432)"
         except Exception as e:
             return False, f"Критическая ошибка: {str(e)}"
 
@@ -10261,37 +10323,59 @@ class ReportConfigDialog(QDialog):
 📄 FILE: ./run_app.py
 ========================================
 
-"""
-Файл запуска приложения АРМ Сотрудника дознания
-✅ ИСПРАВЛЕНО: Использование DatabaseConnector с SSL
-"""
 import sys
+import os
 from PyQt6.QtWidgets import QApplication, QMessageBox
-from db_connector import DatabaseConnector
+from config_manager import ConfigManager
+from db_connector import DatabaseConnector # Ваш коннектор
 from login_window import LoginWindow
 from main_window import MainWindow
+# Импорт вашего диалога настройки
+from setup_dialog import SetupDialog 
 
 def main():
     app = QApplication(sys.argv)
+    config_manager = ConfigManager()
     
-    # ✅ Подключение через коннектор с SSL
+    # 1. Проверяем, есть ли настройки
+    db_config = config_manager.load_config()
+    
+    if not db_config:
+        # Настроек нет, открываем окно настройки
+        dialog = SetupDialog()
+        if dialog.exec():
+            # Пользователь нажал "Сохранить"
+            config_manager.save_config(
+                dialog.host_input.text(),
+                dialog.port_input.text(),
+                dialog.db_input.text(),
+                dialog.user_input.text(),
+                dialog.pass_input.text()
+            )
+            db_config = config_manager.load_config()
+        else:
+            sys.exit(0) # Пользователь отменил
+
+    # 2. Подключаемся к БД
     connector = DatabaseConnector(
-        host="localhost",
-        port=5432,
-        dbname="krd_system",
-        user="arm_user",
-        password="ArmUserSecurePass2026!",
-        ssl_mode="require"
+        host=db_config['host'],
+        port=db_config['port'],
+        dbname=db_config['dbname'],
+        user=db_config['user'],
+        password=db_config['password'],
+        ssl_mode="require" # Или prefer
     )
     
     success, msg = connector.connect()
     if not success:
-        QMessageBox.critical(None, "Ошибка", msg)
+        # Если пароль изменили или сервер недоступен
+        QMessageBox.critical(None, "Ошибка БД", msg)
+        # Можно предложить открыть SetupDialog заново
         sys.exit(1)
-        
+
     db = connector.get_connection()
 
-    # Создание и отображение окна авторизации
+    # 3. Запускаем авторизацию пользователя
     login_window = LoginWindow(db)
     main_window = None
 
@@ -10299,9 +10383,9 @@ def main():
         nonlocal main_window
         from theme_manager import ThemeManager
         user_id = user_info.get('id')
-        print(f"🔍 [DEBUG] user_id из user_info: {user_id}")
         tm = ThemeManager(db, user_id)
         tm.load_and_apply()
+        
         main_window = MainWindow(user_info, db)
         main_window.theme_manager = tm
         main_window.show()
@@ -10309,6 +10393,7 @@ def main():
 
     login_window.login_successful.connect(open_main_window)
     login_window.show()
+    
     sys.exit(app.exec())
 
 if __name__ == "__main__":
@@ -11014,6 +11099,65 @@ class ServicePlacesTab(QWidget):
             }
         
         return None
+
+========================================
+📄 FILE: ./setup_dialog.py
+========================================
+
+# setup_dialog.py
+from PyQt6.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QLineEdit, QPushButton, QMessageBox, QLabel
+from PyQt6.QtSql import QSqlDatabase
+
+class SetupDialog(QDialog):
+    def __init__(self):
+        super().__init__()
+        self.setWindowTitle("Настройка подключения к базе данных")
+        self.setModal(True)
+        self.resize(400, 300)
+        
+        layout = QVBoxLayout()
+        form = QFormLayout()
+        
+        self.host_input = QLineEdit("localhost")
+        self.port_input = QLineEdit("5432")
+        self.db_input = QLineEdit("krd_system")
+        self.user_input = QLineEdit("arm_user")
+        self.pass_input = QLineEdit()
+        self.pass_input.setEchoMode(QLineEdit.EchoMode.Password)
+        
+        form.addRow("Хост:", self.host_input)
+        form.addRow("Порт:", self.port_input)
+        form.addRow("База данных:", self.db_input)
+        form.addRow("Пользователь БД:", self.user_input)
+        form.addRow("Пароль БД:", self.pass_input)
+        
+        layout.addLayout(form)
+        
+        self.btn_test = QPushButton("Проверить подключение")
+        self.btn_save = QPushButton("Сохранить и войти")
+        self.btn_save.setEnabled(False)
+        
+        self.btn_test.clicked.connect(self.test_connection)
+        self.btn_save.clicked.connect(self.accept)
+        
+        layout.addWidget(self.btn_test)
+        layout.addWidget(self.btn_save)
+        self.setLayout(layout)
+
+    def test_connection(self):
+        db = QSqlDatabase.addDatabase("QPSQL", "test_conn")
+        db.setHostName(self.host_input.text())
+        db.setPort(int(self.port_input.text()))
+        db.setDatabaseName(self.db_input.text())
+        db.setUserName(self.user_input.text())
+        db.setPassword(self.pass_input.text())
+        
+        if db.open():
+            QMessageBox.information(self, "Успех", "Подключение успешно!")
+            self.btn_save.setEnabled(True)
+            db.close()
+        else:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось подключиться: {db.lastError().text()}")
 
 ========================================
 📄 FILE: ./soch_episode_dialog.py

@@ -1,0 +1,8 @@
+PyQt6>=6.6.0
+PyQt6-Qt6>=6.6.0
+openpyxl>=3.1.0
+python-docx>=1.0.0
+bcrypt>=4.0.0
+cryptography>=41.0.0
+graphviz>=0.20.0
+psycopg2-binary>=2.9.0
