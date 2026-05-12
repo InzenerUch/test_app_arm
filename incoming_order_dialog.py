@@ -4,6 +4,7 @@
 ✅ ДОБАВЛЕНО: Кнопки ⚙️ для редактирования справочников (Тип инициатора, Военное управление)
 ✅ ДОБАВЛЕНО: Валидация QRegularExpressionValidator и setMaxLength по схеме БД
 ✅ УЛУЧШЕНО: Сохранение текущего выбора при обновлении списков справочников
+✅ ДОБАВЛЕНО: Обновление ComboBox по сигналу data_changed из ReferenceEditorDialog
 """
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QGroupBox, QGridLayout, QHBoxLayout,
@@ -51,22 +52,25 @@ class IncomingOrderDialog(QDialog):
         btn = QPushButton("⚙️")
         btn.setToolTip(f"Настроить справочник: {table_name}")
         btn.setFixedSize(32, 32)
-        btn.setFont(QFont("Segoe UI Emoji", 12))
-        btn.setStyleSheet("""
-            QPushButton { 
-                font-weight: bold; border-radius: 6px; background: #f8f9fa; border: 1px solid #ced4da; 
-            } 
-            QPushButton:hover { background: #e9ecef; border-color: #adb5bd; }
-        """)
+        btn.setProperty("role", "edit")
+       
         btn.clicked.connect(lambda: self.open_ref_editor(table_name, reload_func))
         lay.addWidget(btn)
         return widget
 
     def open_ref_editor(self, table_name, reload_func):
-        """Открывает редактор справочников и обновляет список после закрытия"""
+        """Открывает редактор справочников и подключается к сигналу data_changed"""
         dialog = ReferenceEditorDialog(self.db, self.parent_window or self, initial_table=table_name)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            reload_func()
+        
+        # ✅ ПОДКЛЮЧАЕМСЯ К СИГНАЛУ data_changed
+        dialog.data_changed.connect(lambda tbl: self._on_reference_changed(tbl, reload_func))
+        
+        dialog.exec()  # Не проверяем результат, сигнал сам вызовет обновление
+
+    def _on_reference_changed(self, changed_table, reload_func):
+        """Обработчик изменения справочника - обновляем ComboBox"""
+        print(f"🔄 Справочник '{changed_table}' изменён, обновление ComboBox...")
+        reload_func()
 
     def init_ui(self):
         layout = QVBoxLayout(self)
@@ -287,7 +291,9 @@ class IncomingOrderDialog(QDialog):
             
         if current_id is not None:
             idx = self.initiator_type_combo.findData(current_id)
-            if idx >= 0: self.initiator_type_combo.setCurrentIndex(idx)
+            if idx >= 0: 
+                self.initiator_type_combo.setCurrentIndex(idx)
+                print(f"✅ Восстановлен выбор типа инициатора: {current_id}")
 
     def load_military_units(self):
         """Загрузка военных управлений с сохранением выбора"""
@@ -302,7 +308,9 @@ class IncomingOrderDialog(QDialog):
             
         if current_id is not None:
             idx = self.initiator_military_unit_combo.findData(current_id)
-            if idx >= 0: self.initiator_military_unit_combo.setCurrentIndex(idx)
+            if idx >= 0: 
+                self.initiator_military_unit_combo.setCurrentIndex(idx)
+                print(f"✅ Восстановлен выбор военного управления: {current_id}")
 
     def setup_autocomplete_fields(self):
         """Настройка автодополнения для почтовых полей"""
@@ -336,7 +344,9 @@ class IncomingOrderDialog(QDialog):
         initiator_type_id = self.order_data.get('initiator_type_id')
         if initiator_type_id:
             index = self.initiator_type_combo.findData(initiator_type_id)
-            if index >= 0: self.initiator_type_combo.setCurrentIndex(index)
+            if index >= 0: 
+                self.initiator_type_combo.setCurrentIndex(index)
+                print(f"✅ Загружен тип инициатора: {initiator_type_id}")
             
         self.initiator_full_name_input.setText(self.order_data.get('initiator_full_name') or '')
         
@@ -344,7 +354,9 @@ class IncomingOrderDialog(QDialog):
         military_unit_id = self.order_data.get('military_unit_id')
         if military_unit_id:
             index = self.initiator_military_unit_combo.findData(military_unit_id)
-            if index >= 0: self.initiator_military_unit_combo.setCurrentIndex(index)
+            if index >= 0: 
+                self.initiator_military_unit_combo.setCurrentIndex(index)
+                print(f"✅ Загружено военное управление: {military_unit_id}")
             
         order_date = self.order_data.get('order_date')
         if order_date: self.order_date_input.setDate(order_date)

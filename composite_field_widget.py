@@ -2,6 +2,7 @@
 Виджет для управления составными полями (Composite Fields)
 ✅ Динамическая загрузка колонок, поддержка русских описаний, прокрутка, безопасное управление layout
 ✅ ДОБАВЛЕНО: SearchableComboBox для поиска полей
+✅ ИСПРАВЛЕНО: Кнопка добавления столбца всегда внизу, новые столбцы добавляются перед ней
 """
 import json
 import traceback
@@ -11,7 +12,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
-from searchable_combo import SearchableComboBox  # ✅ ИМПОРТ НОВОГО КЛАССА
+from searchable_combo import SearchableComboBox
 
 # === СПРАВОЧНИК: DB колонка → Русское описание ===
 COLUMN_DESCRIPTIONS = {
@@ -145,37 +146,35 @@ DESCRIPTION_TO_COLUMN = {v: k for k, v in COLUMN_DESCRIPTIONS.items()}
 
 class CompositeFieldWidget:
     """Управление интерфейсом составных полей"""
-    
+
     def __init__(self, parent):
         self.parent = parent
         if not hasattr(parent, 'db_columns'):
             print("⚠️ [CompositeFieldWidget] Предупреждение: у родителя нет атрибута 'db_columns'")
             parent.db_columns = {}
-    
+
     def _create_column_combo(self, selected_column=None, table_name=None):
         """Создание ComboBox с русскими описаниями колонок и поиском"""
         try:
             print(f"\n{'='*60}")
-            print(f"🔧 СОЗДАНИЕ COMBOBOX ДЛЯ СОСТАВНОГО ПОЛЯ")
+            print(f"🔧 СОЗДАНИЕ COMBOBOX ДЛЯ ПОЛЯ БД")
             print(f"{'='*60}")
-            
             combo = SearchableComboBox()
-            
             if combo is None:
                 print("❌ ОШИБКА: Не удалось создать SearchableComboBox!")
                 return None
-            
+
             print(f"✅ SearchableComboBox создан: {combo}")
             print(f"   Тип: {type(combo).__name__}")
             print(f"   Редактируемый: {combo.isEditable()}")
-            
+
             combo.setMaxVisibleItems(50)
             combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             combo.view().setMinimumHeight(400)
             combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
             combo.setMinimumWidth(350)
             combo.setMaximumWidth(600)
-            
+
             # ✅ ИСПРАВЛЕНО: completer() — это метод в PyQt6!
             completer = combo.completer()
             if completer:
@@ -185,13 +184,12 @@ class CompositeFieldWidget:
                 print(f"   CompletionMode: {completer.completionMode()}")
             else:
                 print("❌ ОШИБКА: Completer не создан!")
-            
+
             all_columns = []
             seen = set()
-            
             target_tables = self.parent.db_columns.keys()
             print(f"🔍 Загрузка колонок из таблиц: {list(target_tables)}")
-            
+
             for tbl in target_tables:
                 columns = self.parent.db_columns.get(tbl, [])
                 print(f"   📊 Таблица {tbl}: {len(columns)} колонок")
@@ -201,16 +199,15 @@ class CompositeFieldWidget:
                     seen.add(col)
                     desc = COLUMN_DESCRIPTIONS.get(col, col)
                     all_columns.append((col, desc))
-            
+
             all_columns.sort(key=lambda x: x[1])
-            
+
             print(f"\n📊 Добавление {len(all_columns)} колонок в ComboBox...")
-            
             for col_name, col_desc in all_columns:
                 combo.addItem(col_desc, col_name)
-            
+
             print(f"✅ [COMBO] Загружено: {combo.count()} столбцов (ВСЕ таблицы)")
-            
+
             if selected_column:
                 idx = combo.findData(selected_column.strip())
                 if idx >= 0:
@@ -218,98 +215,102 @@ class CompositeFieldWidget:
                     print(f"✅ Выбран элемент: {combo.currentText()} (data={combo.currentData()})")
                 else:
                     print(f"⚠️ Колонка '{selected_column}' не найдена в списке!")
-            
+
             if combo.count() == 0:
                 print("❌ ОШИБКА: ComboBox пуст!")
             else:
                 print(f"✅ ComboBox готов к использованию")
                 print(f"   Всего элементов: {combo.count()}")
-            
+
             print(f"{'='*60}\n")
             return combo
-            
+
         except Exception as e:
             print(f"❌ КРИТИЧЕСКАЯ ОШИБКА при создании ComboBox: {e}")
             import traceback
             traceback.print_exc()
-            
+
             print("⚠️ Создаем fallback ComboBox...")
             combo = QComboBox()
             combo.addItem("Ошибка загрузки", None)
             return combo
-    
+
     def create_composite_field_row(self, row, field_name, db_columns_json, table_name, mapping_table):
         """Создание строки для составного сопоставления (при загрузке из БД)"""
         try:
             mapping_table.insertRow(row)
-            
+
             # 1. Переменная из шаблона
             var_combo = QComboBox()
             vars_list = getattr(self.parent, 'template_variables', [])
             var_combo.addItems(vars_list if vars_list else [])
             var_combo.setCurrentText(field_name)
             var_combo.setMinimumWidth(200)
-            
+
             # 2. Контейнер для составных столбцов
             composite_widget = QWidget()
             composite_layout = QVBoxLayout(composite_widget)
             composite_layout.setContentsMargins(5, 5, 5, 5)
             composite_layout.setSpacing(5)
-            
+
             # Парсим JSON
             db_columns = json.loads(db_columns_json) if isinstance(db_columns_json, str) else db_columns_json
             if not db_columns:
                 db_columns = [{'column': '', 'separator': ', '}]
-            
+
+            # Добавляем существующие столбцы
             for idx, col_info in enumerate(db_columns):
                 col_widget = self._create_composite_column_widget(row, idx, col_info, table_name)
                 composite_layout.addWidget(col_widget)
-            
+
+            # В конце добавляем кнопку добавления нового столбца
             self._add_add_column_button(composite_layout, row, table_name)
-            
+
             # 3. Установка в таблицу
             mapping_table.setCellWidget(row, 0, var_combo)
             mapping_table.setCellWidget(row, 1, composite_widget)
             mapping_table.setCellWidget(row, 2, self._create_type_label("Составное"))
             mapping_table.resizeRowToContents(row)
-            
+
         except Exception as e:
             print(f"❌ Ошибка создания строки составного поля: {e}")
             traceback.print_exc()
-    
+
     def _create_composite_column_widget(self, row, idx, col_info, table_name):
         """Создание виджета одного столбца в составном поле"""
         col_widget = QWidget()
+        col_widget.setObjectName(f"col_widget_{row}_{idx}")  # ✅ Добавляем objectName
+
         col_layout = QHBoxLayout(col_widget)
         col_layout.setContentsMargins(8, 5, 8, 5)
         col_layout.setSpacing(8)
-        
+
         # Номер столбца
         num_label = QLabel(f"{idx + 1}.")
         num_label.setStyleSheet("font-weight: bold; color: #2196F3; min-width: 20px;")
         num_label.setObjectName(f"num_{row}_{idx}")
         col_layout.addWidget(num_label)
-        
-        # ✅ ComboBox с колонками (теперь показывает ВСЕ таблицы с поиском)
+
+        # ✅ ComboBox с колонками
         col_combo = self._create_column_combo(
             selected_column=col_info.get('column', ''),
-            table_name=None  # ← Игнорируем table_name, показываем все таблицы
+            table_name=None
         )
         col_combo.setObjectName(f"col_{row}_{idx}")
         col_layout.addWidget(col_combo, 2)
-        
+
         # Разделитель
         sep_label = QLabel("Разделитель:")
         sep_label.setStyleSheet("color: #666; font-size: 10px;")
         col_layout.addWidget(sep_label)
-        
+
         sep_input = QLineEdit()
         sep_input.setText(col_info.get('separator', ', '))
         sep_input.setFixedWidth(70)
         sep_input.setObjectName(f"sep_{row}_{idx}")
         sep_input.setStyleSheet("QLineEdit { border: 1px solid #ddd; border-radius: 3px; padding: 2px; }")
         col_layout.addWidget(sep_input)
-        
+
         # Кнопка удаления
         remove_btn = QPushButton("×")
         remove_btn.setFixedSize(26, 26)
@@ -329,29 +330,36 @@ class CompositeFieldWidget:
             lambda checked=False, r=row, i=idx, w=col_widget: self._remove_composite_column(r, i, w)
         )
         col_layout.addWidget(remove_btn)
-        
+
         return col_widget
-    
+
     def _remove_composite_column(self, row, idx, widget_to_remove):
         """Удаление столбца из составного поля"""
         composite_widget = self.parent.mapping_table.cellWidget(row, 1)
         if not composite_widget:
             return
-        
+
         layout = composite_widget.layout()
         if not layout:
             return
-        
-        # Защита: не удаляем, если остался 1 столбец (плюс контейнер кнопки и stretch)
-        if layout.count() <= 3:
+
+        # ✅ Считаем только виджеты-столбцы (не считая контейнер с кнопкой)
+        column_widgets_count = 0
+        for i in range(layout.count()):
+            item = layout.itemAt(i)
+            if item and item.widget() and item.widget().objectName().startswith('col_widget_'):
+                column_widgets_count += 1
+
+        # Защита: не удаляем, если остался 1 столбец
+        if column_widgets_count <= 1:
             QMessageBox.warning(self.parent, "Внимание", "Нельзя удалить последний столбец.")
             return
-        
+
         layout.removeWidget(widget_to_remove)
         widget_to_remove.deleteLater()
         self._update_column_numbers(layout)
         self.parent.mapping_table.resizeRowToContents(row)
-    
+
     def _update_column_numbers(self, layout):
         """Обновление номеров всех столбцов после удаления/добавления"""
         num_idx = 1
@@ -362,21 +370,21 @@ class CompositeFieldWidget:
             w = item.widget()
             if not w:
                 continue
-            # Проверяем, является ли виджет контейнером столбца (есть вложенный layout с номером)
-            if w.layout() and w.layout().count() > 0:
-                num_label = w.layout().itemAt(0).widget()
+            # ✅ Обновляем номер у каждого столбца
+            if w.objectName().startswith('col_widget_'):
+                num_label = w.layout().itemAt(0).widget() if w.layout() else None
                 if isinstance(num_label, QLabel) and num_label.text().endswith('.'):
                     num_label.setText(f"{num_idx}.")
-                    num_label.setObjectName(f"num_updated_{num_idx}")
                     num_idx += 1
-    
+
     def _add_add_column_button(self, layout, row, table_name=None):
-        """Добавление кнопки добавления столбца в конец layout"""
+        """Создание контейнера с кнопкой добавления столбца (всегда в конце)"""
         add_btn_container = QWidget()
+        add_btn_container.setObjectName(f"add_btn_container_{row}")
         add_btn_layout = QHBoxLayout(add_btn_container)
         add_btn_layout.setContentsMargins(0, 8, 0, 0)
         add_btn_layout.addSpacerItem(QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
-        
+
         add_col_btn = QPushButton("+ Добавить столбец")
         add_col_btn.setFixedSize(140, 28)
         add_col_btn.setStyleSheet("""
@@ -396,62 +404,79 @@ class CompositeFieldWidget:
         """)
         add_col_btn.clicked.connect(lambda checked=False, r=row: self.add_composite_column(r, table_name))
         add_btn_layout.addWidget(add_col_btn)
-        layout.addWidget(add_btn_container)
-        layout.addStretch()
-    
+        layout.addWidget(add_btn_container)  # ✅ Всегда добавляем в конец
+
     def add_composite_column(self, row, table_name=None):
-        """Добавление нового столбца в составное сопоставление"""
+        """Добавление нового столбца в составное сопоставление (перед кнопкой)"""
         composite_widget = self.parent.mapping_table.cellWidget(row, 1)
         if not composite_widget:
             return
-        
+
         layout = composite_widget.layout()
         if not layout:
             return
-        
-        # Определяем текущий индекс (количество столбцов минус кнопка и stretch)
-        current_idx = layout.count() - 2 if layout.count() >= 2 else 0
-        col_info = {'column': '', 'separator': ', '}
-        
+
+        # ✅ Находим контейнер с кнопкой добавления
+        add_btn_container = composite_widget.findChild(QWidget, f"add_btn_container_{row}")
+        if not add_btn_container:
+            return
+
+        # Определяем индекс для вставки (перед контейнером кнопки)
+        insert_idx = layout.indexOf(add_btn_container)
+
         # Безопасное получение имени таблицы
         tbl_name = table_name or getattr(self.parent, 'current_table_name', 'social_data')
-        col_widget = self._create_composite_column_widget(row, current_idx, col_info, tbl_name)
-        
-        # Вставляем ПЕРЕД кнопкой добавления
-        button_container_idx = -2
-        layout.insertWidget(button_container_idx, col_widget)
+
+        # ✅ Считаем текущее количество столбцов для нумерации
+        column_count = 0
+        for i in range(layout.count()):
+            item = layout.itemAt(i)
+            if item and item.widget() and item.widget().objectName().startswith('col_widget_'):
+                column_count += 1
+
+        col_info = {'column': '', 'separator': ', '}
+        col_widget = self._create_composite_column_widget(row, column_count, col_info, tbl_name)
+        col_widget.setObjectName(f"col_widget_{row}_{column_count}")
+
+        # ✅ Вставляем ПЕРЕД контейнером кнопки
+        layout.insertWidget(insert_idx, col_widget)
+
+        # Обновляем нумерацию
         self._update_column_numbers(layout)
         self.parent.mapping_table.resizeRowToContents(row)
-    
+
     def add_composite_field_mapping(self, row):
         """Добавление составного сопоставления (новая строка)"""
         mapping_table = self.parent.mapping_table
         mapping_table.insertRow(row)
-        
+
         # Переменная
         var_combo = QComboBox()
         vars_list = getattr(self.parent, 'template_variables', [])
         var_combo.addItems(vars_list if vars_list else [])
         var_combo.setMinimumWidth(200)
         mapping_table.setCellWidget(row, 0, var_combo)
-        
+
         # Контейнер
         composite_widget = QWidget()
         composite_layout = QVBoxLayout(composite_widget)
         composite_layout.setContentsMargins(5, 5, 5, 5)
         composite_layout.setSpacing(5)
-        
+
         tbl_name = getattr(self.parent, 'current_table_name', 'social_data')
         col_info = {'column': '', 'separator': ', '}
         col_widget = self._create_composite_column_widget(row, 0, col_info, tbl_name)
+        col_widget.setObjectName(f"col_widget_{row}_0")
         composite_layout.addWidget(col_widget)
+
+        # ✅ Добавляем кнопку добавления нового столбца
         self._add_add_column_button(composite_layout, row, tbl_name)
-        
+
         mapping_table.setCellWidget(row, 1, composite_widget)
         mapping_table.setCellWidget(row, 2, self._create_type_label("Составное"))
         mapping_table.resizeRowToContents(row)
         mapping_table.selectRow(row)
-    
+
     def _create_type_label(self, text):
         """Создание метки типа сопоставления"""
         type_label = QLabel(text)
@@ -460,7 +485,7 @@ class CompositeFieldWidget:
             else "color: #666; font-size: 10px;"
         )
         return type_label
-    
+
     def get_composite_columns(self, composite_widget):
         """
         Получение списка составных столбцов из виджета (для сохранения в БД)
@@ -470,7 +495,7 @@ class CompositeFieldWidget:
         layout = composite_widget.layout()
         if not layout:
             return db_columns
-        
+
         for i in range(layout.count()):
             item = layout.itemAt(i)
             if not item:
@@ -478,24 +503,23 @@ class CompositeFieldWidget:
             col_widget = item.widget()
             if not col_widget or not col_widget.layout():
                 continue
-            
+
             col_combo = None
             sep_input = None
-            
+
             for j in range(col_widget.layout().count()):
                 w = col_widget.layout().itemAt(j).widget()
                 if isinstance(w, QComboBox):
                     col_combo = w
                 elif isinstance(w, QLineEdit):
                     sep_input = w
-            
+
             if col_combo and sep_input:
-                # ✅ currentData() возвращает техническое имя колонки (скрытое в addItem)
                 col_name = col_combo.currentData()
                 if not col_name and col_combo.count() > 0:
-                    col_name = col_combo.currentText()  # Fallback
+                    col_name = col_combo.currentText()
                 separator = sep_input.text()
                 if col_name:
                     db_columns.append({'column': col_name.strip(), 'separator': separator})
-        
+
         return db_columns

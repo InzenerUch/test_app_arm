@@ -2,8 +2,8 @@
 Диалоговое окно для добавления/редактирования места службы
 С поддержкой автодополнения и быстрой настройкой справочников
 ✅ ДОБАВЛЕНО: Валидация полей согласно схеме БД
-✅ ИСПРАВЛЕНО: Шестерёнки ⚙️ теперь гарантированно отображаются
-✅ УЛУЧШЕНО: ComboBox автоматически обновляется после редактирования справочника с сохранением выбора
+✅ ОБНОВЛЕНО: ComboBox обновляется по сигналу data_changed из ReferenceEditorDialog
+✅ ИСПРАВЛЕНО: Опечатка btn.btn.setProperty -> btn.setProperty
 """
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QGroupBox, QGridLayout,
@@ -50,26 +50,26 @@ class ServicePlaceDialog(QDialog):
         btn = QPushButton("⚙️")
         btn.setToolTip(f"Настроить справочник: {table_name}")
         btn.setFixedSize(34, 34)
-        btn.setFont(QFont("Segoe UI Emoji", 14))  # ✅ Для корректного отображения эмодзи
-        btn.setStyleSheet("""
-            QPushButton { 
-                font-weight: bold; 
-                border-radius: 6px; 
-                background: #f8f9fa; 
-                border: 1px solid #ced4da; 
-            } 
-            QPushButton:hover { background: #e9ecef; border-color: #adb5bd; }
-            QPushButton:pressed { background: #dee2e6; }
-        """)
+        btn.setProperty("role", "edit")  # ✅ Исправлена опечатка btn.btn
         btn.clicked.connect(lambda: self.open_ref_editor(table_name, reload_func))
         lay.addWidget(btn)
         return w
 
     def open_ref_editor(self, table_name, reload_func):
-        """Открывает редактор справочников и обновляет ComboBox после закрытия"""
+        """Открывает редактор справочников и подключается к сигналу data_changed"""
         dlg = ReferenceEditorDialog(self.db, self, initial_table=table_name)
-        # exec() возвращает QDialog.DialogCode.Accepted (1) при успешном сохранении
-        if dlg.exec() == QDialog.DialogCode.Accepted:
+        
+        # ✅ Подключаемся к сигналу data_changed вместо проверки кода возврата
+        dlg.data_changed.connect(
+            lambda changed_table: self._on_reference_changed(changed_table, table_name, reload_func)
+        )
+        
+        dlg.exec()  # Открываем диалог модально. Результат exec() больше не нужен для обновления.
+
+    def _on_reference_changed(self, changed_table, expected_table, reload_func):
+        """Обработчик сигнала изменения справочника"""
+        if changed_table == expected_table:
+            print(f"🔄 Справочник '{changed_table}' обновлён, перезагрузка ComboBox...")
             reload_func()
 
     def init_ui(self):

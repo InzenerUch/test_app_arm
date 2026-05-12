@@ -2,7 +2,6 @@
 Модуль для окна авторизации
 Содержит класс LoginWindow для аутентификации пользователей
 """
-
 import sys
 from PyQt6.QtWidgets import (
     QApplication, QWidget, QDialog, QVBoxLayout, QHBoxLayout,
@@ -11,9 +10,7 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import pyqtSignal, Qt
 from PyQt6.QtSql import QSqlDatabase
-
 from authorization import SimpleAuthManager
-
 
 class LoginWindow(QDialog):
     """
@@ -33,16 +30,23 @@ class LoginWindow(QDialog):
         Инициализация пользовательского интерфейса
         """
         self.setWindowTitle("Авторизация")
-        self.setFixedSize(400, 200)
+        self.setFixedSize(400, 260)  # ✅ Увеличили высоту для новой кнопки
         self.setModal(True)
-
-        # Создаем основной макет
+        
+        # Создаем главный вертикальный макет
         main_layout = QVBoxLayout()
-
+        main_layout.setSpacing(15)  # ✅ Добавили отступы между элементами
+        
         # Вкладка входа
         login_layout = self.create_login_form()
         main_layout.addLayout(login_layout)
-
+        
+        # ✅ КНОПКА НАСТРОЕК СРАЗУ ПОД КНОПКОЙ ВХОДА
+        settings_btn = QPushButton("⚙️ Настройки подключения")
+        settings_btn.setProperty("role", "normal")  # Стиль обычной кнопки
+        settings_btn.clicked.connect(self.open_db_settings)
+        main_layout.addWidget(settings_btn)
+        
         self.setLayout(main_layout)
 
     def create_login_form(self):
@@ -50,23 +54,20 @@ class LoginWindow(QDialog):
         Создание формы для входа
         """
         layout = QFormLayout()
-
         # Поля ввода
         self.username_input = QLineEdit()
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
-
-        # Чекбокс "Запомнить меня"
-
+        
         # Кнопка входа
         login_button = QPushButton("Войти")
+        login_button.setProperty("role", "primary")  # Выделяем цветом
         login_button.clicked.connect(self.attempt_login)
-
+        
         # Добавление виджетов в форму
         layout.addRow("Имя пользователя:", self.username_input)
         layout.addRow("Пароль:", self.password_input)
         layout.addRow(login_button)
-
         return layout
 
     def attempt_login(self):
@@ -75,64 +76,68 @@ class LoginWindow(QDialog):
         """
         username = self.username_input.text().strip()
         password = self.password_input.text()
-
         if not username or not password:
             QMessageBox.warning(self, "Ошибка", "Пожалуйста, заполните все поля")
             return
-
         try:
-            # Пытаемся аутентифицировать пользователя
             user_info = self.auth_manager.authenticate_user(username, password)
-
             if user_info:
                 QMessageBox.information(self, "Успех", f"Добро пожаловать, {user_info['full_name']}!")
-
-                # Испускаем сигнал об успешной авторизации
                 self.login_successful.emit(user_info)
-
-                # Закрываем окно авторизации
                 self.accept()
             else:
                 QMessageBox.warning(self, "Ошибка", "Неверное имя пользователя или пароль")
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка при авторизации:\n{str(e)}")
 
+    def open_db_settings(self):
+        """Открыть окно настроек подключения к БД"""
+        # Импортируем диалог настроек
+        from setup_dialog import SetupDialog
+        
+        dialog = SetupDialog()
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            # Если настройки были изменены и сохранены, можно перезапустить приложение
+            # или просто показать уведомление, что нужно перезапустить
+            QMessageBox.information(self, "Настройки", "Настройки сохранены. Пожалуйста, перезапустите приложение.")
 
 def main():
     """
     Функция для тестирования окна авторизации
     """
     app = QApplication(sys.argv)
-
-    # Подключение к базе данных
-    db = QSqlDatabase.addDatabase("QPSQL")
+    # Подключение к базе данных (в реальном приложении используйте свои параметры)
+    db = QSqlDatabase.addDatabase("QPSQL")  # используем PostgreSQL
     db.setHostName("localhost")
     db.setDatabaseName("krd_system")
     db.setUserName("arm_user")
     db.setPassword("ArmUserSecurePass2026!")
-
+    
+    # Проверяем подключение к базе данных
     if not db.open():
-        QMessageBox.critical(None, "Ошибка", f"Не удалось подключиться к базе данных:\n{db.lastError().text()}")
+        QMessageBox.critical(
+            None,
+            "Ошибка",
+            f"Не удалось подключиться к базе данных:\n{db.lastError().text()}"
+        )
         sys.exit(1)
-
-    # Создание окна авторизации
+        
+    # Создаем окно авторизации
     login_window = LoginWindow(db)
-
-    # Подключение сигнала успешной авторизации
+    
+    # Подключаем обработчик успешной авторизации
     def on_login_success(user_info):
-        print(f"Успешный вход для пользователя: {user_info['username']}")
-        # Здесь можно открыть главное окно приложения
-
+        print(f"Успешный вход для: {user_info['username']} (Роль: {user_info['role']})")
+        
     login_window.login_successful.connect(on_login_success)
-
-    # Показ окна
+    
+    # Показываем окно и запускаем цикл событий
     if login_window.exec() == QDialog.DialogCode.Accepted:
         print("Авторизация прошла успешно")
     else:
         print("Авторизация отменена")
-
+        
     sys.exit(app.exec())
-
 
 if __name__ == "__main__":
     main()

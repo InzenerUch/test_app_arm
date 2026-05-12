@@ -9,17 +9,18 @@ from PyQt6.QtSql import QSqlQuery
 import os
 import traceback
 
-# Импорт вспомогательного модуля из проекта
 from autocomplete_helper import AutocompleteHelper
-
+from reference_editor_dialog import ReferenceEditorDialog
 
 class SocialDataInputWidget(QWidget):
-    """Виджет ввода социально-демографических данных для создания КРД"""
+    """Виджет ввода социально-демографических данных для создания КРД (с автообновлением справочников)"""
     
     def __init__(self, db_connection, parent=None):
         super().__init__(parent)
         self.db = db_connection
-        self.parent_window = parent # Сохраняем ссылку на родительское окно
+        self.parent_window = parent
+        self.audit_logger = getattr(parent, 'audit_logger', None)
+        
         self.photo_paths = {
             'civilian': None, 'military_headgear': None,
             'military_no_headgear': None, 'distinctive_marks': None
@@ -42,7 +43,7 @@ class SocialDataInputWidget(QWidget):
         layout.setContentsMargins(10, 10, 10, 10)
 
         # === Группа 1: Основные данные ===
-        g1 = QGroupBox("👤 Основные данные (поля со знаком * обязательны)")
+        g1 = QGroupBox("👤 Основные данные (все поля необязательны)")
         g1.setFont(QFont("Arial", 10, QFont.Weight.Bold))
         l1 = QGridLayout(); l1.setSpacing(8)
         
@@ -54,35 +55,18 @@ class SocialDataInputWidget(QWidget):
         self.category_combo = QComboBox()
         self.rank_combo = QComboBox()
         
-        l1.addWidget(QLabel("Фамилия *:"), 0, 0); l1.addWidget(self.surname_input, 0, 1)
-        l1.addWidget(QLabel("Имя *:"), 0, 2); l1.addWidget(self.name_input, 0, 3)
-        l1.addWidget(QLabel("Отчество *:"), 0, 4); l1.addWidget(self.patronymic_input, 0, 5)
+        l1.addWidget(QLabel("Фамилия:"), 0, 0); l1.addWidget(self.surname_input, 0, 1)
+        l1.addWidget(QLabel("Имя:"), 0, 2); l1.addWidget(self.name_input, 0, 3)
+        l1.addWidget(QLabel("Отчество:"), 0, 4); l1.addWidget(self.patronymic_input, 0, 5)
         l1.addWidget(QLabel("Табельный номер:"), 1, 0); l1.addWidget(self.tab_number_input, 1, 1)
         l1.addWidget(QLabel("Личный номер:"), 1, 2); l1.addWidget(self.personal_number_input, 1, 3)
         
-        # ✅ ИЗМЕНЕНО: Добавляем кнопки настроек для Категории
+        # ✅ ИСПОЛЬЗУЕМ УНИВЕРСАЛЬНУЮ ОБЁРТКУ ДЛЯ СПРАВОЧНИКОВ
         l1.addWidget(QLabel("Категория:"), 2, 0)
-        cat_layout = QHBoxLayout()
-        cat_layout.addWidget(self.category_combo)
-        btn_cat = QPushButton("⚙️")
-        btn_cat.setToolTip("Настроить справочник категорий")
-        btn_cat.setFixedSize(32, 32)
-        btn_cat.setStyleSheet("QPushButton { font-weight: bold; }")
-        btn_cat.clicked.connect(lambda: self.open_ref_editor('categories'))
-        cat_layout.addWidget(btn_cat)
-        l1.addLayout(cat_layout, 2, 1)
+        l1.addWidget(self._create_ref_combo_widget(self.category_combo, 'categories', self.load_categories), 2, 1)
         
-        # ✅ ИЗМЕНЕНО: Добавляем кнопки настроек для Звания
         l1.addWidget(QLabel("Звание:"), 2, 2)
-        rank_layout = QHBoxLayout()
-        rank_layout.addWidget(self.rank_combo)
-        btn_rank = QPushButton("⚙️")
-        btn_rank.setToolTip("Настроить справочник званий")
-        btn_rank.setFixedSize(32, 32)
-        btn_rank.setStyleSheet("QPushButton { font-weight: bold; }")
-        btn_rank.clicked.connect(lambda: self.open_ref_editor('ranks'))
-        rank_layout.addWidget(btn_rank)
-        l1.addLayout(rank_layout, 2, 3)
+        l1.addWidget(self._create_ref_combo_widget(self.rank_combo, 'ranks', self.load_ranks), 2, 3)
         
         g1.setLayout(l1); layout.addWidget(g1)
 
@@ -97,6 +81,7 @@ class SocialDataInputWidget(QWidget):
         self.birth_place_country_input = QLineEdit()
         self.birth_date_input = QDateEdit(); self.birth_date_input.setCalendarPopup(True)
         self.birth_date_input.setMaximumDate(QDate.currentDate())
+        self.birth_date_input.setSpecialValueText("Не указано")
         
         l2.addWidget(QLabel("Населенный пункт:"), 0, 0); l2.addWidget(self.birth_place_town_input, 0, 1)
         l2.addWidget(QLabel("Район:"), 0, 2); l2.addWidget(self.birth_place_district_input, 0, 3)
@@ -123,13 +108,13 @@ class SocialDataInputWidget(QWidget):
         l3.addWidget(QLabel("Дата отбора:"), 2, 0); l3.addWidget(self.selection_date_input, 2, 1)
         g3.setLayout(l3); layout.addWidget(g3)
 
-        # === Группа 4: 📄 Паспортные данные (ВЫНЕСЕНО ОТДЕЛЬНО) ===
+        # === Группа 4: 📄 Паспортные данные ===
         g4 = QGroupBox("📄 Паспортные данные")
         g4.setFont(QFont("Arial", 10, QFont.Weight.Bold))
         l4 = QGridLayout(); l4.setSpacing(8)
         
-        self.passport_series_input = QLineEdit(); self.passport_series_input.setPlaceholderText("Серия (напр. 0000)")
-        self.passport_number_input = QLineEdit(); self.passport_number_input.setPlaceholderText("Номер")
+        self.passport_series_input = QLineEdit(); self.passport_series_input.setPlaceholderText("Серия (4 цифры)")
+        self.passport_number_input = QLineEdit(); self.passport_number_input.setPlaceholderText("Номер (6 цифр)")
         self.passport_issue_date_input = QDateEdit(); self.passport_issue_date_input.setCalendarPopup(True)
         self.passport_issue_date_input.setMaximumDate(QDate.currentDate())
         self.passport_issued_by_input = QLineEdit()
@@ -140,7 +125,7 @@ class SocialDataInputWidget(QWidget):
         l4.addWidget(QLabel("Кем выдан:"), 1, 2); l4.addWidget(self.passport_issued_by_input, 1, 3)
         g4.setLayout(l4); layout.addWidget(g4)
 
-        # === Группа 5: 🎫 Данные военного билета (ВЫНЕСЕНО ОТДЕЛЬНО) ===
+        # === Группа 5: 🎫 Данные военного билета ===
         g5 = QGroupBox("🎫 Данные военного билета")
         g5.setFont(QFont("Arial", 10, QFont.Weight.Bold))
         l5 = QGridLayout(); l5.setSpacing(8)
@@ -214,174 +199,174 @@ class SocialDataInputWidget(QWidget):
         main = QVBoxLayout(self)
         main.addWidget(scroll)
 
-    def open_ref_editor(self, table_name: str):
-        """Открытие редактора справочников на нужной вкладке с последующим обновлением"""
+    # ✅ НОВЫЙ МЕТОД: Универсальная обёртка ComboBox + ⚙️
+    def _create_ref_combo_widget(self, combo, table_name, reload_func):
+        """Создаёт контейнер: ComboBox + кнопка настроек с автообновлением"""
+        w = QWidget()
+        lay = QHBoxLayout(w)
+        lay.setContentsMargins(0, 0, 0, 0)
+        lay.setSpacing(4)
+        lay.addWidget(combo, 1)
+        
+        btn = QPushButton("⚙️")
+        btn.setToolTip(f"Настроить справочник: {table_name}")
+        btn.setFixedSize(32, 32)
+        btn.setFont(QFont("Segoe UI Emoji", 12))
+        btn.setProperty("role", "edit")
+        btn.clicked.connect(lambda: self.open_ref_editor(table_name, reload_func))
+        lay.addWidget(btn)
+        return w
+
+    def open_ref_editor(self, table_name, reload_func):
+        """Открывает редактор справочников и подключает сигнал для автообновления"""
         try:
-            from reference_editor_dialog import ReferenceEditorDialog
-            # Передаем table_name, чтобы справочник открылся сразу на нужной вкладке
-            # Если у виджета есть родительское окно, передаем его как parent
             parent_window = self.parent_window or self.parent()
-            dialog = ReferenceEditorDialog(self.db, parent_window, table_name)
+            dialog = ReferenceEditorDialog(self.db, parent_window, initial_table=table_name)
             
-            if dialog.exec() == QDialog.DialogCode.Accepted:
-                # Если что-то изменили, обновляем данные в ComboBox
-                print(f"🔄 Обновление справочника '{table_name}'...")
-                self.load_combo_data()
+            # ✅ ПОДКЛЮЧАЕМ СИГНАЛ ИЗ ReferenceEditorDialog
+            # Сигнал data_changed.emit(table_name) срабатывает при добавлении, 
+            # редактировании или удалении записи внутри справочника
+            dialog.data_changed.connect(reload_func)
+            
+            # Открываем диалог модально (блокирует родительское окно)
+            dialog.exec()
+            
         except Exception as e:
             print(f"⚠️ Ошибка открытия редактора справочников: {e}")
             QMessageBox.warning(self, "Ошибка", f"Не удалось открыть справочник: {str(e)}")
-
-    def _setup_validators_and_autocomplete(self):
-        """Настройка валидаторов и автодополнения по схеме БД"""
-        # 1. Ограничения по длине (VARCHAR) согласно schema_only.sql
-        self.surname_input.setMaxLength(100)
-        self.name_input.setMaxLength(100)
-        self.patronymic_input.setMaxLength(100)
-        self.birth_place_town_input.setMaxLength(100)
-        self.birth_place_district_input.setMaxLength(100)
-        self.birth_place_region_input.setMaxLength(100)
-        self.birth_place_country_input.setMaxLength(100)
-        self.tab_number_input.setMaxLength(50)
-        self.personal_number_input.setMaxLength(50)
-        self.drafted_by_commissariat_input.setMaxLength(255)
-        self.povsk_input.setMaxLength(255)
-        self.education_input.setMaxLength(255)
-        self.social_media_account_input.setMaxLength(255)
-        self.military_contacts_input.setMaxLength(255)
-        self.passport_issued_by_input.setMaxLength(255)
-        self.military_id_issued_by_input.setMaxLength(255)
-        
-        self.passport_series_input.setMaxLength(10)
-        self.passport_number_input.setMaxLength(20)
-        self.military_id_series_input.setMaxLength(10)
-        self.military_id_number_input.setMaxLength(20)
-        self.bank_card_number_input.setMaxLength(50)
-
-        # 2. Форматные валидаторы (RegEx)
-        # Только цифры для номера карты
-        card_regex = QRegularExpression(r"^[0-9]+$")
-        self.bank_card_number_input.setValidator(QRegularExpressionValidator(card_regex))
-        
-        # Серия и номер паспорта/ВБ: цифры и латиница/кириллица
-        doc_regex = QRegularExpression(r"^[a-zA-Zа-яА-Я0-9\-]+$")
-        self.passport_series_input.setValidator(QRegularExpressionValidator(doc_regex))
-        self.passport_number_input.setValidator(QRegularExpressionValidator(doc_regex))
-        self.military_id_series_input.setValidator(QRegularExpressionValidator(doc_regex))
-        self.military_id_number_input.setValidator(QRegularExpressionValidator(doc_regex))
-
-        # 3. Автодополнение из БД (используем ваш AutocompleteHelper)
-        autocomplete_config = [
-            (self.surname_input, 'surname', 50),
-            (self.name_input, 'name', 50),
-            (self.patronymic_input, 'patronymic', 50),
-            (self.birth_place_town_input, 'birth_place_town', 20),
-            (self.birth_place_district_input, 'birth_place_district', 20),
-            (self.birth_place_region_input, 'birth_place_region', 20),
-            (self.birth_place_country_input, 'birth_place_country', 20),
-            (self.tab_number_input, 'tab_number', 30),
-            (self.personal_number_input, 'personal_number', 30),
-            (self.drafted_by_commissariat_input, 'drafted_by_commissariat', 20),
-            (self.povsk_input, 'povsk', 20),
-            (self.education_input, 'education', 15),
-            (self.social_media_account_input, 'social_media_account', 20),
-            (self.bank_card_number_input, 'bank_card_number', 20),
-            (self.passport_series_input, 'passport_series', 10),
-            (self.passport_number_input, 'passport_number', 10),
-            (self.passport_issued_by_input, 'passport_issued_by', 20),
-            (self.military_id_series_input, 'military_id_series', 10),
-            (self.military_id_number_input, 'military_id_number', 10),
-            (self.military_id_issued_by_input, 'military_id_issued_by', 20),
-            (self.military_contacts_input, 'military_contacts', 20),
-        ]
-        for widget, col, max_items in autocomplete_config:
-            self.autocomplete_helper.setup_autocomplete(
-                widget, 'social_data', col, max_items=max_items, show_on_focus=True
-            )
-
-    def load_combo_data(self):
-        """Загрузка данных в комбобоксы"""
-        # Очистка и заполнение Категории
+    def load_categories(self):
+        """Загрузка категорий с сохранением текущего выбора"""
+        current_id = self.category_combo.currentData()
         self.category_combo.clear()
         self.category_combo.addItem("", None)
         q = QSqlQuery(self.db)
         q.exec("SELECT id, name FROM krd.categories ORDER BY name")
         while q.next(): self.category_combo.addItem(q.value(1), q.value(0))
-        
-        # Очистка и заполнение Звания
+        if current_id is not None:
+            idx = self.category_combo.findData(current_id)
+            if idx >= 0: self.category_combo.setCurrentIndex(idx)
+
+    def load_ranks(self):
+        """Загрузка званий с сохранением текущего выбора"""
+        current_id = self.rank_combo.currentData()
         self.rank_combo.clear()
         self.rank_combo.addItem("", None)
+        q = QSqlQuery(self.db)
         q.exec("SELECT id, name FROM krd.ranks ORDER BY name")
         while q.next(): self.rank_combo.addItem(q.value(1), q.value(0))
+        if current_id is not None:
+            idx = self.rank_combo.findData(current_id)
+            if idx >= 0: self.rank_combo.setCurrentIndex(idx)
+
+    def load_combo_data(self):
+        """Первичная загрузка данных в комбобоксы"""
+        self.load_categories()
+        self.load_ranks()
+
+    def _setup_validators_and_autocomplete(self):
+        """Настройка валидаторов и автодополнения по схеме БД"""
+        # 1. Ограничения по длине
+        for w, l in [(self.surname_input, 100), (self.name_input, 100), (self.patronymic_input, 100),
+                     (self.birth_place_town_input, 100), (self.birth_place_district_input, 100),
+                     (self.birth_place_region_input, 100), (self.birth_place_country_input, 100),
+                     (self.tab_number_input, 50), (self.personal_number_input, 50),
+                     (self.drafted_by_commissariat_input, 255), (self.povsk_input, 255),
+                     (self.education_input, 255), (self.social_media_account_input, 255),
+                     (self.military_contacts_input, 255), (self.passport_issued_by_input, 255),
+                     (self.military_id_issued_by_input, 255), (self.passport_series_input, 4),
+                     (self.passport_number_input, 6), (self.military_id_series_input, 10),
+                     (self.military_id_number_input, 10), (self.bank_card_number_input, 19)]:
+            w.setMaxLength(l)
+
+        # 2. Регулярные выражения
+        self.passport_series_input.setValidator(QRegularExpressionValidator(QRegularExpression(r"^\d{4}$")))
+        self.passport_number_input.setValidator(QRegularExpressionValidator(QRegularExpression(r"^\d{6}$")))
+        self.military_id_series_input.setValidator(QRegularExpressionValidator(QRegularExpression(r"^[A-Za-z0-9\-]{1,10}$")))
+        self.military_id_number_input.setValidator(QRegularExpressionValidator(QRegularExpression(r"^\d{5,10}$")))
+        self.bank_card_number_input.setValidator(QRegularExpressionValidator(QRegularExpression(r"^[\d\s]{16,19}$")))
+
+        # 3. Автодополнение
+        autocomplete_config = [
+            (self.surname_input, 'surname', 50), (self.name_input, 'name', 50),
+            (self.patronymic_input, 'patronymic', 50), (self.birth_place_town_input, 'birth_place_town', 20),
+            (self.birth_place_district_input, 'birth_place_district', 20), (self.birth_place_region_input, 'birth_place_region', 20),
+            (self.birth_place_country_input, 'birth_place_country', 20), (self.tab_number_input, 'tab_number', 30),
+            (self.personal_number_input, 'personal_number', 30), (self.drafted_by_commissariat_input, 'drafted_by_commissariat', 20),
+            (self.povsk_input, 'povsk', 20), (self.education_input, 'education', 15),
+            (self.social_media_account_input, 'social_media_account', 20), (self.bank_card_number_input, 'bank_card_number', 20),
+            (self.passport_series_input, 'passport_series', 10), (self.passport_number_input, 'passport_number', 10),
+            (self.passport_issued_by_input, 'passport_issued_by', 20), (self.military_id_series_input, 'military_id_series', 10),
+            (self.military_id_number_input, 'military_id_number', 10), (self.military_id_issued_by_input, 'military_id_issued_by', 20),
+            (self.military_contacts_input, 'military_contacts', 20),
+        ]
+        for widget, col, max_items in autocomplete_config:
+            self.autocomplete_helper.setup_autocomplete(widget, 'social_data', col, max_items=max_items, show_on_focus=True)
 
     def load_photo(self, photo_type):
-        """Загрузка фотографии"""
         path, _ = QFileDialog.getOpenFileName(self, f"Выберите фото ({photo_type})", "", "Images (*.png *.jpg *.jpeg *.bmp)")
         if path:
             try:
-                if os.path.getsize(path) > 5 * 1024 * 1024:
-                    return QMessageBox.warning(self, "Ошибка", "Файл превышает 5 МБ")
-                pixmap = self._load_pixmap(path)
-                if not pixmap: return
+                if os.path.getsize(path) > 5 * 1024 * 1024: return QMessageBox.warning(self, "Ошибка", "Файл превышает 5 МБ")
+                p = QPixmap(path)
+                if p.isNull(): return
                 lbl = getattr(self, f'photo_{photo_type}_label')
-                lbl.setPixmap(pixmap)
+                lbl.setPixmap(p.scaled(150, 200, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation))
                 lbl.setStyleSheet("QLabel { border: 2px solid #2196F3; background: white; }")
                 self.photo_paths[photo_type] = path
-            except Exception as e:
-                QMessageBox.critical(self, "Ошибка", str(e))
+            except Exception as e: QMessageBox.critical(self, "Ошибка", str(e))
 
     def _load_pixmap(self, path):
-        """Масштабирование изображения"""
         p = QPixmap(path)
         if p.isNull(): return None
         return p.scaled(150, 200, Qt.AspectRatioMode.KeepAspectRatio, Qt.TransformationMode.SmoothTransformation)
 
-    def validate_required_fields(self):
-        """Валидация обязательных полей"""
-        if not self.surname_input.text().strip(): return False, "Введите фамилию"
-        if not self.name_input.text().strip(): return False, "Введите имя"
-        if not self.patronymic_input.text().strip(): return False, "Введите отчество"
-        
-        # Доп. валидация формата
-        if self.bank_card_number_input.text().strip() and not self.bank_card_number_input.hasAcceptableInput():
-            return False, "Номер карты должен содержать только цифры"
+    def validate_all_fields(self):
+        """Условная валидация: проверяет формат ТОЛЬКО если поле заполнено + проверка логики дат"""
+        errors = []
+        def check_fmt(widget, regex, msg):
+            txt = widget.text().strip()
+            if txt and not QRegularExpressionValidator(QRegularExpression(regex)).validate(txt, 0)[0] == 0:
+                errors.append(msg)
+
+        check_fmt(self.passport_series_input, r"^\d{4}$", "Серия паспорта: ровно 4 цифры")
+        check_fmt(self.passport_number_input, r"^\d{6}$", "Номер паспорта: ровно 6 цифр")
+        check_fmt(self.military_id_series_input, r"^[A-Za-z0-9\-]{1,10}$", "Серия ВБ: буквы, цифры, дефис (1-10)")
+        check_fmt(self.military_id_number_input, r"^\d{5,10}$", "Номер ВБ: цифры (5-10)")
+        check_fmt(self.bank_card_number_input, r"^[\d\s]{16,19}$", "Карта: 16-19 цифр/пробелов")
+
+        # Логика дат
+        b, d, s = self.birth_date_input.date(), self.draft_date_input.date(), self.selection_date_input.date()
+        if b.isValid() and d.isValid() and d < b: errors.append("Дата призыва раньше даты рождения")
+        if b.isValid() and s.isValid() and s < b: errors.append("Дата отбора раньше даты рождения")
+        if d.isValid() and s.isValid() and s < d: errors.append("Дата отбора раньше даты призыва")
+
+        if errors: return False, "Обнаружены ошибки:\n" + "\n".join(f"• {e}" for e in errors)
         return True, ""
 
     def get_data(self):
-        """Получение данных из формы"""
+        """Получение данных (пустые строки → None для SQL NULL)"""
+        def safe_get(widget, is_text=True):
+            val = widget.text().strip() if is_text else widget.toPlainText().strip()
+            return val if val else None
+
         data = {
-            'surname': self.surname_input.text().strip(),
-            'name': self.name_input.text().strip(),
-            'patronymic': self.patronymic_input.text().strip(),
-            'birth_date': self.birth_date_input.date(),
-            'birth_place_town': self.birth_place_town_input.text().strip(),
-            'birth_place_district': self.birth_place_district_input.text().strip(),
-            'birth_place_region': self.birth_place_region_input.text().strip(),
-            'birth_place_country': self.birth_place_country_input.text().strip(),
-            'tab_number': self.tab_number_input.text().strip(),
-            'personal_number': self.personal_number_input.text().strip(),
-            'category_id': self.category_combo.currentData(),
-            'rank_id': self.rank_combo.currentData(),
-            'drafted_by_commissariat': self.drafted_by_commissariat_input.text().strip(),
-            'draft_date': self.draft_date_input.date(),
-            'povsk': self.povsk_input.text().strip(),
-            'selection_date': self.selection_date_input.date(),
-            'education': self.education_input.text().strip(),
-            'criminal_record': self.criminal_record_input.toPlainText(),
-            'social_media_account': self.social_media_account_input.text().strip(),
-            'bank_card_number': self.bank_card_number_input.text().strip(),
-            'federal_search_info': self.federal_search_info_input.toPlainText(),
-            'military_contacts': self.military_contacts_input.text().strip(),
-            'relatives_info': self.relatives_info_input.toPlainText(),
-            'passport_series': self.passport_series_input.text().strip(),
-            'passport_number': self.passport_number_input.text().strip(),
-            'passport_issue_date': self.passport_issue_date_input.date(),
-            'passport_issued_by': self.passport_issued_by_input.text().strip(),
-            'military_id_series': self.military_id_series_input.text().strip(),
-            'military_id_number': self.military_id_number_input.text().strip(),
-            'military_id_issue_date': self.military_id_issue_date_input.date(),
-            'military_id_issued_by': self.military_id_issued_by_input.text().strip(),
-            'appearance_features': "",
-            'personal_marks': ""
+            'surname': safe_get(self.surname_input), 'name': safe_get(self.name_input),
+            'patronymic': safe_get(self.patronymic_input), 'birth_date': self.birth_date_input.date() if self.birth_date_input.date().isValid() else None,
+            'birth_place_town': safe_get(self.birth_place_town_input), 'birth_place_district': safe_get(self.birth_place_district_input),
+            'birth_place_region': safe_get(self.birth_place_region_input), 'birth_place_country': safe_get(self.birth_place_country_input),
+            'tab_number': safe_get(self.tab_number_input), 'personal_number': safe_get(self.personal_number_input),
+            'category_id': self.category_combo.currentData(), 'rank_id': self.rank_combo.currentData(),
+            'drafted_by_commissariat': safe_get(self.drafted_by_commissariat_input), 'draft_date': self.draft_date_input.date() if self.draft_date_input.date().isValid() else None,
+            'povsk': safe_get(self.povsk_input), 'selection_date': self.selection_date_input.date() if self.selection_date_input.date().isValid() else None,
+            'education': safe_get(self.education_input), 'criminal_record': safe_get(self.criminal_record_input, False),
+            'social_media_account': safe_get(self.social_media_account_input), 'bank_card_number': safe_get(self.bank_card_number_input),
+            'federal_search_info': safe_get(self.federal_search_info_input, False), 'military_contacts': safe_get(self.military_contacts_input),
+            'relatives_info': safe_get(self.relatives_info_input, False), 'passport_series': safe_get(self.passport_series_input),
+            'passport_number': safe_get(self.passport_number_input), 'passport_issue_date': self.passport_issue_date_input.date() if self.passport_issue_date_input.date().isValid() else None,
+            'passport_issued_by': safe_get(self.passport_issued_by_input), 'military_id_series': safe_get(self.military_id_series_input),
+            'military_id_number': safe_get(self.military_id_number_input), 'military_id_issue_date': self.military_id_issue_date_input.date() if self.military_id_issue_date_input.date().isValid() else None,
+            'military_id_issued_by': safe_get(self.military_id_issued_by_input),
+            'appearance_features': "", 'personal_marks': ""
         }
         for key in ['civilian', 'military_headgear', 'military_no_headgear', 'distinctive_marks']:
             path = self.photo_paths.get(key)

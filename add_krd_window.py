@@ -58,19 +58,21 @@ class AddKrdWindow(QDialog):
         self.setLayout(layout)
 
     def save_krd(self):
-        valid, msg = self.social_widget.validate_required_fields()
+        # ✅ ИСПРАВЛЕНО: Вызов нового метода валидации
+        valid, msg = self.social_widget.validate_all_fields()
         if not valid:
             return QMessageBox.warning(self, "Ошибка валидации", msg)
             
-        reply = QMessageBox.question(self, "Подтверждение", 
-            "Создать новую карточку розыска?\nОстальные данные можно будет заполнить позже.",
+        reply = QMessageBox.question(self, "Подтверждение",
+            "Создать новую карточку розыска?\n"
+            "Остальные данные можно будет заполнить позже.",
             QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
         if reply != QMessageBox.StandardButton.Yes: return
-
+        
         try:
             if not self.db.transaction():
                 raise Exception("Не удалось начать транзакцию")
-            
+                
             # 1. Создаём КРД
             q = QSqlQuery(self.db)
             q.prepare("INSERT INTO krd.krd DEFAULT VALUES RETURNING id")
@@ -108,9 +110,10 @@ class AddKrdWindow(QDialog):
             """)
             for k, v in data.items():
                 q2.bindValue(f":{k}", v)
+                
             if not q2.exec():
                 raise Exception(f"Ошибка сохранения соц. данных: {q2.lastError().text()}")
-            
+                
             if not self.db.commit():
                 raise Exception("Ошибка коммита")
                 

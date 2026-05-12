@@ -5,12 +5,14 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtSql import QSqlQuery, QSqlQueryModel
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
+from PyQt6.QtCore import Qt, pyqtSignal 
 
 from soch_episode_dialog import SochEpisodeDialog
 
 
 class SochEpisodesTab(QWidget):
     """Вкладка сведений о СОЧ"""
+    data_changed = pyqtSignal() 
     
     def __init__(self, krd_id, db_connection, audit_logger=None):
         super().__init__()
@@ -108,6 +110,7 @@ class SochEpisodesTab(QWidget):
         dialog = SochEpisodeDialog(self.db, self.krd_id, parent=self)
         if dialog.exec() == 1:
             self.load_data()
+            self.data_changed.emit()
             if self.audit_logger:
                 self.audit_logger.log_action(
                     action_type='SOCH_ADDED', table_name='soch_episodes',
@@ -156,6 +159,7 @@ class SochEpisodesTab(QWidget):
                 if q.exec() and q.numRowsAffected() > 0:
                     QMessageBox.information(self, "Успех", "✅ Эпизод СОЧ успешно скрыт!")
                     self.load_data()
+                    self.data_changed.emit()
                     if self.audit_logger:
                         self.audit_logger.log_action(
                             action_type='SOCH_SOFT_DELETED', table_name='soch_episodes',
@@ -179,6 +183,7 @@ class SochEpisodesTab(QWidget):
             dialog = SochEpisodeDialog(self.db, self.krd_id, episode_data, parent=self)
             if dialog.exec() == 1:
                 self.load_data()
+                self.data_changed.emit()
                 if self.audit_logger:
                     self.audit_logger.log_action(
                         action_type='SOCH_EDITED', table_name='soch_episodes',

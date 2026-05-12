@@ -11,12 +11,14 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
+from PyQt6.QtCore import pyqtSignal
 from reference_manager import ReferenceManager, REFERENCE_TABLES
 from record_edit_dialog import RecordEditDialog  # ✅ Импорт вынесенного класса
 
 
 class ReferenceEditorDialog(QDialog):
     """Диалог для управления справочниками"""
+    data_changed = pyqtSignal(str) 
 
     def __init__(self, db_connection, parent=None, initial_table=None):
         super().__init__(parent)
@@ -187,6 +189,7 @@ class ReferenceEditorDialog(QDialog):
             data = dialog.get_data()
             success, new_id = self.manager.add_record(self.current_table, data)
             if success:
+                self.data_changed.emit(self.current_table)
                 QMessageBox.information(self, "Успех", f"✅ Запись добавлена!\nID: {new_id}")
                 self.log_action('REFERENCE_CREATE', new_id, data)
                 self.refresh_data()
@@ -210,6 +213,7 @@ class ReferenceEditorDialog(QDialog):
             data = dialog.get_data()
             success = self.manager.update_record(self.current_table, record_id, data)
             if success:
+                self.data_changed.emit(self.current_table)
                 QMessageBox.information(self, "Успех", "✅ Запись обновлена!")
                 self.log_action('REFERENCE_UPDATE', record_id, data)
                 self.refresh_data()
@@ -236,6 +240,7 @@ class ReferenceEditorDialog(QDialog):
         if reply == QMessageBox.StandardButton.Yes:
             success = self.manager.delete_record(self.current_table, record_id)
             if success:
+                self.data_changed.emit(self.current_table)
                 QMessageBox.information(self, "Успех", "✅ Запись удалена!")
                 self.log_action('REFERENCE_DELETE', record_id, {'name': record_name})
                 self.refresh_data()

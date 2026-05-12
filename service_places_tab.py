@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QTableView, QMessageBox, QHeaderView, QAbstractItemView
 )
 from PyQt6.QtSql import QSqlQuery, QSqlQueryModel
+from PyQt6.QtCore import Qt, pyqtSignal 
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
@@ -16,6 +17,7 @@ from service_place_dialog import ServicePlaceDialog
 
 class ServicePlacesTab(QWidget):
     """Вкладка мест службы"""
+    data_changed = pyqtSignal() 
     
     def __init__(self, krd_id, db_connection, audit_logger=None):
         super().__init__()
@@ -106,6 +108,7 @@ class ServicePlacesTab(QWidget):
         if dialog.exec() == 1:  # QDialog.Accepted
             # Обновить таблицу после добавления
             self.load_data()
+            self.data_changed.emit()
             
             if self.audit_logger:
                 self.audit_logger.log_action(
@@ -136,6 +139,7 @@ class ServicePlacesTab(QWidget):
             if dialog.exec() == 1:  # QDialog.Accepted
                 # Обновить таблицу после редактирования
                 self.load_data()
+                self.data_changed.emit()
                 
                 if self.audit_logger:
                     self.audit_logger.log_action(
@@ -187,6 +191,7 @@ class ServicePlacesTab(QWidget):
                 if query.exec():
                     QMessageBox.information(self, "Успех", "✅ Место службы успешно удалено")
                     self.load_data()
+                    self.data_changed.emit()
                     
                     if self.audit_logger:
                         self.audit_logger.log_action(

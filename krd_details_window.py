@@ -59,13 +59,27 @@ class KrdDetailsWindow(QDialog):
         
         self.tabs = QTabWidget()
         
-        self.tabs.addTab(SocialDataTab(self.krd_id, self.db, self.audit_logger), "👤 Социально-демографические данные")
-        self.tabs.addTab(AddressesTab(self.krd_id, self.db, self.audit_logger), "🏠 Адреса проживания")
-        self.tabs.addTab(IncomingOrdersTab(self.krd_id, self.db, self.audit_logger), "📬 Входящие поручения")
-        self.tabs.addTab(ServicePlacesTab(self.krd_id, self.db, self.audit_logger), "🎖️ Места службы")
-        self.tabs.addTab(SochEpisodesTab(self.krd_id, self.db, self.audit_logger), "⚠️ Сведения о СОЧ")
-        self.tabs.addTab(OutgoingRequestsTab(self.krd_id, self.db, self.audit_logger), "📤 Запросы и поручения")
-        self.tabs.addTab(DocumentGeneratorTab(self.krd_id, self.db, self.audit_logger), "📄 Генерация документов")
+        # 🔧 СОХРАНЯЕМ ССЫЛКИ НА ВКЛАДКИ В АТРИБУТАХ КЛАССА
+        self.social_data_tab = SocialDataTab(self.krd_id, self.db, self.audit_logger)
+        self.addresses_tab = AddressesTab(self.krd_id, self.db, self.audit_logger)
+        self.incoming_orders_tab = IncomingOrdersTab(self.krd_id, self.db, self.audit_logger)
+        self.service_places_tab = ServicePlacesTab(self.krd_id, self.db, self.audit_logger)
+        self.soch_episodes_tab = SochEpisodesTab(self.krd_id, self.db, self.audit_logger)
+        self.outgoing_requests_tab = OutgoingRequestsTab(self.krd_id, self.db, self.audit_logger)
+        self.doc_generator_tab = DocumentGeneratorTab(self.krd_id, self.db, self.audit_logger)
+        
+        # Добавляем вкладки
+        self.tabs.addTab(self.social_data_tab, "👤 Социально-демографические данные")
+        self.tabs.addTab(self.addresses_tab, "🏠 Адреса проживания")
+        self.tabs.addTab(self.incoming_orders_tab, "📬 Входящие поручения")
+        self.tabs.addTab(self.service_places_tab, "🎖️ Места службы")
+        self.tabs.addTab(self.soch_episodes_tab, "⚠️ Сведения о СОЧ")
+        self.tabs.addTab(self.outgoing_requests_tab, "📤 Запросы и поручения")
+        
+        # 🔥 ПОДКЛЮЧАЕМ СИГНАЛЫ АВТООБНОВЛЕНИЯ СПИСКОВ ВЫБОРА
+        self.addresses_tab.data_changed.connect(self.doc_generator_tab.load_related_records)
+        self.service_places_tab.data_changed.connect(self.doc_generator_tab.load_related_records)
+        self.soch_episodes_tab.data_changed.connect(self.doc_generator_tab.load_related_records)
         
         self.tabs.currentChanged.connect(self._on_tab_switched)
         main_layout.addWidget(self.tabs)
