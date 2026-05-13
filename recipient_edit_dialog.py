@@ -4,8 +4,9 @@
 """
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QGridLayout, QLineEdit, QLabel,
-    QPushButton, QHBoxLayout, QMessageBox
+    QPushButton, QHBoxLayout, QMessageBox, QWidget,QComboBox
 )
+from reference_editor_dialog import ReferenceEditorDialog
 from PyQt6.QtSql import QSqlQuery
 
 class RecipientEditDialog(QDialog):
@@ -47,6 +48,27 @@ class RecipientEditDialog(QDialog):
             self.fields[col] = edit
             form.addWidget(lbl, i, 0)
             form.addWidget(edit, i, 1)
+                # === ТИП ЗАПРОСА С КНОПКОЙ НАСТРОЙКИ ===
+        req_type_label = QLabel("Тип запроса по умолчанию:")
+        req_widget = QWidget()
+        req_layout = QHBoxLayout(req_widget)
+        req_layout.setContentsMargins(0, 0, 0, 0)
+        
+        self.request_type_combo = QComboBox()
+        self.request_type_combo.setMinimumWidth(220)
+        self.load_request_types()
+        req_layout.addWidget(self.request_type_combo, 1)
+        
+        gear_btn = QPushButton("⚙️")
+        gear_btn.setFixedSize(32, 32)
+        gear_btn.setToolTip("Открыть справочник типов запросов")
+        gear_btn.setProperty("role", "edit")
+        gear_btn.clicked.connect(self.open_type_editor)
+        req_layout.addWidget(gear_btn)
+        
+        form.addWidget(req_type_label, len(cols), 0)
+        form.addWidget(req_widget, len(cols), 1)
+        
         layout.addLayout(form)
         
         btns = QHBoxLayout()
@@ -94,6 +116,54 @@ class RecipientEditDialog(QDialog):
             for k, v in values.items():
                 q.bindValue(f":{k}", v)
                 
+        if q.exec():
+            self.accept()
+        else:
+            QMessageBox.critical(self, "Ошибка БД", f"Ошибка сохранения:\n{q.lastError().text()}")
+    def load_request_types(self):
+        """Загрузка справочника с сохранением текущего выбора"""
+        current_id = self.request_type_combo.currentData()
+        self.request_type_combo.clear()
+        self.request_type_combo.addItem("— Не выбрано —", None)
+        
+        q = QSqlQuery(self.db)
+        q.exec("SELECT id, name FROM krd.request_types ORDER BY name")
+        while q.next():
+            self.request_type_combo.addItem(q.value(1), q.value(0))
+            
+        if current_id is not None:
+            idx = self.request_type_combo.findData(current_id)
+            if idx >= 0: self.request_type_combo.setCurrentIndex(idx)
+
+    def open_type_editor(self):
+        """Открывает редактор справочника и подписывается на изменения"""
+        dlg = ReferenceEditorDialog(self.db, self, initial_table='request_types')
+        # ✅ АВТООБНОВЛЕНИЕ при добавлении/удалении в справочнике
+        dlg.data_changed.connect(self.load_request_types)
+        dlg.exec()
+
+    def save(self):
+        # ... ваш код проверки name ...
+        name = self.fields["name"].text().strip()
+        if not name:
+            return QMessageBox.warning(self, "Ошибка", "Наименование адресата обязательно!")
+            
+        q = QSqlQuery(self.db)
+        # ✅ Добавляем request_type_id в сохраняемые данные
+        values = {col: self.fields[col].text().strip() for col in self.fields}
+        values["request_type_id"] = self.request_type_combo.currentData()
+        
+        if self.recipient_id:
+            cols_set = ", ".join([f"{k} = :{k}" for k in values.keys()])
+            q.prepare(f"UPDATE krd.recipients SET {cols_set}, updated_at=CURRENT_TIMESTAMP WHERE id=:id")
+            for k, v in values.items(): q.bindValue(f":{k}", v)
+            q.bindValue(":id", self.recipient_id)
+        else:
+            cols = ", ".join(values.keys())
+            placeholders = ", ".join([f":{k}" for k in values.keys()])
+            q.prepare(f"INSERT INTO krd.recipients ({cols}) VALUES ({placeholders})")
+            for k, v in values.items(): q.bindValue(f":{k}", v)
+            
         if q.exec():
             self.accept()
         else:

@@ -11,7 +11,7 @@ from PyQt6.QtWidgets import (
     QLineEdit, QDateEdit, QLabel, QPushButton, QComboBox,
     QMessageBox, QDialogButtonBox, QScrollArea, QWidget
 )
-from PyQt6.QtCore import QDate, QRegularExpression
+from PyQt6.QtCore import QDate, QRegularExpression, pyqtSignal
 from PyQt6.QtGui import QRegularExpressionValidator, QFont
 from PyQt6.QtSql import QSqlQuery
 from autocomplete_helper import AutocompleteHelper
@@ -20,7 +20,6 @@ from reference_editor_dialog import ReferenceEditorDialog  # ✅ Импорт р
 
 class IncomingOrderDialog(QDialog):
     """Диалог для добавления/редактирования входящего поручения"""
-    
     def __init__(self, db_connection, krd_id, order_data=None, parent=None):
         super().__init__(parent)
         self.db = db_connection

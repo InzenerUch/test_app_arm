@@ -1,12 +1,13 @@
-"""
-Менеджер управления списком шаблонов в таблице
-"""
 from PyQt6.QtWidgets import QTableView, QMessageBox
 from PyQt6.QtSql import QSqlQuery, QSqlQueryModel
+from PyQt6.QtCore import QObject, pyqtSignal  # ✅ Добавлено
 from template_edit_dialog import TemplateEditDialog
 
-class TemplateManager:
+class TemplateManager(QObject):  # ✅ Наследуем QObject для работы с сигналами
+    template_changed = pyqtSignal()  # ✅ Новый сигнал
+
     def __init__(self, db):
+        super().__init__()
         self.db = db
         self.model = QSqlQueryModel()
         self.view = None
@@ -33,6 +34,7 @@ class TemplateManager:
         dialog = TemplateEditDialog(self.db, parent=parent)
         if dialog.exec() == 1:
             self.load_templates()
+            self.template_changed.emit()  # ✅ Испускаем сигнал
 
     def edit_template_dialog(self, parent):
         if not self.view or not self.view.selectionModel().hasSelection():
@@ -42,6 +44,7 @@ class TemplateManager:
         dialog = TemplateEditDialog(self.db, template_id=template_id, parent=parent)
         if dialog.exec() == 1:
             self.load_templates()
+            self.template_changed.emit()  # ✅ Испускаем сигнал
 
     def delete_selected(self, parent):
         if not self.view or not self.view.selectionModel().hasSelection():
@@ -57,3 +60,4 @@ class TemplateManager:
             query.addBindValue(template_id)
             if query.exec():
                 self.load_templates()
+                self.template_changed.emit()  # ✅ Испускаем сигнал

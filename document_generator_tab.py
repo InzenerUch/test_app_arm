@@ -1,3 +1,8 @@
+"""
+Вкладка генерации документов
+✅ ИСПРАВЛЕНО: Использование repaint() для мгновенного обновления скрытых виджетов
+✅ ИСПРАВЛЕНО: Удален несуществующий вызов load_incoming_orders()
+"""
 import os
 import tempfile
 import json
@@ -7,7 +12,7 @@ from docx.shared import Pt, Cm
 from docx import Document
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel, QGroupBox, QComboBox,
-    QGridLayout, QMessageBox, QTabWidget, QTableView, QHeaderView, QAbstractItemView
+    QGridLayout, QMessageBox, QTabWidget, QTableView, QHeaderView, QAbstractItemView, QApplication
 )
 from PyQt6.QtCore import Qt, QByteArray, QDate, pyqtSignal
 from PyQt6.QtSql import QSqlQuery, QSqlQueryModel
@@ -31,19 +36,17 @@ class DocumentGeneratorTab(QWidget):
         self.krd_id = krd_id
         self.db = db_connection
         self.audit_logger = audit_logger
-        
         self.template_variables = []
         self.db_columns = {}
         self.current_template_id = None
         self.current_table_name = "social_data"
         self.used_tables_in_mappings = set()
         
-        # Выбранные ID записей
         self.selected_address_id = None
         self.selected_service_place_id = None
         self.selected_soch_episode_id = None
+        self.selected_incoming_order_id = None  # ✅ Новое поле
 
-        # Инициализация помощников
         self.tmpl_mgr = TemplateManager(db_connection)
         self.recipient_widget = RecipientWidget(db_connection, self)
         self.composite_widget = CompositeFieldWidget(self)
@@ -54,10 +57,15 @@ class DocumentGeneratorTab(QWidget):
         self.load_db_columns()
         self.engine.set_columns_map(self.db_columns)
         
+        # ✅ Подключаем сигнал автообновления шаблонов
+        self.tmpl_mgr.template_changed.connect(self.load_document_templates)
+        
         self.init_ui()
         self.load_document_templates()
-        self.load_related_records()  # Первичная загрузка
-
+        
+        # ✅ ЕДИНЫЙ ВЫЗОВ ОБНОВЛЕНИЯ (убран лишний load_incoming_orders)
+        self.load_related_records()
+        
     def init_ui(self):
         layout = QVBoxLayout()
         tabs = QTabWidget()
@@ -93,8 +101,15 @@ class DocumentGeneratorTab(QWidget):
         self.soch_episode_combo.addItem("— Не выбрано —", None)
         self.soch_episode_combo.currentIndexChanged.connect(self.on_soch_episode_selected)
         records_layout.addWidget(self.soch_episode_combo, 1, 1)
+        
+        records_layout.addWidget(QLabel("Входящее поручение:"), 1, 2)
+        self.incoming_order_combo = QComboBox()
+        self.incoming_order_combo.setMinimumWidth(300)
+        self.incoming_order_combo.addItem("— Не выбрано —", None)
+        self.incoming_order_combo.currentIndexChanged.connect(self.on_incoming_order_selected) 
+        records_layout.addWidget(self.incoming_order_combo, 1, 3)
 
-        records_layout.addWidget(QPushButton("🔄 Обновить списки", clicked=self.load_related_records), 1, 2, 1, 2)
+        records_layout.addWidget(QPushButton("🔄 Обновить списки", clicked=self.load_related_records), 2, 2, 2, 2)
         layout.addWidget(records_group)
 
         # === ГРУППА ШАБЛОНА ===
@@ -114,7 +129,7 @@ class DocumentGeneratorTab(QWidget):
         metadata_layout.addWidget(QLabel("Адресат *:"), 0, 0)
         metadata_layout.addWidget(self.recipient_widget, 0, 1)
         layout.addWidget(metadata_group)
-
+        
         # === КНОПКА ГЕНЕРАЦИИ ===
         btn = QPushButton("📄 Сформировать и сохранить в базу")
         btn.setMinimumHeight(60)
@@ -144,42 +159,86 @@ class DocumentGeneratorTab(QWidget):
         lay.addWidget(tbl)
         return widget
 
-    # 🔥 КЛЮЧЕВОЙ МЕТОД ДЛЯ АВТООБНОВЛЕНИЯ
+    # 🔥 КЛЮЧЕВОЙ МЕТОД ДЛЯ АВТООБНОВЛЕНИЯ (ИСПРАВЛЕН repaint)
     def load_related_records(self):
-        """Перезагружает выпадающие списки адресов, мест службы и эпизодов СОЧ"""
+        """Перезагружает выпадающие списки адресов, мест службы, эпизодов СОЧ и входящих поручений"""
         if not hasattr(self, 'address_combo'):
             return
-            
+        
+        print(f"\n{'='*70}")
+        print(f"🔄 [AUTO-UPDATE] Начало обновления ComboBox для КРД-{self.krd_id}")
+        print(f"{'='*70}")
+        
         queries = [
-            (self.address_combo, 
-             "SELECT id, COALESCE(region,'')||', '||COALESCE(town,'')||', '||COALESCE(street,'')||', '||COALESCE(house,'') FROM krd.addresses WHERE krd_id=:krd_id ORDER BY id DESC", 
-             "🏠"),
-            (self.service_place_combo, 
-             "SELECT id, COALESCE(place_name,'')||' ('||COALESCE(postal_town,'')||')' FROM krd.service_places WHERE krd_id=:krd_id ORDER BY id DESC", 
-             "🎖️"),
-            (self.soch_episode_combo, 
-             "SELECT id, COALESCE(soch_date::text,'')||' - '||COALESCE(soch_location,'') FROM krd.soch_episodes WHERE krd_id=:krd_id ORDER BY soch_date DESC", 
-             "⚠️")
+            (self.address_combo,
+             "SELECT id, COALESCE(region,'')||', '||COALESCE(town,'')||', '||COALESCE(street,'')||', '||COALESCE(house,'') FROM krd.addresses WHERE krd_id=:krd_id AND (is_deleted = FALSE OR is_deleted IS NULL) ORDER BY id DESC",
+             "🏠", "Адреса"),
+            (self.service_place_combo,
+             "SELECT id, COALESCE(place_name,'')||' ('||COALESCE(postal_town,'')||')' FROM krd.service_places WHERE krd_id=:krd_id AND (is_deleted = FALSE OR is_deleted IS NULL) ORDER BY id DESC",
+             "🎖️", "Места службы"),
+            (self.soch_episode_combo,
+             "SELECT id, COALESCE(soch_date::text,'')||' - '||COALESCE(soch_location,'') FROM krd.soch_episodes WHERE krd_id=:krd_id AND (is_deleted = FALSE OR is_deleted IS NULL) ORDER BY soch_date DESC",
+             "⚠️", "Эпизоды СОЧ"),
+            # ✅ Входящие поручения
+            (self.incoming_order_combo,
+             "SELECT id, CONCAT(order_number, ' от ', order_date::text, ' (', initiator_full_name, ')') FROM krd.incoming_orders WHERE krd_id=:krd_id AND (is_deleted = FALSE OR is_deleted IS NULL) ORDER BY id DESC",
+             "📥", "Входящие поручения")
         ]
-
-        for combo, sql, label in queries:
-            # Сохраняем текущий выбор, чтобы интерфейс не "прыгал"
+        
+        for combo, sql, label, name in queries:
+            print(f"\n📋 [{name}] Начало обновления...")
+            
+            # 1. БЛОКИРУЕМ СИГНАЛЫ
+            combo.blockSignals(True)
+            
+            # Сохраняем текущий выбор
             current_id = combo.currentData()
+            old_count = combo.count()
+            print(f"   📊 До обновления: {old_count} записей, текущий ID={current_id}")
+            
+            # Очищаем и добавляем пустой элемент
             combo.clear()
             combo.addItem("— Не выбрано —", None)
             
+            # Выполняем запрос
             q = QSqlQuery(self.db)
             q.prepare(sql)
             q.bindValue(":krd_id", self.krd_id)
-            if q.exec():
-                while q.next():
-                    combo.addItem(f"{label} {q.value(1)}", q.value(0))
             
-            # Восстанавливаем выбор, если запись всё ещё существует в БД
+            if q.exec():
+                new_items = []
+                while q.next():
+                    item_id = q.value(0)
+                    item_text = q.value(1)
+                    combo.addItem(f"{label} {item_text}", item_id)
+                    new_items.append((item_id, item_text))
+                
+                print(f"   ✅ Загружено {len(new_items)} записей из БД")
+            else:
+                print(f"   ❌ Ошибка выполнения запроса: {q.lastError().text()}")
+            
+            # Восстанавливаем выбор
             if current_id is not None:
                 idx = combo.findData(current_id)
                 if idx >= 0:
                     combo.setCurrentIndex(idx)
+                    print(f"   ↩️ Восстановлен выбор: индекс {idx}")
+                else:
+                    print(f"   ⚠️ Предыдущий ID={current_id} не найден, сброс на 'Не выбрано'")
+            
+            # 2. СНИМАЕМ БЛОКИРОВКУ
+            combo.blockSignals(False)
+            
+            # ✅ ГЛАВНОЕ ИСПРАВЛЕНИЕ: repaint() перерисовывает виджет немедленно, даже если он скрыт
+            combo.repaint()
+        
+        print(f"\n{'='*70}")
+        print(f"✅ [AUTO-UPDATE] Обновление ComboBox завершено")
+        print(f"{'='*70}\n")
+
+    # ✅ Обработчик выбора входящего поручения
+    def on_incoming_order_selected(self, index): 
+        self.selected_incoming_order_id = self.incoming_order_combo.currentData()
 
     def on_address_selected(self, index): 
         self.selected_address_id = self.address_combo.currentData()
@@ -224,20 +283,66 @@ class DocumentGeneratorTab(QWidget):
             return q.value(0)
         return None
 
+    def _get_used_source_tables(self, template_id):
+        """Определяет, какие таблицы-источники используются в сопоставлениях шаблона"""
+        query = QSqlQuery(self.db)
+        query.prepare("SELECT DISTINCT table_name FROM krd.field_mappings WHERE template_id = ?")
+        query.addBindValue(template_id)
+        used_tables = set()
+        if query.exec():
+            while query.next():
+                used_tables.add(query.value(0))
+        return used_tables
+
     def generate_and_save_document(self):
         tid = self.current_template_id
         rec_id = self.recipient_widget.current_id()
-        rt_id = self._get_default_request_type_id()
         
-        if not tid: return QMessageBox.warning(self, "Ошибка", "Выберите шаблон")
-        if not rt_id: return QMessageBox.warning(self, "Ошибка", "Справочник типов запросов пуст!")
-        if not rec_id: return QMessageBox.warning(self, "Ошибка", "Выберите адресата")
+        if not tid: 
+            return QMessageBox.warning(self, "Ошибка", "Выберите шаблон")
         
-        errs = []
-        if "addresses" in self.used_tables_in_mappings and not self.selected_address_id: errs.append("Адрес")
-        if "service_places" in self.used_tables_in_mappings and not self.selected_service_place_id: errs.append("Место службы")
-        if "soch_episodes" in self.used_tables_in_mappings and not self.selected_soch_episode_id: errs.append("Эпизод СОЧ")
-        if errs: return QMessageBox.warning(self, "Требуется выбор", f"Не выбрано: {', '.join(errs)}")
+        # ✅ 1. Пытаемся взять тип запроса из карточки адресата
+        rt_id = None
+        if rec_id:
+            q = QSqlQuery(self.db)
+            q.prepare("SELECT request_type_id FROM krd.recipients WHERE id = ?")
+            q.addBindValue(rec_id)
+            if q.exec() and q.next():
+                rt_id = q.value(0)
+                
+        # ✅ 2. Если в адресате не указан → берём первый из справочника (fallback)
+        if not rt_id:
+            rt_id = self._get_default_request_type_id()
+            
+        if not rt_id: 
+            return QMessageBox.warning(self, "Ошибка", "Справочник типов запросов пуст! Добавьте хотя бы один тип через ⚙️.")
+        
+        # 🔍 Определяем, какие таблицы реально нужны шаблону
+        used_tables = self._get_used_source_tables(tid)
+        
+        # 🗺️ Маппинг: таблица БД -> атрибут виджета с выбранным ID
+        table_to_attr = {
+            'addresses': 'selected_address_id',
+            'incoming_orders': 'selected_incoming_order_id',
+            'soch_episodes': 'selected_soch_episode_id',
+            'service_places': 'selected_service_place_id'
+        }
+        
+        # ✅ Проверяем только те комбобоксы, чьи таблицы используются в шаблоне
+        for table, attr in table_to_attr.items():
+            if table in used_tables and getattr(self, attr) is None:
+                return QMessageBox.warning(
+                    self, "Требуется выбор", 
+                    f"Шаблон использует данные из таблицы «{table}», но соответствующий список не выбран."
+                )
+                
+        # Формируем словарь выбранных ID (None для неиспользуемых таблиц)
+        selections = {
+            "addresses": self.selected_address_id if 'addresses' in used_tables else None,
+            "service_places": self.selected_service_place_id if 'service_places' in used_tables else None,
+            "soch_episodes": self.selected_soch_episode_id if 'soch_episodes' in used_tables else None,
+            "incoming_orders": self.selected_incoming_order_id if 'incoming_orders' in used_tables else None
+        }
         
         try:
             q = QSqlQuery(self.db)
@@ -249,12 +354,6 @@ class DocumentGeneratorTab(QWidget):
             tpl_name = q.value(1)
             tpl_data = bytes(q.value(0)) if not isinstance(q.value(0), bytes) else q.value(0)
             
-            selections = {
-                "addresses": self.selected_address_id,
-                "service_places": self.selected_service_place_id,
-                "soch_episodes": self.selected_soch_episode_id
-            }
-            
             context = self.engine.build_context(tid, selections)
             output_path, replacements = self.engine.apply_to_docx(tpl_data, context)
             
@@ -265,8 +364,15 @@ class DocumentGeneratorTab(QWidget):
             request_id = self.engine.save_to_database(rt_id, rec_id, num, doc_bytes)
             os.unlink(output_path)
             
-            QMessageBox.information(self, "Успех", f"Документ успешно сгенерирован!\n📄 Шаблон: {tpl_name}\n🔢 Номер: {num}\n🔄 Заменено переменных: {replacements}")
+            QMessageBox.information(
+                self, "Успех", 
+                f"Документ успешно сгенерирован!\n"
+                f"📄 Шаблон: {tpl_name}\n"
+                f"🔢 Номер: {num}\n"
+                f"🔄 Заменено переменных: {replacements}"
+            )
             self.request_saved.emit()
+            
         except Exception as e:
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка генерации", str(e))

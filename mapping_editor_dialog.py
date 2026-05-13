@@ -1,6 +1,7 @@
 """
 Диалог для редактирования сопоставлений полей шаблона с данными из БД
 ✅ ДОБАВЛЕНО: SearchableComboBox для поиска полей
+✅ ИСПРАВЛЕНО: Русские названия вкладок вместо английских имен таблиц
 """
 import os
 import tempfile
@@ -9,7 +10,7 @@ import re
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QTableWidget, QHeaderView, QAbstractItemView, QMessageBox,
-    QComboBox, QDialogButtonBox, QGroupBox, QTableWidgetItem
+    QComboBox, QDialogButtonBox, QGroupBox, QTableWidgetItem,QCompleter
 )
 from PyQt6.QtCore import Qt, QByteArray
 from PyQt6.QtSql import QSqlQuery
@@ -17,9 +18,20 @@ from PyQt6.QtGui import QFont
 from docx import Document
 from composite_field_widget import CompositeFieldWidget
 from field_mapping_manager import FieldMappingManager
-from searchable_combo import SearchableComboBox  # ✅ ИМПОРТ НОВОГО КЛАССА
+from searchable_combo import SearchableComboBox
 
-# === СПРАВОЧНИК: DB колонка → Русское описание ===
+# === СПРАВОЧНИК: Английское имя таблицы -> Русское название вкладки ===
+TABLE_NAMES_RU = {
+    'social_data': 'Социально-демографические данные',
+    'addresses': 'Адреса проживания',
+    'service_places': 'Места службы',
+    'soch_episodes': 'Эпизоды СОЧ',
+    'incoming_orders': 'Входящие поручения',
+    'outgoing_requests': 'Исходящие запросы',
+    'recipients': 'Адресаты'
+}
+
+# === СПРАВОЧНИК: DB колонка -> Русское описание ===
 COLUMN_DESCRIPTIONS = {
     # social_data
     "surname": "Фамилия военнослужащего",
@@ -104,13 +116,43 @@ COLUMN_DESCRIPTIONS = {
     "search_circumstances": "🔍 Обстоятельства розыска",
     "notification_recipient": "📬 Адресат уведомления",
     "notification_date": "📅 Дата уведомления",
-    "notification_number": "📬 Номер уведомления"
+    "notification_number": "📬 Номер уведомления",
+    # incoming_orders
+    "initiator_type_id": "📩 ID типа инициатора",
+    "initiator_full_name": "📩 Наименование инициатора",
+    "order_date": "📩 Дата поручения",
+    "order_number": "📩 Номер поручения",
+    "receipt_date": "📩 Дата поступления",
+    "receipt_number": "📩 Входящий номер",
+    "initiator_contacts": "📩 Контакты инициатора",
+    "our_response_date": "📩 Дата ответа",
+    "our_response_number": "📩 Исходящий номер ответа",
+    # outgoing_requests
+    "request_type_id": "📤 ID типа запроса",
+    "recipient_name": "📤 Наименование адресата",
+    "issue_date": "📤 Дата запроса",
+    "issue_number": "📤 Номер запроса",
+    "request_text": "📤 Текст запроса",
+    "signed_by_position": "📤 Должность подписанта",
+    "document_data": "📄 Данные документа",
+    "recipient_contacts": "📬 Контакты адресата",
+    # recipients
+    "recipient_name": "👥 Наименование адресата",
+    "contacts": "👥 Контакты адресата (телефон, email)",
+    "postal_index": "👥 Почтовый индекс адресата",
+    "postal_region": "👥 Субъект РФ адресата",
+    "postal_district": "👥 Административный район адресата",
+    "postal_town": "👥 Город/населенный пункт адресата",
+    "postal_street": "👥 Улица адресата",
+    "postal_house": "👥 Дом адресата",
+    "postal_building": "👥 Корпус/строение адресата",
+    "postal_letter": "👥 Литера адресата",
+    "postal_apartment": "👥 Квартира адресата",
+    "postal_room": "👥 Комната адресата",
 }
-
 
 class MappingEditorDialog(QDialog):
     """Отдельное окно для редактирования сопоставлений"""
-    
     def __init__(self, parent=None, krd_id=None, db_connection=None, template_id=None, audit_logger=None):
         super().__init__(parent)
         self.krd_id = krd_id
@@ -127,26 +169,26 @@ class MappingEditorDialog(QDialog):
         
         self.setWindowTitle("✏️ Редактирование сопоставлений полей")
         self.setMinimumSize(1100, 750)
-        self.setModal(False)  # Не модальное окно
+        self.setModal(False)
         
         self.init_ui()
         if template_id:
             self.load_field_mappings(template_id)
-    
+
     def init_ui(self):
         layout = QVBoxLayout()
         layout.setSpacing(10)
-        
+
         # Заголовок
         title_label = QLabel("🔗 Сопоставление полей шаблона с данными из БД")
         title_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
         layout.addWidget(title_label)
-        
+
         info_label = QLabel("💡 Выберите переменную из шаблона и укажите, какое поле из базы данных должно быть подставлено")
         info_label.setStyleSheet("QLabel { color: #666; padding: 8px; background-color: #f0f0f0; border-radius: 5px; }")
         info_label.setWordWrap(True)
         layout.addWidget(info_label)
-        
+
         # Таблица сопоставлений
         self.mapping_table = QTableWidget()
         self.mapping_table.setColumnCount(3)
@@ -165,116 +207,70 @@ class MappingEditorDialog(QDialog):
         self.mapping_table.setColumnWidth(2, 100)
         
         layout.addWidget(self.mapping_table)
-        
+
         # Кнопки управления
         btn_group = QGroupBox("Управление сопоставлениями")
         btn_layout = QHBoxLayout(btn_group)
         
         add_simple_btn = QPushButton("➕ Добавить простое сопоставление")
         add_simple_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #2196F3;
-                color: white;
-                font-weight: bold;
-                padding: 8px 15px;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #1976D2;
-            }
+            QPushButton { background-color: #2196F3; color: white; font-weight: bold; padding: 8px 15px; border-radius: 5px; }
+            QPushButton:hover { background-color: #1976D2; }
         """)
         add_simple_btn.clicked.connect(self.add_field_mapping)
         btn_layout.addWidget(add_simple_btn)
-        
+
         add_composite_btn = QPushButton("🔗 Добавить составное поле")
         add_composite_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #9C27B0;
-                color: white;
-                font-weight: bold;
-                padding: 8px 15px;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #7B1FA2;
-            }
+            QPushButton { background-color: #9C27B0; color: white; font-weight: bold; padding: 8px 15px; border-radius: 5px; }
+            QPushButton:hover { background-color: #7B1FA2; }
         """)
         add_composite_btn.clicked.connect(self.add_composite_field_mapping)
         btn_layout.addWidget(add_composite_btn)
-        
+
         delete_btn = QPushButton("🗑️ Удалить выбранное")
         delete_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #f44336;
-                color: white;
-                font-weight: bold;
-                padding: 8px 15px;
-                border-radius: 5px;
-            }
-            QPushButton:hover {
-                background-color: #d32f2f;
-            }
+            QPushButton { background-color: #f44336; color: white; font-weight: bold; padding: 8px 15px; border-radius: 5px; }
+            QPushButton:hover { background-color: #d32f2f; }
         """)
         delete_btn.clicked.connect(self.remove_field_mapping)
         btn_layout.addWidget(delete_btn)
         
         layout.addWidget(btn_group)
-        
+
         # Кнопки сохранения и закрытия
         button_box = QDialogButtonBox()
-        
         save_btn = QPushButton("💾 Сохранить сопоставления")
         save_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #4CAF50;
-                color: white;
-                font-weight: bold;
-                padding: 12px 30px;
-                border-radius: 5px;
-                font-size: 13px;
-            }
-            QPushButton:hover {
-                background-color: #45a049;
-            }
+            QPushButton { background-color: #4CAF50; color: white; font-weight: bold; padding: 12px 30px; border-radius: 5px; font-size: 13px; }
+            QPushButton:hover { background-color: #45a049; }
         """)
         save_btn.clicked.connect(self.save_and_close)
         
         cancel_btn = QPushButton("❌ Закрыть без сохранения")
         cancel_btn.setStyleSheet("""
-            QPushButton {
-                background-color: #757575;
-                color: white;
-                font-weight: bold;
-                padding: 12px 30px;
-                border-radius: 5px;
-                font-size: 13px;
-            }
-            QPushButton:hover {
-                background-color: #616161;
-            }
+            QPushButton { background-color: #757575; color: white; font-weight: bold; padding: 12px 30px; border-radius: 5px; font-size: 13px; }
+            QPushButton:hover { background-color: #616161; }
         """)
         cancel_btn.clicked.connect(self.reject)
         
         button_box.addButton(save_btn, QDialogButtonBox.ButtonRole.AcceptRole)
         button_box.addButton(cancel_btn, QDialogButtonBox.ButtonRole.RejectRole)
         layout.addWidget(button_box)
-        
+
         self.setLayout(layout)
         
         # Загрузка данных
         self.load_template_variables(self.template_id)
         self.load_db_columns()
-    
+
     def add_field_mapping(self):
         """Добавление простого сопоставления"""
         if not self.current_template_id:
-            QMessageBox.warning(self, "Ошибка", "Шаблон не выбран")
-            return
-        
+            return QMessageBox.warning(self, "Ошибка", "Шаблон не выбран")
         if not self.template_variables:
-            QMessageBox.warning(self, "Ошибка", "Переменные шаблона не загружены")
-            return
-        
+            return QMessageBox.warning(self, "Ошибка", "Переменные шаблона не загружены")
+            
         row = self.mapping_table.rowCount()
         self.mapping_table.insertRow(row)
         
@@ -292,32 +288,25 @@ class MappingEditorDialog(QDialog):
         
         self.mapping_table.resizeRowToContents(row)
         self.mapping_table.selectRow(row)
-    
+
     def add_composite_field_mapping(self):
         """Добавление составного поля"""
         if not self.current_template_id:
-            QMessageBox.warning(self, "Ошибка", "Выберите шаблон")
-            return
-        
+            return QMessageBox.warning(self, "Ошибка", "Выберите шаблон")
         if not self.template_variables:
-            QMessageBox.warning(self, "Ошибка", "Переменные шаблона не загружены")
-            return
-        
+            return QMessageBox.warning(self, "Ошибка", "Переменные шаблона не загружены")
+            
         row = self.mapping_table.rowCount()
         self.composite_widget.add_composite_field_mapping(row)
-    
+
     def remove_field_mapping(self):
         """Удаление сопоставления"""
         selected_rows = self.mapping_table.selectionModel().selectedRows()
         if not selected_rows:
-            QMessageBox.warning(self, "Внимание", "Выберите сопоставление для удаления")
-            return
-        
+            return QMessageBox.warning(self, "Внимание", "Выберите сопоставление для удаления")
         row = selected_rows[0].row()
         self.mapping_table.removeRow(row)
-    
-    # === НОВЫЕ МЕТОДЫ ДЛЯ ЗАГРУЗКИ СОПОСТАВЛЕНИЙ ===
-    
+
     def add_simple_mapping_row(self, row, field_name, db_column, table_name):
         """Добавление простого сопоставления при загрузке из БД"""
         self.mapping_table.insertRow(row)
@@ -336,97 +325,74 @@ class MappingEditorDialog(QDialog):
         self.mapping_table.setCellWidget(row, 2, type_label)
         
         self.mapping_table.resizeRowToContents(row)
-    
+
     def add_composite_mapping_row(self, row, field_name, db_columns_json, table_name):
         """Добавление составного сопоставления при загрузке из БД"""
         self.composite_widget.create_composite_field_row(
             row, field_name, db_columns_json, table_name, self.mapping_table
         )
-    
+
     def load_field_mappings(self, template_id):
         """Загрузка сопоставлений"""
         self.mapping_table.setRowCount(0)
         self.mapping_manager.load_field_mappings(template_id)
-    
+
     def _create_db_column_combo(self, selected_column=None):
-        """Создание ComboBox с русскими описаниями полей БД"""
+        """Создание ComboBox с русскими описаниями полей БД и префиксом таблицы"""
         try:
-            print(f"\n{'='*60}")
-            print(f"🔧 СОЗДАНИЕ COMBOBOX ДЛЯ ПОЛЯ БД")
-            print(f"{'='*60}")
-            
             combo = SearchableComboBox()
-            
             if combo is None:
-                print("❌ ОШИБКА: Не удалось создать SearchableComboBox!")
                 return None
-            
-            print(f"✅ SearchableComboBox создан: {combo}")
-            print(f"   Тип: {type(combo).__name__}")
-            print(f"   Редактируемый: {combo.isEditable()}")
-            
+
             combo.setMaxVisibleItems(50)
             combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             combo.view().setMinimumHeight(400)
             combo.setMinimumWidth(350)
             combo.setMaximumWidth(600)
             
-            # ✅ ИСПРАВЛЕНО: completer() — это метод в PyQt6!
             completer = combo.completer()
             if completer:
-                print(f"✅ Completer настроен")
-                print(f"   CaseSensitivity: {completer.caseSensitivity()}")
-                print(f"   FilterMode: {completer.filterMode()}")
-                print(f"   CompletionMode: {completer.completionMode()}")
-            else:
-                print("❌ ОШИБКА: Completer не создан!")
-            
+                completer.setCaseSensitivity(Qt.CaseSensitivity.CaseInsensitive)
+                completer.setFilterMode(Qt.MatchFlag.MatchContains)
+                completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
+
             all_columns = []
+            # Перебираем таблицы из self.db_columns
             for table_name, columns in self.db_columns.items():
+                # ✅ ПОЛУЧАЕМ РУССКОЕ НАЗВАНИЕ ВКЛАДКИ
+                table_name_ru = TABLE_NAMES_RU.get(table_name, table_name)
+                
                 for col in columns:
                     if col in COLUMN_DESCRIPTIONS:
-                        all_columns.append((col, COLUMN_DESCRIPTIONS[col]))
+                        desc = COLUMN_DESCRIPTIONS[col]
+                        # ✅ ФОРМИРУЕМ ПОДПИСЬ: [Название вкладки] Описание поля
+                        display_desc = f"[{table_name_ru}] {desc}"
+                        all_columns.append((col, display_desc))
             
+            # Сортируем по описанию
             all_columns.sort(key=lambda x: x[1])
-            
-            print(f"\n📊 Загрузка {len(all_columns)} колонок...")
             
             for col_name, col_description in all_columns:
                 combo.addItem(col_description, col_name)
-            
-            print(f"✅ Добавлено элементов: {combo.count()}")
             
             if selected_column:
                 index = combo.findData(selected_column)
                 if index >= 0:
                     combo.setCurrentIndex(index)
-                    print(f"✅ Выбран элемент: {combo.currentText()} (data={combo.currentData()})")
-                else:
-                    print(f"⚠️ Предупреждение: Колонка '{selected_column}' не найдена")
             
-            if combo.count() == 0:
-                print("❌ ОШИБКА: ComboBox пуст!")
-            else:
-                print(f"✅ ComboBox готов к использованию")
-            
-            print(f"{'='*60}\n")
             return combo
             
         except Exception as e:
-            print(f"❌ КРИТИЧЕСКАЯ ОШИБКА при создании ComboBox: {e}")
-            import traceback
-            traceback.print_exc()
-            
-            print("⚠️ Создаем fallback ComboBox...")
+            print(f"❌ Ошибка при создании ComboBox: {e}")
             combo = QComboBox()
             combo.addItem("Ошибка загрузки", None)
             return combo
-    
+
     def load_template_variables(self, template_id):
         """Загрузка переменных из шаблона"""
         if not template_id:
             return
-        
+            
         query = QSqlQuery(self.db)
         query.prepare("SELECT template_data FROM krd.document_templates WHERE id = ?")
         query.addBindValue(template_id)
@@ -434,33 +400,29 @@ class MappingEditorDialog(QDialog):
         if not query.exec() or not query.next():
             self.template_variables = []
             return
-        
+            
         data = query.value(0)
         template_bytes = bytes(data) if isinstance(data, QByteArray) else bytes(data) if data else b''
         
         if not template_bytes:
             self.template_variables = []
             return
-        
+            
         with tempfile.NamedTemporaryFile(delete=False, suffix='.docx') as tmp:
             tmp.write(template_bytes)
             tmp_path = tmp.name
-        
+            
         try:
             doc = Document(tmp_path)
             vars_set = set()
-            
             for para in doc.paragraphs:
                 vars_set.update(re.findall(r'\{\{[^{}]+\}\}', para.text))
-            
             for table in doc.tables:
                 for row in table.rows:
                     for cell in row.cells:
                         for para in cell.paragraphs:
                             vars_set.update(re.findall(r'\{\{[^{}]+\}\}', para.text))
-            
             self.template_variables = sorted(vars_set)
-            
         except Exception as e:
             print(f"❌ Ошибка загрузки переменных: {e}")
             self.template_variables = ["{{surname}}", "{{name}}", "{{patronymic}}"]
@@ -469,9 +431,10 @@ class MappingEditorDialog(QDialog):
                 os.unlink(tmp_path)
             except:
                 pass
-    
+
     def load_db_columns(self):
         """Загрузка структуры столбцов базы данных"""
+        # ✅ ОБНОВЛЕНО: Добавлены таблицы incoming_orders, outgoing_requests, recipients
         self.db_columns = {
             "social_data": [
                 "surname", "name", "patronymic", "birth_date", "birth_place_town",
@@ -500,15 +463,31 @@ class MappingEditorDialog(QDialog):
                 "prosecution_info", "criminal_case_info", "search_date", "found_by",
                 "search_circumstances", "notification_recipient", "notification_date",
                 "notification_number"
+            ],
+            "incoming_orders": [
+                "initiator_type_id", "initiator_full_name", "military_unit_id",
+                "order_date", "order_number", "receipt_date", "receipt_number",
+                "postal_index", "postal_region", "postal_district", "postal_town",
+                "postal_street", "postal_house", "postal_building", "postal_letter",
+                "postal_apartment", "postal_room", "initiator_contacts",
+                "our_response_date", "our_response_number"
+            ],
+            "outgoing_requests": [
+                "request_type_id", "recipient_name", "issue_date", "issue_number",
+                "request_text", "signed_by_position", "document_data", "recipient_contacts"
+            ],
+            "recipients": [
+                "recipient_name", "contacts", "postal_index", "postal_region",
+                "postal_district", "postal_town", "postal_street", "postal_house",
+                "postal_building", "postal_letter", "postal_apartment", "postal_room"
             ]
         }
-    
+
     def save_and_close(self):
         """Сохранение и закрытие"""
         if not self.current_template_id:
-            QMessageBox.critical(self, "Ошибка", "Шаблон не выбран")
-            return
-        
+            return QMessageBox.critical(self, "Ошибка", "Шаблон не выбран")
+            
         if self.mapping_manager.save_field_mappings(self.current_template_id):
             QMessageBox.information(self, "Успех", "✅ Сопоставления успешно сохранены!")
             self.accept()

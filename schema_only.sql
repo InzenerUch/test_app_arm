@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict iz65JXKjevusefGIQUa16zTZZhAHLKT9u0PCTFcGhrMGLfQS4R4pUCAsrh6y2xh
+\restrict aQL0eFlXb6wOofvd3a4AtiYKmhkd4QTkWrFW8H8IIPx8QXU3BxdDYYA6hbK01xE
 
 -- Dumped from database version 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)
 -- Dumped by pg_dump version 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)
@@ -745,7 +745,11 @@ CREATE TABLE krd.outgoing_requests (
     is_deleted boolean DEFAULT false,
     deleted_at timestamp without time zone,
     deleted_by integer,
-    recipient_id integer
+    recipient_id integer,
+    response_date date,
+    response_number character varying(100),
+    response_data bytea,
+    response_status character varying(50) DEFAULT 'Ожидание'::character varying
 );
 
 
@@ -960,7 +964,8 @@ CREATE TABLE krd.recipients (
     postal_apartment character varying(50),
     postal_room character varying(50),
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    is_deleted boolean DEFAULT false
+    is_deleted boolean DEFAULT false,
+    request_type_id integer
 );
 
 
@@ -1232,9 +1237,9 @@ ALTER SEQUENCE krd.soch_episodes_id_seq OWNED BY krd.soch_episodes.id;
 CREATE TABLE krd.social_data (
     id integer NOT NULL,
     krd_id integer NOT NULL,
-    surname character varying(100) NOT NULL,
-    name character varying(100) NOT NULL,
-    patronymic character varying(100) NOT NULL,
+    surname character varying(100),
+    name character varying(100),
+    patronymic character varying(100),
     birth_date date,
     birth_place_town character varying(100),
     birth_place_district character varying(100),
@@ -2175,6 +2180,13 @@ CREATE INDEX idx_outgoing_requests_krd_id ON krd.outgoing_requests USING btree (
 
 
 --
+-- Name: idx_recipients_request_type; Type: INDEX; Schema: krd; Owner: -
+--
+
+CREATE INDEX idx_recipients_request_type ON krd.recipients USING btree (request_type_id);
+
+
+--
 -- Name: idx_report_templates_deleted; Type: INDEX; Schema: krd; Owner: -
 --
 
@@ -2377,6 +2389,14 @@ ALTER TABLE ONLY krd.outgoing_requests
 
 
 --
+-- Name: recipients recipients_request_type_id_fkey; Type: FK CONSTRAINT; Schema: krd; Owner: -
+--
+
+ALTER TABLE ONLY krd.recipients
+    ADD CONSTRAINT recipients_request_type_id_fkey FOREIGN KEY (request_type_id) REFERENCES krd.request_types(id) ON DELETE SET NULL;
+
+
+--
 -- Name: service_places service_places_garrison_id_fkey; Type: FK CONSTRAINT; Schema: krd; Owner: -
 --
 
@@ -2492,5 +2512,5 @@ ALTER TABLE ONLY krd.users
 -- PostgreSQL database dump complete
 --
 
-\unrestrict iz65JXKjevusefGIQUa16zTZZhAHLKT9u0PCTFcGhrMGLfQS4R4pUCAsrh6y2xh
+\unrestrict aQL0eFlXb6wOofvd3a4AtiYKmhkd4QTkWrFW8H8IIPx8QXU3BxdDYYA6hbK01xE
 

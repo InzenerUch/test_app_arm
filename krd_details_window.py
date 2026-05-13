@@ -81,6 +81,9 @@ class KrdDetailsWindow(QDialog):
         self.service_places_tab.data_changed.connect(self.doc_generator_tab.load_related_records)
         self.soch_episodes_tab.data_changed.connect(self.doc_generator_tab.load_related_records)
         
+        # ✅ Добавляем связь для входящих поручений
+        self.incoming_orders_tab.data_changed.connect(self.doc_generator_tab.load_related_records)
+        
         self.tabs.currentChanged.connect(self._on_tab_switched)
         main_layout.addWidget(self.tabs)
 

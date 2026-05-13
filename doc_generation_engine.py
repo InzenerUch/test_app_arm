@@ -1,7 +1,7 @@
 """
 Движок генерации документов из Word-шаблонов
 ✅ С ПОЛНОЙ ДИАГНОСТИКОЙ ТЕКСТА (ДО/ПОСЛЕ)
-✅ ВЫВОДИТ ВЕСЬ ТЕКСТ ШАБЛОНА И ГОТОВОГО ДОКУМЕНТА
+✅ АВТОМАТИЧЕСКАЯ ПОДСТАНОВКА НАЗВАНИЙ ИЗ СПРАВОЧНИКОВ (вместо ID)
 """
 import os
 import tempfile
@@ -23,6 +23,15 @@ class DocGenerationEngine:
         self.placeholder_pattern = re.compile(r'\{\{([^{}]+)\}\}')
         self.debug_mode = True  # ✅ ВКЛЮЧИТЬ ДИАГНОСТИКУ
 
+        # ️ КАРТА СПРАВОЧНИКОВ: Поле ID -> (Таблица справочника, Колонка с названием)
+        # Это нужно, чтобы вместо цифры (ID) подставлялось название (например, "Майор")
+        self.lookup_tables = {
+            'rank_id': ('krd.ranks', 'name'),
+            'category_id': ('krd.categories', 'name'),
+            # Если есть другие ID, которые нужно превращать в текст, добавьте сюда:
+            # 'military_unit_id': ('krd.military_units', 'name'), 
+        }
+
     def set_columns_map(self, cols_map):
         self.db_columns_map = cols_map
 
@@ -30,12 +39,8 @@ class DocGenerationEngine:
         """Вспомогательный метод для логирования"""
         if self.debug_mode:
             prefix = {
-                "INFO": "📝",
-                "WARN": "⚠️",
-                "ERROR": "❌",
-                "SUCCESS": "✅",
-                "DATA": "📊",
-                "TEXT": "📄"
+                "INFO": "📝", "WARN": "⚠️", "ERROR": "❌",
+                "SUCCESS": "✅", "DATA": "📊", "TEXT": "📄"
             }.get(level, "•")
             print(f"{prefix} [{level}] {message}")
 
@@ -68,7 +73,6 @@ class DocGenerationEngine:
         return all_text
 
     def build_context(self, template_id, selections):
-        """Сбор контекста с диагностикой"""
         self._log("=" * 80, "INFO")
         self._log(f"НАЧАЛО СБОРКИ КОНТЕКСТА (template_id={template_id}, krd_id={self.krd_id})", "INFO")
         self._log("=" * 80, "INFO")
@@ -81,11 +85,10 @@ class DocGenerationEngine:
             WHERE template_id = ?
         """)
         query.addBindValue(template_id)
-        
         if not query.exec():
             self._log(f"Ошибка загрузки маппингов: {query.lastError().text()}", "ERROR")
             return context
-
+            
         mappings_count = 0
         while query.next():
             field_name = query.value(0).strip('{} ')
@@ -93,32 +96,39 @@ class DocGenerationEngine:
             table_name = query.value(2)
             db_columns_json = query.value(3)
             is_composite = query.value(4) or False
-
+            
             try:
                 if is_composite and db_columns_json:
                     value = self._get_composite_value(table_name, db_columns_json, selections)
                     source = f"COMPOSITE({table_name})"
                 else:
                     selected_id = selections.get(table_name)
+                    
+                    # Обработка значений из таблиц с выбором (адреса, места службы и т.д.)
                     if selected_id and table_name in self.tables_with_selection:
                         value = self._get_value_from_record(table_name, db_column, selected_id)
                         source = f"{table_name}.id={selected_id}"
+                    elif table_name in self.tables_with_selection and selected_id is None:
+                        value = ""
+                        source = f"{table_name} (не выбрано)"
                     else:
+                        # Для social_data (основные данные)
                         value = self._get_value_from_social_data(db_column)
                         source = "social_data"
-                
+                        
                 if value is not None and value != "":
                     context[field_name] = value
                     self._log(f"{{{field_name}}} = '{value}' (источник: {source})", "DATA")
                     mappings_count += 1
                 else:
+                    context[field_name] = "" # Гарантируем пустую строку вместо None
                     self._log(f"{{{field_name}}} = ПУСТО (источник: {source})", "WARN")
+                    
             except Exception as e:
                 self._log(f"Ошибка получения {{{field_name}}}: {e}", "ERROR")
-        
+                
         self._log("=" * 80, "INFO")
-        self._log(f"КОНТЕКСТ СОБРАН: {mappings_count} переменных из {query.size()}", "SUCCESS")
-        self._log(f"ВСЕГО переменных в контексте: {len(context)}", "DATA")
+        self._log(f"КОНТЕКСТ СОБРАН: {mappings_count} переменных", "SUCCESS")
         self._log("=" * 80, "INFO")
         return context
 
@@ -133,11 +143,21 @@ class DocGenerationEngine:
                 if not col: continue
                 t = self._get_table_by_column(col) or table_hint
                 sid = selections.get(t)
-                val = self._get_value_from_record(t, col, sid) if (sid and t in self.tables_with_selection) else self._get_value_from_social_data(col)
+                
+                # Выбираем метод получения значения в зависимости от таблицы
+                if sid and t in self.tables_with_selection:
+                    val = self._get_value_from_record(t, col, sid)
+                else:
+                    val = self._get_value_from_social_data(col)
+                    
                 if val:
                     parts.append(str(val))
                     if sep: parts.append(sep)
-            if parts and parts[-1] in [', ', ' ', '; ', ': ', ' - ']: parts.pop()
+            
+            # Убираем лишний разделитель в конце
+            if parts and parts[-1] in [', ', ' ', '; ', ': ', ' - ']: 
+                parts.pop()
+                
             return ''.join(parts) if parts else None
         except Exception as e:
             self._log(f"Ошибка составного поля: {e}", "ERROR")
@@ -148,20 +168,64 @@ class DocGenerationEngine:
             if col in cols: return t
         return None
 
-    def _get_value_from_record(self, table, col, rid):
-        if not re.match(r'^\w+$', table) or not re.match(r'^\w+$', col): return ""
+    # ========================================================================
+    # ✅ УЛУЧШЕННЫЙ МЕТОД: Подставляет названия из справочников вместо ID
+    # ========================================================================
+    def _get_value_from_social_data(self, col):
+        # Защита от SQL-инъекций (разрешаем только буквы, цифры и _)
+        if not re.match(r'^\w+$', col): return ""
+        
         q = QSqlQuery(self.db)
-        q.prepare(f"SELECT {col} FROM krd.{table} WHERE id = ?")
-        q.addBindValue(rid)
-        if q.exec() and q.next(): return self._format_value(q.value(0))
+        
+        # Проверяем, является ли колонка ссылкой на справочник (ID)
+        if col in self.lookup_tables:
+            ref_table, ref_col = self.lookup_tables[col]
+            # Делаем LEFT JOIN, чтобы получить название из справочника
+            sql = f"""
+                SELECT t.{ref_col} 
+                FROM krd.social_data s
+                LEFT JOIN {ref_table} t ON s.{col} = t.id
+                WHERE s.krd_id = ? 
+                ORDER BY s.id DESC 
+                LIMIT 1
+            """
+            q.prepare(sql)
+        else:
+            # Обычное поле (текст, дата и т.д.)
+            sql = f"SELECT {col} FROM krd.social_data WHERE krd_id = ? ORDER BY id DESC LIMIT 1"
+            q.prepare(sql)
+
+        q.addBindValue(self.krd_id)
+        
+        if q.exec() and q.next(): 
+            return self._format_value(q.value(0))
         return ""
 
-    def _get_value_from_social_data(self, col):
-        if not re.match(r'^\w+$', col): return ""
+    # ========================================================================
+    # ✅ УЛУЧШЕННЫЙ МЕТОД: Для связанных таблиц (места службы и т.д.)
+    # ========================================================================
+    def _get_value_from_record(self, table, col, rid):
+        if not re.match(r'^\w+$', table) or not re.match(r'^\w+$', col): return ""
+        
         q = QSqlQuery(self.db)
-        q.prepare(f"SELECT {col} FROM krd.social_data WHERE krd_id = ? ORDER BY id DESC LIMIT 1")
-        q.addBindValue(self.krd_id)
-        if q.exec() and q.next(): return self._format_value(q.value(0))
+        
+        # Проверяем, нужно ли делать JOIN для справочника
+        if col in self.lookup_tables:
+            ref_table, ref_col = self.lookup_tables[col]
+            sql = f"""
+                SELECT t.{ref_col} 
+                FROM krd.{table} s
+                LEFT JOIN {ref_table} t ON s.{col} = t.id
+                WHERE s.id = ?
+            """
+            q.prepare(sql)
+        else:
+            sql = f"SELECT {col} FROM krd.{table} WHERE id = ?"
+            q.prepare(sql)
+            
+        q.addBindValue(rid)
+        if q.exec() and q.next(): 
+            return self._format_value(q.value(0))
         return ""
 
     def _format_value(self, val):

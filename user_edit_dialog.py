@@ -4,6 +4,7 @@
 ✅ PostgreSQL-совместимые именованные параметры :param
 ✅ Мягкое удаление через is_deleted = TRUE
 ✅ Полная валидация и диагностика
+✅ ДОБАВЛЕНО: Прокрутка для удобного отображения всех полей
 """
 import bcrypt
 import re
@@ -13,7 +14,7 @@ from typing import Optional
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QFormLayout, 
     QLineEdit, QPushButton, QComboBox, QLabel, QMessageBox,
-    QGroupBox, QDialogButtonBox, QCheckBox
+    QGroupBox, QDialogButtonBox, QCheckBox, QScrollArea, QWidget
 )
 from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
@@ -32,7 +33,8 @@ class UserEditDialog(QDialog):
         self.editing_user_role: Optional[str] = None
         
         self.setWindowTitle("✏️ Редактирование пользователя")
-        self.setMinimumSize(500, 650)
+        self.setMinimumSize(550, 600)  # ✅ Уменьшили минимальную высоту
+        self.resize(600, 650)  # ✅ Установили разумный размер по умолчанию
         self.setModal(True)
         
         self.original_username = ""
@@ -51,15 +53,30 @@ class UserEditDialog(QDialog):
         print(f"{prefix} [{level}] {message}")
     
     def init_ui(self) -> None:
-        """Инициализация интерфейса"""
+        """Инициализация интерфейса с прокруткой"""
         self._log("init_ui(): Начало", "DEBUG")
-        layout = QVBoxLayout(self)
-        layout.setSpacing(15)
+        
+        # ✅ ОСНОВНОЙ LAYOUT ДИАЛОГА
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        # ✅ СОЗДАЁМ SCROLL AREA
+        scroll_area = QScrollArea()
+        scroll_area.setWidgetResizable(True)
+        scroll_area.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        scroll_area.setFrameShape(QScrollArea.Shape.NoFrame)
+        
+        # ✅ КОНТЕЙНЕР ДЛЯ ВСЕГО СОДЕРЖИМОГО
+        scroll_content = QWidget()
+        content_layout = QVBoxLayout(scroll_content)
+        content_layout.setSpacing(15)
+        content_layout.setContentsMargins(15, 15, 15, 15)
         
         # Заголовок
         title_label = QLabel("👤 Редактирование учётной записи")
         title_label.setFont(QFont("Arial", 12, QFont.Weight.Bold))
-        layout.addWidget(title_label)
+        content_layout.addWidget(title_label)
         
         # === Основная информация ===
         info_group = QGroupBox("📋 Основная информация")
@@ -77,26 +94,32 @@ class UserEditDialog(QDialog):
         info_layout.addRow("Имя пользователя *:", self.username_input)
         
         # === Смена пароля ===
-        password_group = QGroupBox("🔑 Смена пароля")
+        password_group = QGroupBox("🔐 Смена пароля (поставьте галочку для активации)")
+        password_group.setStyleSheet("""
+            QGroupBox { font-weight: bold; border: 2px solid #FF9800; border-radius: 6px; margin-top: 12px; padding-top: 10px; }
+            QGroupBox::title { subcontrol-origin: margin; left: 15px; color: #E65100; }
+        """)
         password_layout = QFormLayout(password_group)
         password_layout.setSpacing(10)
-        password_layout.setContentsMargins(10, 10, 10, 10)
+        password_layout.setContentsMargins(30, 12, 12, 12)
         
-        self.change_password_checkbox = QCheckBox("Изменить пароль")
+        self.change_password_checkbox = QCheckBox("✅ Разрешить изменение пароля")
+        self.change_password_checkbox.setToolTip("Без галочки поля будут заблокированы в целях безопасности")
+        self.change_password_checkbox.setStyleSheet("font-size: 13px; font-weight: bold; color: #2E7D32;")
         self.change_password_checkbox.stateChanged.connect(self.on_password_change_toggled)
         password_layout.addRow(self.change_password_checkbox)
         
         self.password_input = QLineEdit()
         self.password_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.password_input.setEnabled(False)
-        self.password_input.setPlaceholderText("Новый пароль")
+        self.password_input.setPlaceholderText("Введите новый пароль (мин. 6 символов)")
         self.password_input.setMinimumHeight(32)
         password_layout.addRow("Новый пароль:", self.password_input)
         
         self.password_confirm_input = QLineEdit()
         self.password_confirm_input.setEchoMode(QLineEdit.EchoMode.Password)
         self.password_confirm_input.setEnabled(False)
-        self.password_confirm_input.setPlaceholderText("Подтвердите пароль")
+        self.password_confirm_input.setPlaceholderText("Повторите пароль")
         self.password_confirm_input.setMinimumHeight(32)
         password_layout.addRow("Подтверждение:", self.password_confirm_input)
         
@@ -112,7 +135,7 @@ class UserEditDialog(QDialog):
         self.email_input.setMinimumHeight(32)
         info_layout.addRow("Email:", self.email_input)
         
-        layout.addWidget(info_group)
+        content_layout.addWidget(info_group)
         
         # === Права доступа ===
         role_group = QGroupBox("🔐 Права доступа")
@@ -141,18 +164,18 @@ class UserEditDialog(QDialog):
         self.last_login_label.setStyleSheet("QLabel { padding: 4px; }")
         role_layout.addRow("Последний вход:", self.last_login_label)
         
-        layout.addWidget(role_group)
+        content_layout.addWidget(role_group)
         
         # === Кнопки управления статусом (скрыты для админов) ===
         if self.editing_user_role != 'admin':
-            self._create_status_buttons(layout)
+            self._create_status_buttons(content_layout)
         
         # Разделитель
         separator = QHBoxLayout()
         line = QLabel("────────────────────────────────────────")
         line.setStyleSheet("QLabel { color: #999; font-size: 16px; }")
         separator.addWidget(line)
-        layout.addLayout(separator)
+        content_layout.addLayout(separator)
         
         # === Опасная зона ===
         delete_group = QGroupBox("🗑️ Опасная зона")
@@ -167,9 +190,15 @@ class UserEditDialog(QDialog):
         )
         self.delete_btn.clicked.connect(self.on_delete_user)
         delete_layout.addWidget(self.delete_btn)
-        layout.addWidget(delete_group)
+        content_layout.addWidget(delete_group)
         
-        # === Кнопки диалога ===
+        # ✅ УСТАНАВЛИВАЕМ КОНТЕЙНЕР В SCROLL AREA
+        scroll_area.setWidget(scroll_content)
+        
+        # ✅ ДОБАВЛЯЕМ SCROLL AREA В ОСНОВНОЙ LAYOUT
+        main_layout.addWidget(scroll_area, 1)  # 1 = растягивается
+        
+        # === Кнопки диалога (всегда видны внизу) ===
         button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
         )
@@ -177,9 +206,9 @@ class UserEditDialog(QDialog):
         button_box.button(QDialogButtonBox.StandardButton.Cancel).setText("Отмена")
         button_box.accepted.connect(self.on_accept)
         button_box.rejected.connect(self.reject)
-        layout.addWidget(button_box)
+        main_layout.addWidget(button_box)
         
-        self.setLayout(layout)
+        self.setLayout(main_layout)
         self._log("init_ui(): Завершено", "SUCCESS")
     
     def _create_status_buttons(self, layout: QVBoxLayout) -> None:
@@ -246,8 +275,6 @@ class UserEditDialog(QDialog):
             return
 
         query = QSqlQuery(self.db)
-        # 🔥 Именованные параметры :param для PostgreSQL
-        # ⚠️ В схеме krd.users НЕТ поля updated_at!
         query.prepare("""
             SELECT u.id, u.username, u.full_name, u.email, u.role_id,
                    u.is_active, u.created_at, u.last_login, u.is_deleted,
@@ -274,8 +301,7 @@ class UserEditDialog(QDialog):
             self.reject()
             return
 
-        # Проверка на логическое удаление
-        if query.value(8):  # is_deleted
+        if query.value(8):
             self._log(f"load_user_data(): ⚠️ Пользователь помечен как удалённый", "WARN")
             QMessageBox.warning(self, "Внимание", "Этот пользователь был удалён. Редактирование недоступно.")
             self.reject()
@@ -283,14 +309,12 @@ class UserEditDialog(QDialog):
 
         self._log("load_user_data(): ✅ Запись найдена, заполняю форму", "SUCCESS")
 
-        # Заполнение полей формы
         self.id_label.setText(str(query.value(0)))
         self.username_input.setText(query.value(1) or "")
         self.original_username = query.value(1) or ""
         self.full_name_input.setText(query.value(2) or "")
         self.email_input.setText(query.value(3) or "")
 
-        # Обработка роли
         role_id = query.value(4)
         role_name = query.value(9) or ""
         self.editing_user_role = role_name.lower() if role_name else None
@@ -306,7 +330,6 @@ class UserEditDialog(QDialog):
         self.is_user_active = bool(query.value(5))
         self.update_status_display()
 
-        # Форматирование дат
         for i, (val, label) in enumerate([(query.value(6), self.created_at_label),
                                            (query.value(7), self.last_login_label)]):
             if val and hasattr(val, 'toString'):
@@ -405,7 +428,6 @@ class UserEditDialog(QDialog):
         ) != QMessageBox.StandardButton.Yes:
             return
         
-        # Подтверждение вводом имени пользователя
         confirm, ok = QMessageBox.getText(
             self, "Подтверждение",
             f"Введите «{username}» для подтверждения удаления:",
@@ -418,7 +440,6 @@ class UserEditDialog(QDialog):
         
         try:
             query = QSqlQuery(self.db)
-            # 🔥 МЯГКОЕ УДАЛЕНИЕ согласно схеме: is_deleted = TRUE, deleted_at = NOW()
             query.prepare("""
                 UPDATE krd.users 
                 SET is_deleted = TRUE, deleted_at = CURRENT_TIMESTAMP 
@@ -435,8 +456,6 @@ class UserEditDialog(QDialog):
         except Exception as e:
             self._log(f"on_delete_user(): ❌ {str(e)}", "ERROR")
             QMessageBox.critical(self, "Ошибка", f"Ошибка при удалении: {str(e)}")
-    
-    # === Валидаторы ===
     
     def validate_username(self, username: str) -> tuple[bool, str]:
         """Валидация имени пользователя"""
@@ -455,7 +474,7 @@ class UserEditDialog(QDialog):
     def validate_email(self, email: str) -> tuple[bool, str]:
         """Валидация email"""
         if not email:
-            return True, ""  # Email необязателен
+            return True, ""
         if not re.match(r'^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$', email):
             return False, "Некорректный формат email"
         return True, ""
@@ -464,7 +483,6 @@ class UserEditDialog(QDialog):
         """Обработчик сохранения данных"""
         self._log("on_accept(): Начало", "DEBUG")
         
-        # Сбор данных из формы
         username = self.username_input.text().strip()
         full_name = self.full_name_input.text().strip()
         email = self.email_input.text().strip()
@@ -474,7 +492,6 @@ class UserEditDialog(QDialog):
         password = self.password_input.text()
         password_confirm = self.password_confirm_input.text()
         
-        # === Валидация ===
         errors = []
         
         if not username:
@@ -508,7 +525,6 @@ class UserEditDialog(QDialog):
             QMessageBox.critical(self, "Ошибка валидации", "\n".join(f"• {e}" for e in errors))
             return
         
-        # === Проверка уникальности username ===
         if username != self.original_username:
             check = QSqlQuery(self.db)
             check.prepare("SELECT id FROM krd.users WHERE username = :username AND id != :id")
@@ -519,15 +535,12 @@ class UserEditDialog(QDialog):
                 QMessageBox.critical(self, "Ошибка", "Пользователь с таким именем уже существует!")
                 return
         
-        # === Сохранение в БД ===
         try:
             query = QSqlQuery(self.db)
             
             if change_password:
-                # Хеширование пароля
                 hashed = bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt())
                 
-                # 🔥 UPDATE с паролем — БЕЗ updated_at (нет в схеме!)
                 query.prepare("""
                     UPDATE krd.users 
                     SET username = :username,
@@ -547,7 +560,6 @@ class UserEditDialog(QDialog):
                 query.bindValue(":id", self.user_id)
                 
             else:
-                # 🔥 UPDATE без пароля — БЕЗ updated_at (нет в схеме!)
                 query.prepare("""
                     UPDATE krd.users 
                     SET username = :username,
@@ -564,7 +576,6 @@ class UserEditDialog(QDialog):
                 query.bindValue(":is_active", is_active)
                 query.bindValue(":id", self.user_id)
             
-            # Отладочный лог
             self._log(f"SQL: {query.lastQuery()}", "SQL")
             self._log(f"boundValues: {query.boundValues()}", "DEBUG")
             
