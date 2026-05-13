@@ -5,6 +5,12 @@
 ✅ ИСПРАВЛЕНО: Убран столбец "Номер КРД", ID переименован в "№ КРД"
 ✅ ИСПРАВЛЕНО: Убран столбец "ID последнего места службы"
 ✅ ДОБАВЛЕНО: Столбец "Занято пользователем" (определяется через pg_locks)
+✅ ДОБАВЛЕНО: Автообновление статуса занятости каждую секунду (QTimer)
+✅ ДОБАВЛЕНО: Подпись "Не занято" для свободных записей
+✅ ДОБАВЛЕНО: Подробная диагностика проверки блокировок в консоль
+✅ ДОБАВЛЕНО: Отдельное меню "Отчеты" с пунктом "Отчеты по всем КРД"
+✅ ДОБАВЛЕНО: Меню "Администрирование" (Пользователи, Удаленные, Аудит)
+✅ УДАЛЕНО: Кнопки администрирования с Toolbar
 """
 
 import sys
@@ -17,7 +23,8 @@ from PyQt6.QtWidgets import (
     QGridLayout, QMenuBar, QStatusBar, QToolBar, QTableView, QPushButton, QDialog,
     QMessageBox, QMenu, QFileDialog, QAbstractItemView, QProgressDialog, QLineEdit
 )
-from PyQt6.QtCore import Qt, QPoint, QDate, QTimer
+# ✅ ДОБАВЛЕНО: Импорт QTime для получения текущего времени
+from PyQt6.QtCore import Qt, QPoint, QDate, QTime, QTimer
 from PyQt6.QtSql import QSqlDatabase, QSqlQueryModel, QSqlQuery, QSqlTableModel
 from PyQt6.QtGui import QAction, QFont, QContextMenuEvent, QIcon
 
@@ -76,9 +83,17 @@ class MainWindow(QMainWindow):
         self.user_id = user_info.get('id')
         self.current_krd_window = None
 
+        # ✅ ТАЙМЕР ДЛЯ ОБНОВЛЕНИЯ СТАТУСА ЗАНЯТОСТИ (КАЖДУЮ СЕКУНДУ)
+        self.lock_timer = QTimer()
+        self.lock_timer.timeout.connect(self.update_lock_status)
+        
         self.init_ui()
         self.load_krd_data()
         self.audit_logger.log_user_login()
+        
+        # Запускаем мониторинг блокировок
+        print("🟢 [DIAGNOSTIC] Запуск таймера проверки блокировок (интервал: 1000 мс)")
+        self.lock_timer.start(1000) # 1000 мс = 1 секунда
     
     def init_ui(self):
         self.create_menu_bar()
@@ -96,18 +111,22 @@ class MainWindow(QMainWindow):
     def create_menu_bar(self):
         menu_bar = self.menuBar()
         
+        # === МЕНЮ "ФАЙЛ" ===
         file_menu = menu_bar.addMenu("Файл")
-        generate_all_reports_action = QAction("📥 Сгенерировать отчеты по ВСЕМ КРД...", self)
-        generate_all_reports_action.setShortcut("Ctrl+E")
-        generate_all_reports_action.triggered.connect(self.on_generate_all_reports)
-        file_menu.addAction(generate_all_reports_action)
-        
-        file_menu.addSeparator()
         exit_action = QAction("Выход", self)
         exit_action.setShortcut("Ctrl+Q")
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
         
+        # === МЕНЮ "ОТЧЕТЫ" ===
+        reports_menu = menu_bar.addMenu("📊 Отчеты")
+        generate_all_reports_action = QAction("📥 Отчеты по всем КРД...", self)
+        generate_all_reports_action.setShortcut("Ctrl+E")
+        generate_all_reports_action.setToolTip("Сгенерировать отчеты по всем КРД в базе данных с выбором шаблона")
+        generate_all_reports_action.triggered.connect(self.on_generate_all_reports)
+        reports_menu.addAction(generate_all_reports_action)
+        
+        # === МЕНЮ "СПРАВОЧНИКИ" ===
         ref_menu = menu_bar.addMenu("📚 Справочники")
         all_refs_action = QAction("📋 Все справочники", self)
         all_refs_action.setShortcut("Ctrl+R")
@@ -121,16 +140,29 @@ class MainWindow(QMainWindow):
             act = QAction(name, self)
             act.triggered.connect(lambda checked, t=table: self.open_reference_editor(t))
             ref_menu.addAction(act)
+
+        # === МЕНЮ "АДМИНИСТРИРОВАНИЕ" (НОВОЕ) ===
+        admin_menu = menu_bar.addMenu("🛡️ Администрирование")
         
+        # Пункты для всех (или можно скрыть по роли, но обычно аудит видят все или только админы)
+        # Переносим сюда функции управления
+        
+        # Только для администраторов
         if self.user_info.get('role') == 'admin':
-            reports_menu = menu_bar.addMenu("📊 Отчеты")
-            reports_menu.addAction("⚙️ Управление шаблонами отчетов", self.on_manage_templates)
-            reports_menu.addSeparator()
-            reports_menu.addAction("Аудит действий пользователей", self.open_user_audit_window)
+            admin_menu.addAction("👥 Управление пользователями", self.open_user_management)
+            admin_menu.addAction("📁 Удаленные записи", self.open_deleted_records_window)
+            admin_menu.addAction("📋 Аудит действий пользователей", self.open_user_audit_window)
+            admin_menu.addAction("⚙️ Управление шаблонами отчетов", self.on_manage_templates)
+        else:
+            # Если нужно показать что-то обычным пользователям, добавьте сюда
+            admin_menu.addAction("📋 Аудит действий пользователей", self.open_user_audit_window)
+            admin_menu.setEnabled(False) # Пример: отключить меню для не-админов
         
+        # === МЕНЮ "НАСТРОЙКИ" ===
         settings_menu = self.menuBar().addMenu("⚙️ Настройки")
         settings_menu.addAction("🎨 Тема оформления", self.open_theme_settings)
         
+        # === МЕНЮ "СПРАВКА" ===
         help_menu = menu_bar.addMenu("Справка")
         help_menu.addAction("О программе", self.show_about_dialog)
     
@@ -145,14 +177,10 @@ class MainWindow(QMainWindow):
         toolbar.addAction(self.delete_krd_action)
         
         toolbar.addSeparator()
-        toolbar.addAction("📥 Отчеты по всем КРД", self.on_generate_all_reports)
+        # Оставляем только быстрый доступ к справочникам
         toolbar.addAction("📚 Справочники", self.open_reference_editor)
         
-        if self.user_info.get('role') == 'admin':
-            toolbar.addSeparator()
-            toolbar.addAction("📁 Удаленные записи", self.open_deleted_records_window)
-            toolbar.addAction("👥 Управление пользователями", self.open_user_management)
-            toolbar.addAction("📋 Аудит пользователей", self.open_user_audit_window)
+        # Кнопки администрирования удалены отсюда и перенесены в меню
     
     def create_status_bar(self):
         self.statusBar().showMessage(f"Пользователь: {self.user_info['username']} | Роль: {self.user_info['role']}")
@@ -257,7 +285,11 @@ class MainWindow(QMainWindow):
                 COALESCE(s.name, '') AS "Имя",
                 COALESCE(s.patronymic, '') AS "Отчество",
                 COALESCE(st.name, 'Неизвестен') AS "Статус",
-                COALESCE(lk.usename, '') AS "Занято пользователем"
+                -- ✅ ИЗМЕНЕНО: Теперь показываем application_name (логин программы)
+                CASE 
+                    WHEN lk.application_name IS NOT NULL THEN lk.application_name
+                    ELSE '🟢 Не занято'
+                END AS "Занято пользователем"
             FROM krd.krd k
             LEFT JOIN krd.social_data s ON k.id = s.krd_id
             LEFT JOIN krd.statuses st ON k.status_id = st.id
@@ -266,12 +298,14 @@ class MainWindow(QMainWindow):
                 AND pl.objid = k.id 
                 AND pl.objsubid = 1 
                 AND pl.granted = true
-            LEFT JOIN pg_stat_activity lk ON lk.pid = pl.pid AND lk.usename != current_user
+            LEFT JOIN pg_stat_activity lk ON lk.pid = pl.pid
             WHERE k.is_deleted = FALSE
             ORDER BY {sort_field} {sort_order}
         """
 
     def load_krd_data(self):
+        """Загрузка данных КРД в таблицу"""
+        print("\n🔄 [DIAGNOSTIC] ===== ЗАГРУЗКА ДАННЫХ КРД =====")
         query = QSqlQuery(self.db)
         sort_field = self.sort_column_names.get(self.sort_column, "k.id")
         sort_order = "ASC" if self.sort_order == Qt.SortOrder.AscendingOrder else "DESC"
@@ -302,9 +336,47 @@ class MainWindow(QMainWindow):
                 self.found_count_label.setText(f"🔍 Найдено: {count} записей по запросу \"{self.search_query}\"")
             else:
                 self.found_count_label.setText(f"📊 Всего записей: {count}")
+            print(f"✅ [DIAGNOSTIC] Загружено {count} записей")
         else:
-            print(f"⚠️ Ошибка загрузки данных: {query.lastError().text()}")
+            print(f"⚠️ [DIAGNOSTIC] Ошибка загрузки данных: {query.lastError().text()}")
             self.found_count_label.setText("⚠️ Ошибка загрузки данных")
+
+    def update_lock_status(self):
+        """Слот для обновления только статуса занятости (вызывается таймером)"""
+        # ✅ ИСПРАВЛЕНО: Используем QTime вместо QDate
+        print(f"\n⏰ [{QTime.currentTime().toString('HH:mm:ss')}] [DIAGNOSTIC] Проверка блокировок...")
+        
+        # 1. Проверяем глобальные advisory блокировки в базе
+        global_locks_query = QSqlQuery(self.db)
+        global_locks_query.prepare("""
+            SELECT pl.objid, lk.usename, lk.pid 
+            FROM pg_locks pl
+            LEFT JOIN pg_stat_activity lk ON lk.pid = pl.pid
+            WHERE pl.locktype = 'advisory' AND pl.granted = true
+        """)
+        
+        if global_locks_query.exec():
+            active_locks = []
+            while global_locks_query.next():
+                objid = global_locks_query.value(0)
+                username = global_locks_query.value(1)
+                active_locks.append(f"ID={objid} (User: {username})")
+            
+            if active_locks:
+                print(f"🔒 [DIAGNOSTIC] Глобально активных advisory блокировок в БД: {len(active_locks)}")
+                for lock in active_locks:
+                    print(f"   - {lock}")
+            else:
+                print(f"🟢 [DIAGNOSTIC] Глобально активных advisory блокировок нет.")
+        else:
+            print(f"⚠️ [DIAGNOSTIC] Ошибка проверки глобальных блокировок: {global_locks_query.lastError().text()}")
+
+        # 2. Обновляем таблицу (стандартная процедура)
+        current_count = self.table_model_krd.rowCount()
+        # print(f"📊 [DIAGNOSTIC] Текущее записей в таблице: {current_count}") # Можно раскомментировать для отладки
+        
+        self.load_krd_data()
+
     
     def on_selection_changed(self, selected, deselected):
         self.delete_krd_action.setEnabled(self.krd_table_view.selectionModel().hasSelection())
@@ -313,12 +385,58 @@ class MainWindow(QMainWindow):
         index = self.krd_table_view.indexAt(position)
         if not index.isValid(): return
         
+        model = self.table_model_krd
+        krd_id = model.data(model.index(index.row(), 0))
+        
         menu = QMenu(self)
         menu.addAction("Открыть", lambda: self.on_krd_double_clicked(index))
-        menu.addAction("Удалить КРД", self.delete_selected_krd)
         menu.addSeparator()
-        menu.addAction("📥 Сгенерировать отчеты по ВСЕМ КРД", self.on_generate_all_reports)
+        
+        # --- НОВОЕ: Меню смены статуса ---
+        status_menu = menu.addMenu("🔄 Сменить статус")
+        self._fill_status_menu(status_menu, krd_id)
+        # ---------------------------------
+        
+        menu.addSeparator()
+        menu.addAction("Удалить КРД", self.delete_selected_krd)
         menu.exec(self.krd_table_view.mapToGlobal(position))
+
+    def _fill_status_menu(self, menu, krd_id):
+        """Заполняет меню доступными статусами из БД"""
+        query = QSqlQuery(self.db)
+        query.exec("SELECT id, name FROM krd.statuses ORDER BY id")
+        
+        while query.next():
+            status_id = query.value(0)
+            status_name = query.value(1)
+            
+            action = QAction(status_name, self)
+            action.triggered.connect(lambda checked=False, sid=status_id, name=status_name: self.update_krd_status(krd_id, sid, name))
+            menu.addAction(action)
+
+    def update_krd_status(self, krd_id, new_status_id, new_status_name):
+        """Метод обновления статуса в БД"""
+        if not krd_id: return
+        
+        reply = QMessageBox.question(self, "Смена статуса", 
+            f"Установить статус «{new_status_name}» для КРД №{krd_id}?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No)
+            
+        if reply == QMessageBox.StandardButton.Yes:
+            try:
+                q = QSqlQuery(self.db)
+                q.prepare("UPDATE krd.krd SET status_id = :sid WHERE id = :id")
+                q.bindValue(":sid", new_status_id)
+                q.bindValue(":id", krd_id)
+                
+                if q.exec():
+                    QMessageBox.information(self, "Успех", f"Статус изменен на «{new_status_name}»")
+                    self.load_krd_data() 
+                    self.audit_logger.log_action('STATUS_CHANGE', 'krd', record_id=krd_id, description=f'Статус изменен на {new_status_name}')
+                else:
+                    QMessageBox.critical(self, "Ошибка", q.lastError().text())
+            except Exception as e:
+                QMessageBox.critical(self, "Ошибка", str(e))
     
     def open_reference_editor(self, initial_table=None):
         try:
@@ -438,6 +556,8 @@ class MainWindow(QMainWindow):
     
     def closeEvent(self, event):
         self.audit_logger.log_user_logout()
+        print("⏹️ [DIAGNOSTIC] Остановка таймера проверки блокировок")
+        self.lock_timer.stop()
         super().closeEvent(event)
     
     def open_user_audit_window(self):

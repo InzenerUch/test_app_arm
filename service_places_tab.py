@@ -1,6 +1,7 @@
 """
 Вкладка мест службы
 Только таблица с кнопками добавления/удаления
+✅ ИСПРАВЛЕНО: Отображение названий из справочников (Военное управление, Гарнизон, Должность)
 """
 
 from PyQt6.QtWidgets import (
@@ -9,7 +10,6 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtSql import QSqlQuery, QSqlQueryModel
 from PyQt6.QtCore import Qt, pyqtSignal 
-from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 
 from service_place_dialog import ServicePlaceDialog
@@ -80,25 +80,29 @@ class ServicePlacesTab(QWidget):
         layout.addLayout(button_layout)
     
     def load_data(self):
-        """Загрузка данных из базы"""
+        """Загрузка данных из базы с JOIN справочников"""
         query = QSqlQuery(self.db)
+        # ✅ ИЗМЕНЕНО: Добавлены LEFT JOIN для получения названий вместо ID
         query.prepare("""
             SELECT 
-                id,
-                place_name as "Место службы",
-                military_unit_id as "Военное управление",
-                garrison_id as "Гарнизон",
-                position_id as "Должность",
-                place_contacts as "Контакты"
-            FROM krd.service_places
-            WHERE krd_id = ?
-            ORDER BY id DESC
+                s.id,
+                s.place_name as "Место службы",
+                m.name as "Военное управление",
+                g.name as "Гарнизон",
+                p.name as "Должность",
+                s.place_contacts as "Контакты"
+            FROM krd.service_places s
+            LEFT JOIN krd.military_units m ON s.military_unit_id = m.id
+            LEFT JOIN krd.garrisons g ON s.garrison_id = g.id
+            LEFT JOIN krd.positions p ON s.position_id = p.id
+            WHERE s.krd_id = ?
+            ORDER BY s.id DESC
         """)
         query.addBindValue(self.krd_id)
         query.exec()
         self.places_model.setQuery(query)
         
-        # Скрыть ID колонку
+        # Скрыть ID колонку (первая колонка с индексом 0)
         self.places_table.setColumnHidden(0, True)
     
     def on_add_place(self):
@@ -122,14 +126,14 @@ class ServicePlacesTab(QWidget):
         """Обработчик двойного клика по записи"""
         row = index.row()
         
-        # Получить ID места службы из скрытой колонки
+        # Получить ID места службы из скрытой колонки (индекс 0)
         id_index = self.places_model.index(row, 0)
         place_id = self.places_model.data(id_index)
         
         if not place_id:
             return
         
-        # Загрузить полные данные места службы
+        # Загрузить полные данные места службы (с ID для диалога)
         place_data = self.load_place_data(place_id)
         
         if place_data:
@@ -159,7 +163,7 @@ class ServicePlacesTab(QWidget):
             QMessageBox.warning(self, "Предупреждение", "⚠️ Выберите место службы для удаления")
             return
         
-        # Получить ID места службы
+        # Получить ID места службы из модели (колонка 0 скрыта, но данные доступны)
         row = selected_indexes[0].row()
         id_index = self.places_model.index(row, 0)
         place_id = self.places_model.data(id_index)
@@ -167,8 +171,8 @@ class ServicePlacesTab(QWidget):
         if not place_id:
             return
         
-        # Получить информацию о месте службы для отображения в подтверждении
-        place_name_index = self.places_model.index(row, 1)  # Колонка "Место службы"
+        # Получить информацию о месте службы для отображения в подтверждении (колонка 1 - "Место службы")
+        place_name_index = self.places_model.index(row, 1)
         place_name = self.places_model.data(place_name_index)
         
         # Подтверждение удаления
@@ -208,8 +212,9 @@ class ServicePlacesTab(QWidget):
                 QMessageBox.critical(self, "Ошибка", f"❌ Ошибка удаления места службы:\n{str(e)}")
     
     def load_place_data(self, place_id):
-        """Загрузка полных данных места службы для редактирования"""
+        """Загрузка полных данных места службы для редактирования (нужны ID, а не названия)"""
         query = QSqlQuery(self.db)
+        # Здесь мы выбираем именно ID, чтобы диалог мог правильно выбрать значение в ComboBox
         query.prepare("""
             SELECT 
                 id,
