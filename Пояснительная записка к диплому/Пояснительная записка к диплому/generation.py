@@ -1,154 +1,322 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Генератор продолжения раздела 2.4 "Проектирование базы данных"
+Оформление согласно методическим указаниям (ГОСТ)
+Исправлена ошибка WD_LINE_SPACING
+"""
+
 from docx import Document
-from docx.shared import Inches, Pt, Cm
-from docx.enum.text import WD_ALIGN_PARAGRAPH
-from docx.enum.style import WD_STYLE_TYPE
+from docx.shared import Pt, Cm, RGBColor
+from docx.enum.text import WD_ALIGN_PARAGRAPH, WD_LINE_SPACING
 from docx.oxml.ns import qn
 from docx.oxml import OxmlElement
-import os
+from datetime import datetime
 
-def create_architecture_section():
-    """Создание раздела о проектировании архитектуры АРМ"""
+
+def setup_document():
+    """Настройка документа согласно методичке"""
     doc = Document()
     
-    # Настройка стилей
+    # Настройка стиля Normal
     style = doc.styles['Normal']
     font = style.font
     font.name = 'Times New Roman'
     font.size = Pt(14)
+    font.color.rgb = RGBColor(0, 0, 0)
     
-    # Добавление заголовка раздела
-    heading = doc.add_heading('2.2 Архитектура программного продукта', level=2)
-    heading.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    # ✅ ИСПРАВЛЕНО: Используем Enum вместо float 1.5
+    style.paragraph_format.line_spacing_rule = WD_LINE_SPACING.ONE_POINT_FIVE
+    style.paragraph_format.space_after = Pt(0)
+    style.paragraph_format.space_before = Pt(0)
     
-    doc.add_paragraph()  # Пустая строка
+    # Отступ первой строки 1.25 см
+    style.paragraph_format.first_line_indent = Cm(1.25)
+    style.paragraph_format.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
     
-    # Основной текст
-    text1 = """Проектирование архитектуры автоматизированного рабочего места (АРМ) сотрудника отдела дознания осуществлялось с учётом требований к отказоустойчивости, информационной безопасности, масштабируемости и удобства сопровождения. В качестве базовой парадигмы выбрана трёхуровневая клиент-серверная архитектура с адаптацией паттерна Model-View-Controller (MVC). Данное решение обеспечивает строгое разделение ответственности между слоями, минимизирует связность компонентов и упрощает независимое тестирование каждого модуля системы."""
+    # Настройка для кириллицы
+    element = style.element.get_or_add_rPr()
+    run_font = element.get_or_add_rFonts()
+    run_font.set(qn('w:eastAsia'), 'Times New Roman')
     
-    p1 = doc.add_paragraph(text1)
-    p1.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    p1.paragraph_format.first_line_indent = Cm(1.25)
-    p1.paragraph_format.line_spacing = 1.5
+    return doc
+
+
+def add_heading(doc, text, level=1):
+    """Добавление заголовка раздела"""
+    p = doc.add_paragraph()
+    p.paragraph_format.first_line_indent = Cm(1.25)
+    p.paragraph_format.space_before = Pt(12)
+    p.paragraph_format.space_after = Pt(6)
     
-    doc.add_paragraph()  # Пустая строка
+    run = p.add_run(text)
+    run.bold = True
+    run.font.name = 'Times New Roman'
+    run.font.size = Pt(14)
+    run.font.color.rgb = RGBColor(0, 0, 0)
     
-    # Рисунок 2.2 - Схема архитектуры
-    doc.add_paragraph('Рисунок 2.2 – Схема архитектуры приложения (клиент → логика → БД)', style='Caption')
-    doc.add_paragraph()
+    return p
+
+
+def add_text(doc, text):
+    """Добавление обычного текста"""
+    p = doc.add_paragraph(text)
+    p.paragraph_format.first_line_indent = Cm(1.25)
+    return p
+
+
+def add_list_item(doc, text, bullet=True):
+    """Добавление элемента списка"""
+    p = doc.add_paragraph()
+    p.paragraph_format.first_line_indent = Cm(1.25)
     
-    # Здесь можно добавить изображение архитектуры
-    # if os.path.exists('architecture_diagram.png'):
-    #     doc.add_picture('architecture_diagram.png', width=Inches(6))
-    #     doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    if bullet:
+        run = p.add_run('– ')
+        run.bold = False
+    else:
+        run = p.add_run('   ')
+        
+    run_text = p.add_run(text)
+    run_text.font.name = 'Times New Roman'
+    run_text.font.size = Pt(14)
     
-    doc.add_paragraph()
+    return p
+
+
+def set_cell_border(cell, **kwargs):
+    """Установка границ для ячейки таблицы"""
+    tc = cell._tc
+    tcPr = tc.get_or_add_tcPr()
     
-    # Текст про трёхуровневую архитектуру
-    text2 = """Трёхуровневая архитектура является стандартом де-факто для корпоративных информационных систем, обрабатывающих конфиденциальные данные. В рамках проекта архитектура разделена на три изолированных логических уровня: уровень представления (Presentation Layer), уровень бизнес-логики (Business Logic Layer) и уровень данных (Data Access Layer). Взаимодействие между уровнями осуществляется через строго определённые интерфейсы, что исключает риски несанкционированного доступа и SQL-инъекций."""
+    tcBorders = tcPr.first_child_found_in('w:tcBorders')
+    if tcBorders is None:
+        tcBorders = OxmlElement('w:tcBorders')
+        tcPr.append(tcBorders)
     
-    p2 = doc.add_paragraph(text2)
-    p2.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    p2.paragraph_format.first_line_indent = Cm(1.25)
-    p2.paragraph_format.line_spacing = 1.5
+    for edge in ('start', 'left', 'top', 'bottom', 'end', 'right'):
+        edge_data = kwargs.get(edge)
+        if edge_data:
+            tag = f'w:{edge}'
+            element = tcBorders.find(qn(tag))
+            if element is None:
+                element = OxmlElement(tag)
+                tcBorders.append(element)
+            
+            for key in ['val', 'sz', 'space', 'color']:
+                if key in edge_data:
+                    element.set(qn(f'w:{key}'), str(edge_data[key]))
+
+
+def create_formatted_table(doc, table_data, caption):
+    """Создание таблицы с форматированием согласно ГОСТ"""
+    # Добавляем подпись таблицы
+    caption_para = doc.add_paragraph()
+    caption_run = caption_para.add_run(caption)
+    caption_run.bold = True
+    caption_para.alignment = WD_ALIGN_PARAGRAPH.CENTER
+    caption_para.paragraph_format.space_after = Pt(6)
     
-    doc.add_paragraph()
+    # Создаем таблицу
+    num_columns = len(table_data[0])
+    table = doc.add_table(rows=1, cols=num_columns)
+    table.style = 'Table Grid'
+    table.autofit = False
     
-    text3 = """Уровень представления реализован на базе фреймворка PyQt6 и инкапсулирует графический интерфейс пользователя, включая визуализацию данных, мгновенную валидацию ввода и обработку событий. Уровень бизнес-логики содержит алгоритмы генерации документов, экспорта в Excel, автодополнения полей и ведения журнала аудита. Уровень данных реализован на базе PostgreSQL 16 и отвечает за персистентное хранение, ACID-транзакции и криптографическую защиту."""
+    # Настраиваем ширину колонок
+    for i, col in enumerate(table.columns):
+        if i == 0:
+            col.width = Cm(3.5)
+        elif i == 1:
+            col.width = Cm(3.0)
+        elif i == 2:
+            col.width = Cm(3.5)
+        else:
+            col.width = Cm(6.0)
     
-    p3 = doc.add_paragraph(text3)
-    p3.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    p3.paragraph_format.first_line_indent = Cm(1.25)
-    p3.paragraph_format.line_spacing = 1.5
+    # Заполняем заголовок таблицы
+    hdr_cells = table.rows[0].cells
+    for i, heading in enumerate(table_data[0]):
+        p = hdr_cells[i].paragraphs[0]
+        run = p.add_run(heading)
+        run.bold = True
+        run.font.size = Pt(12)
+        p.alignment = WD_ALIGN_PARAGRAPH.CENTER
+        
+        set_cell_border(hdr_cells[i], 
+                       top={'val': 'single', 'sz': 4},
+                       bottom={'val': 'single', 'sz': 4},
+                       left={'val': 'single', 'sz': 4},
+                       right={'val': 'single', 'sz': 4})
     
-    doc.add_paragraph()
+    # Заполняем данными
+    for row_data in table_data[1:]:
+        row_cells = table.add_row().cells
+        for i, item in enumerate(row_data):
+            p = row_cells[i].paragraphs[0]
+            run = p.add_run(str(item))
+            run.font.size = Pt(12)
+            p.alignment = WD_ALIGN_PARAGRAPH.CENTER if i < 3 else WD_ALIGN_PARAGRAPH.LEFT
+            
+            set_cell_border(row_cells[i],
+                           top={'val': 'single', 'sz': 4},
+                           bottom={'val': 'single', 'sz': 4},
+                           left={'val': 'single', 'sz': 4},
+                           right={'val': 'single', 'sz': 4})
     
-    text4 = """Адаптация MVC в PyQt6 учитывает особенности Qt-SQL модулей. В роли Model выступают классы QSqlQueryModel и QSqlTableModel, обеспечивающие ленивую загрузку данных и автоматическую синхронизацию состояний. Представление (View) использует стандартные компоненты PyQt6: QTableView для списков, QTabWidget для навигации, QDialog для модальных окон. Контроллеры инкапсулированы в классах диалогов, обрабатывают события, валидируют данные и управляют транзакциями."""
+    doc.add_paragraph().paragraph_format.space_after = Pt(12)
+    return table
+
+
+def generate_section_continuation_docx():
+    """Генерация продолжения раздела 2.4 в формате DOCX"""
+    doc = setup_document()
     
-    p4 = doc.add_paragraph(text4)
-    p4.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    p4.paragraph_format.first_line_indent = Cm(1.25)
-    p4.paragraph_format.line_spacing = 1.5
+    # Вводный текст
+    add_text(doc, 
+        "Помимо основных сущностей предметной области (КРД и связанные данные), "
+        "информационная модель включает таблицы для управления процессами отчётности, "
+        "персонализации интерфейса и контроля безопасности. Данные таблицы обеспечивают "
+        "гибкость настройки системы под нужды конкретного сотрудника и соответствие "
+        "требованиям аудита."
+    )
     
-    doc.add_paragraph()
+    # --- Таблица 2.14: Шаблоны отчетов ---
+    table_2_14_data = [
+        ['Поле', 'Тип', 'Ограничения', 'Описание'],
+        ['id', 'SERIAL', 'PK', 'Уникальный ID шаблона'],
+        ['name', 'VARCHAR(255)', 'NOT NULL', 'Название шаблона'],
+        ['template_type', 'VARCHAR(50)', "DEFAULT 'excel'", 'Тип экспорта'],
+        ['config_json', 'JSONB', 'NOT NULL', 'Конфигурация полей отчета'],
+        ['is_deleted', 'BOOLEAN', 'DEFAULT FALSE', 'Мягкое удаление'],
+    ]
+    create_formatted_table(doc, table_2_14_data, "Таблица 2.14 – Структура таблицы krd.report_templates")
     
-    text5 = """Информационная модель данных, лежащая в основе архитектуры системы, формализована в нотации IDEF1X. Диаграммы отображают трансформацию процессов обработки карточек розыска (КРД) при переходе от ручного учёта к автоматизированному рабочему месту."""
+    add_text(doc,
+        "Таблица krd.report_templates хранит пользовательские конфигурации для массового "
+        "экспорта данных. Ключевым элементом является поле config_json (тип JSONB), которое "
+        "сохраняет структуру отчёта: список включенных секций и конкретных полей."
+    )
     
-    p5 = doc.add_paragraph(text5)
-    p5.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    p5.paragraph_format.first_line_indent = Cm(1.25)
-    p5.paragraph_format.line_spacing = 1.5
+    # --- Таблица 2.15: Сгенерированные документы ---
+    table_2_15_data = [
+        ['Поле', 'Тип', 'Ограничения', 'Описание'],
+        ['id', 'SERIAL', 'PK', 'Уникальный ID записи'],
+        ['krd_id', 'INTEGER', 'FK → krd.id', 'Ссылка на карточку розыска'],
+        ['template_id', 'INTEGER', 'FK → report_templates', 'Использованный шаблон'],
+        ['document_data', 'BYTEA', 'NULL', 'Бинарные данные файла (.docx/.xlsx)'],
+        ['file_name', 'VARCHAR(255)', 'NULL', 'Имя файла'],
+        ['generated_at', 'TIMESTAMP', 'DEFAULT NOW()', 'Дата генерации'],
+    ]
+    create_formatted_table(doc, table_2_15_data, "Таблица 2.15 – Структура таблицы krd.generated_documents")
     
-    doc.add_paragraph()
+    add_text(doc,
+        "Таблица krd.generated_documents реализует функцию архивации созданных документов. "
+        "Файлы хранятся в бинарном виде (BYTEA), что гарантирует атомарность транзакций "
+        "и упрощает резервное копирование."
+    )
     
-    # Диаграмма вариантов использования
-    doc.add_paragraph('Рисунок 2.5 – Диаграмма вариантов использования системы', style='Caption')
-    doc.add_paragraph()
+    # --- Таблица 2.16: Настройки пользователя ---
+    table_2_16_data = [
+        ['Поле', 'Тип', 'Ограничения', 'Описание'],
+        ['id', 'SERIAL', 'PK', 'Уникальный ID настроек'],
+        ['user_id', 'INTEGER', 'FK → users.id', 'Привязка к пользователю'],
+        ['theme_name', 'VARCHAR(50)', "DEFAULT 'light'", 'Название темы'],
+        ['config_json', 'JSONB', 'NULL', 'JSON с параметрами UI (шрифт, цвета)'],
+    ]
+    create_formatted_table(doc, table_2_16_data, "Таблица 2.16 – Структура таблицы krd.user_settings")
     
-    # Вставка диаграммы вариантов использования
-    if os.path.exists('use_case_diagram.png'):
-        doc.add_picture('use_case_diagram.png', width=Inches(6.5))
-        doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    add_text(doc,
+        "Таблица krd.user_settings отвечает за персонализацию рабочего места оператора. "
+        "Поле config_json хранит сериализованные настройки интерфейса."
+    )
     
-    doc.add_paragraph()
+    # --- Таблица 2.17: Пользовательские темы ---
+    table_2_17_data = [
+        ['Поле', 'Тип', 'Ограничения', 'Описание'],
+        ['id', 'SERIAL', 'PK', 'Уникальный ID темы'],
+        ['user_id', 'INTEGER', 'FK → users.id', 'Владелец темы'],
+        ['theme_name', 'VARCHAR(100)', 'NOT NULL', 'Название темы'],
+        ['config_json', 'JSONB', 'NOT NULL', 'Цветовая схема (HEX коды)'],
+        ['is_active', 'BOOLEAN', 'DEFAULT FALSE', 'Активная тема сейчас'],
+    ]
+    create_formatted_table(doc, table_2_17_data, "Таблица 2.17 – Структура таблицы krd.user_themes")
     
-    text6 = """Диаграмма вариантов использования (Рисунок 2.5) определяет границы системы и роли пользователей. Основной актор «Пользователь» (Дознаватель) взаимодействует с системой для ведения карточек розыска (КРД), работы с адресами проживания, местами прохождения службы, входящими поручениями и эпизодами СОЧ, а также создания отчётов. Актор «Администратор» обладает расширенными функциональными возможностями: управление пользователями системы (добавление, редактирование, активация, удаление), просмотр журнала аудита действий пользователей, работа с удалёнными записями (просмотр и восстановление). Все операции начинаются с авторизации в системе и включают настройку интерфейса программы."""
+    add_text(doc,
+        "Таблица krd.user_themes позволяет создавать неограниченное количество визуальных "
+        "тем оформления. Конфигурация цветов хранится в JSONB."
+    )
     
-    p6 = doc.add_paragraph(text6)
-    p6.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    p6.paragraph_format.first_line_indent = Cm(1.25)
-    p6.paragraph_format.line_spacing = 1.5
+    # --- Таблица 2.18: Сессии пользователей ---
+    table_2_18_data = [
+        ['Поле', 'Тип', 'Ограничения', 'Описание'],
+        ['id', 'SERIAL', 'PK', 'Уникальный ID сессии'],
+        ['user_id', 'INTEGER', 'FK → users.id', 'Владелец сессии'],
+        ['login_time', 'TIMESTAMP', 'NOT NULL', 'Время входа'],
+        ['logout_time', 'TIMESTAMP', 'NULL', 'Время выхода'],
+        ['is_active', 'BOOLEAN', 'DEFAULT TRUE', 'Статус сессии'],
+    ]
+    create_formatted_table(doc, table_2_18_data, "Таблица 2.18 – Структура таблицы krd.user_sessions")
     
-    doc.add_paragraph()
+    add_text(doc,
+        "Таблица krd.user_sessions используется для контроля безопасности. Она фиксирует "
+        "каждое успешное вхождение в систему для выявления аномальной активности."
+    )
     
-    # Диаграмма активностей
-    doc.add_paragraph('Рисунок 2.6 – Диаграмма активностей создания и сохранения КРД', style='Caption')
-    doc.add_paragraph()
+    # Выводы по разделу
+    add_heading(doc, "2.4.4 Выводы по проектированию базы данных", level=2)
     
-    # if os.path.exists('activity_diagram.png'):
-    #     doc.add_picture('activity_diagram.png', width=Inches(6))
-    #     doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    add_list_item(doc, 
+        "Разработана полноценная реляционная схема krd, состоящая из 26 таблиц. "
+        "Структура покрывает все требования ТЗ: от учёта персональных данных до гибкой "
+        "настройки отчётности и интерфейса."
+    )
     
-    doc.add_paragraph()
+    add_list_item(doc, 
+        "Активное использование типа данных JSONB (в таблицах field_mappings, "
+        "report_templates, user_settings) позволило реализовать гибкие конфигурации "
+        "без изменения структуры БД (DDL-операций) при обновлении функционала."
+    )
     
-    text7 = """Диаграмма активностей (Рисунок 2.6) визуализирует алгоритм создания и сохранения новой карточки розыска. Процесс начинается с ввода данных в интерфейс, после чего система выполняет автоматическую проверку обязательных полей и соответствие форматов регулярным выражениям. В случае ошибок транзакция отклоняется, пользователю выводится структурированное сообщение. При успешной валидации данные записываются в БД в рамках единой транзакции BEGIN TRANSACTION, одновременно создаётся запись в таблице audit_log с типом действия CREATE и фиксацией новых значений. Транзакция завершается командой COMMIT, что гарантирует атомарность и отсутствие «висячих» состояний в базе данных."""
+    add_list_item(doc, 
+        "Реализован механизм мягкого удаления (is_deleted) для всех критичных таблиц. "
+        "Это обеспечивает сохранность истории операций и возможность восстановления "
+        "ошибочно удалённых записей администратором."
+    )
     
-    p7 = doc.add_paragraph(text7)
-    p7.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    p7.paragraph_format.first_line_indent = Cm(1.25)
-    p7.paragraph_format.line_spacing = 1.5
+    add_list_item(doc, 
+        "Бинарные данные (фотографии, сканы документов, сгенерированные файлы) хранятся "
+        "в полях типа BYTEA. Это упрощает процедуру резервного копирования и гарантирует "
+        "атомарность хранения файла вместе с его метаданными."
+    )
     
-    doc.add_paragraph()
+    add_list_item(doc, 
+        "Спроектирована система аудита (audit_log) и контроля сессий (user_sessions), "
+        "обеспечивающая соответствие требованиям информационной безопасности."
+    )
     
-    # Диаграмма последовательности
-    doc.add_paragraph('Рисунок 2.7 – Диаграмма последовательности сохранения данных', style='Caption')
-    doc.add_paragraph()
+    return doc
+
+
+def main():
+    """Основная функция"""
+    doc = generate_section_continuation_docx()
     
-    # if os.path.exists('sequence_diagram.png'):
-    #     doc.add_picture('sequence_diagram.png', width=Inches(6))
-    #     doc.paragraphs[-1].alignment = WD_ALIGN_PARAGRAPH.CENTER
+    # Сохранение файла
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    filename = f"section_2.4_schema_part2_{timestamp}.docx"
     
-    doc.add_paragraph()
+    doc.save(filename)
     
-    text8 = """Диаграмма последовательности (Рисунок 2.7) детализирует временное взаимодействие слоёв MVC при сохранении записи. Пользователь инициирует действие в UI (View), которое передаёт событие Контроллеру. Контроллер выполняет бизнес-логику валидации и формирует подготовленный SQL-запрос (PREPARE), передавая параметры через bindValue для предотвращения SQL-инъекций. СУБД выполняет INSERT внутри транзакции и возвращает сгенерированный id. После успешного сохранения контроллер вызывает метод логгера аудита и отправляет UI подтверждение об успешном завершении. При возникновении ошибки на любом этапе вызывается ROLLBACK, интерфейс остаётся в стабильном состоянии, а пользователю выводится сообщение с кодом исключения СУБД."""
-    
-    p8 = doc.add_paragraph(text8)
-    p8.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    p8.paragraph_format.first_line_indent = Cm(1.25)
-    p8.paragraph_format.line_spacing = 1.5
-    
-    doc.add_paragraph()
-    
-    # Заключительный абзац
-    text9 = """Таким образом, спроектированная архитектура обеспечивает высокую модульность, безопасность данных и прозрачность процессуальных действий. Использование трёхуровневой модели, паттерна MVC и стандартизированных диаграмм UML/IDEF1X позволяет эффективно сопровождать систему, масштабировать её компоненты и гарантировать соответствие требованиям ФЗ-152 «О персональных данных» и приказам ФСТЭК РФ по защите информации в изолированных информационных системах."""
-    
-    p9 = doc.add_paragraph(text9)
-    p9.alignment = WD_ALIGN_PARAGRAPH.JUSTIFY
-    p9.paragraph_format.first_line_indent = Cm(1.25)
-    p9.paragraph_format.line_spacing = 1.5
-    
-    # Сохранение документа
-    doc.save('section_2_2_architecture.docx')
-    print("Документ section_2_2_architecture.docx успешно создан!")
+    print(f"✅ Раздел 2.4 (продолжение) сгенерирован и сохранён в файл: {filename}")
+    print(f"\n{'='*70}")
+    print("ИНСТРУКЦИЯ:")
+    print('='*70)
+    print("1. Откройте сгенерированный файл в Microsoft Word")
+    print("2. Проверьте форматирование таблиц и текста")
+    print("3. При необходимости добавьте перекрёстные ссылки")
+    print("4. Вставьте этот раздел после описания основных таблиц (2.4.3)")
+    print(f"{'='*70}\n")
+
 
 if __name__ == "__main__":
-    create_architecture_section()
+    main()
