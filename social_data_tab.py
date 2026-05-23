@@ -1,33 +1,34 @@
-"""
-Вкладка социально-демографических данных с поддержкой изображений
-✅ ВКЛЮЧЕНО: Автосохранение (Debounce 400мс), Валидация, Автодополнение, Кнопки настроек справочников
-"""
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QScrollArea, QGroupBox, QGridLayout, QHBoxLayout,
     QLineEdit, QTextEdit, QDateEdit, QComboBox, QLabel, QPushButton, QFileDialog,
     QMessageBox, QFrame, QDialog
 )
 from PyQt6.QtCore import Qt, QDate, QByteArray, QTimer, QRegularExpression
-from PyQt6.QtGui import QPixmap, QFont, QRegularExpressionValidator, QValidator
+from PyQt6.QtGui import QPixmap, QFont, QRegularExpressionValidator
 from PyQt6.QtSql import QSqlQuery
 import os
 import traceback
 
 from autocomplete_helper import AutocompleteHelper
 from reference_editor_dialog import ReferenceEditorDialog
-
+# 🔒 ИМПОРТ ВСПОМОГАТЕЛЬНЫХ ФУНКЦИЙ ДЛЯ РОЛИ ЧИТАТЕЛЯ
+from ui_helpers import is_reader, apply_readonly_mode
 
 class SocialDataTab(QWidget):
     """Вкладка социально-демографических данных с поддержкой изображений"""
     
-    def __init__(self, krd_id, db_connection, audit_logger=None):
+    def __init__(self, krd_id, db_connection, audit_logger=None, user_info=None):
         super().__init__()
         self.krd_id = krd_id
         self.db = db_connection
         self.audit_logger = audit_logger
+        self.user_info = user_info or {}
+        
+        # 🔒 Флаг режима чтения
+        self.is_read_only = is_reader(self.user_info)
+        
         self.record = None
         self.autocomplete_helper = AutocompleteHelper(db_connection)
-        
         self.photo_paths = {
             'civilian': None, 'military_headgear': None,
             'military_no_headgear': None, 'distinctive_marks': None
@@ -36,27 +37,32 @@ class SocialDataTab(QWidget):
             'civilian': None, 'military_headgear': None,
             'military_no_headgear': None, 'distinctive_marks': None
         }
-        
         self.max_text_length = 5000
-        
-        # Инициализация интерфейса
+
+        # 1. Создание интерфейса
         self.init_ui()
-        # Загрузка первичных данных (комбобоксы)
+        # 2. Загрузка справочников
         self.load_combo_data()
-        # Загрузка данных из БД
+        # 3. Загрузка данных из БД
         self.load_data()
-        # Настройка автосохранения (срабатывает через 400мс после остановки ввода)
+        # 4. Настройка автосохранения, автодополнения и валидаторов
         self.setup_auto_save()
-        # Настройка автодополнения
         self.setup_autocomplete_fields()
-        # Настройка валидаторов
         self.setup_validators()
+        
+        # 🔒 БЛОКИРОВКА ИНТЕРФЕЙСА ДЛЯ ЧИТАТЕЛЯ (вызывается ПОСЛЕ полной инициализации)
+        if self.is_read_only:
+            apply_readonly_mode(self.scroll_area, True)
+            if hasattr(self, '_auto_save_timer'):
+                self._auto_save_timer.stop()
+            print(f"👁️ [READ-ONLY] Режим просмотра активирован для КРД-{self.krd_id}")
 
     def init_ui(self):
         """Инициализация интерфейса"""
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        # ✅ СОХРАНЯЕМ scroll_area В АТРИБУТ КЛАССА, чтобы apply_readonly_mode мог его найти
+        self.scroll_area = QScrollArea()
+        self.scroll_area.setWidgetResizable(True)
+        self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
         
         container = QWidget()
         layout = QVBoxLayout(container)
@@ -188,8 +194,13 @@ class SocialDataTab(QWidget):
             pg.addLayout(v, 0, i)
         g7.addLayout(pg); group7.setLayout(g7); layout.addWidget(group7)
         
-        layout.addStretch(); scroll.setWidget(container); main = QVBoxLayout(self); main.addWidget(scroll)
+        layout.addStretch()
+        self.scroll_area.setWidget(container)
 
+        # ✅ УСТАНОВКА ГЛАВНОГО LAYOUT'А
+        main_layout = QVBoxLayout(self)
+        main_layout.addWidget(self.scroll_area)
+        self.setLayout(main_layout)
     def _create_ref_combo_widget(self, combo, table_name, reload_func):
         """Вспомогательный метод: ComboBox + кнопка ⚙️ с автообновлением"""
         w = QWidget()

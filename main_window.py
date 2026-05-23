@@ -15,7 +15,7 @@
 
 import sys
 import traceback
-from datetime import datetime
+from ui_helpers import is_reader, apply_readonly_mode
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
@@ -171,11 +171,18 @@ class MainWindow(QMainWindow):
     def create_toolbar(self):
         toolbar = self.addToolBar("Основная панель")
         toolbar.addAction("🔄 Обновить", self.load_krd_data)
-        toolbar.addAction("➕ Добавить КРД", self.open_krd_add_window)
         
+        is_r = is_reader(self.user_info) # 🔒 Проверяем роль
+
+        # 1. Кнопка добавления
+        add_action = toolbar.addAction("➕ Добавить КРД", self.open_krd_add_window)
+        if is_r: add_action.setVisible(False) # Скрываем для читателя
+
+        # 2. Кнопка удаления
         self.delete_krd_action = QAction("🗑️ Удалить КРД", self)
         self.delete_krd_action.triggered.connect(self.delete_selected_krd)
         self.delete_krd_action.setEnabled(False)
+        if is_r: self.delete_krd_action.setVisible(False) # Скрываем для читателя
         toolbar.addAction(self.delete_krd_action)
         
         # 🔥 НОВОЕ: Кнопка очистки блокировок (только для админов)

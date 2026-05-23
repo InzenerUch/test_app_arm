@@ -1,8 +1,8 @@
+# incoming_orders_tab.py
 """
 Вкладка входящих поручений на розыск
-Только таблица с кнопками добавления/удаления
+✅ АДАПТИРОВАНО: Поддержка роли 'reader' (только просмотр)
 """
-
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableView, QMessageBox, QHeaderView, QAbstractItemView
@@ -10,19 +10,20 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtSql import QSqlQuery, QSqlQueryModel
 from PyQt6.QtCore import Qt, pyqtSignal 
 from PyQt6.QtGui import QFont
-
-
 from incoming_order_dialog import IncomingOrderDialog
-
+from ui_helpers import is_reader  # 🔒 Импорт проверки роли
 
 class IncomingOrdersTab(QWidget):
     """Вкладка входящих поручений на розыск"""
     data_changed = pyqtSignal()
-    def __init__(self, krd_id, db_connection, audit_logger=None):
+    
+    def __init__(self, krd_id, db_connection, audit_logger=None, user_info=None):
         super().__init__()
         self.krd_id = krd_id
         self.db = db_connection
         self.audit_logger = audit_logger
+        self.user_info = user_info or {}
+        self.is_read_only = is_reader(self.user_info)  # 🔒 Флаг режима чтения
         
         self.init_ui()
         self.load_data()
@@ -33,8 +34,9 @@ class IncomingOrdersTab(QWidget):
         layout.setSpacing(15)
         layout.setContentsMargins(20, 20, 20, 20)
         
-        # Заголовок
-        title_label = QLabel("📬 Входящие поручения на розыск")
+        # Заголовок (добавляем метку режима для читателя)
+        title_text = "📬 Входящие поручения на розыск" + (" — [Просмотр]" if self.is_read_only else "")
+        title_label = QLabel(title_text)
         title_font = QFont("Arial", 14, QFont.Weight.Bold)
         title_label.setFont(title_font)
         layout.addWidget(title_label)
@@ -57,25 +59,34 @@ class IncomingOrdersTab(QWidget):
         # Настройка высоты строк
         self.orders_table.verticalHeader().setDefaultSectionSize(35)
         
-        # Подключение двойного клика для редактирования
-        self.orders_table.doubleClicked.connect(self.on_order_double_clicked)
-        
+        # 🔒 Двойной клик для редактирования только если НЕ читатель
+        if not self.is_read_only:
+            self.orders_table.doubleClicked.connect(self.on_order_double_clicked)
+            
         layout.addWidget(self.orders_table)
         
         # Кнопки внизу
         button_layout = QHBoxLayout()
         button_layout.addStretch()
         
-        add_btn = QPushButton("➕ Добавить поручение")
-        add_btn.setProperty("role", "info")
-        add_btn.clicked.connect(self.on_add_order)
-        button_layout.addWidget(add_btn)
-        
-        delete_btn = QPushButton("🗑️ Удалить поручение")
-        delete_btn.setProperty("role", "danger")
-        delete_btn.clicked.connect(self.on_delete_order)
-        button_layout.addWidget(delete_btn)
-        
+        if not self.is_read_only:
+            # 🟢 Кнопки видны только для редакторов/админов
+            add_btn = QPushButton("➕ Добавить поручение")
+            add_btn.setProperty("role", "info")
+            add_btn.clicked.connect(self.on_add_order)
+            button_layout.addWidget(add_btn)
+            
+            delete_btn = QPushButton("🗑️ Удалить поручение")
+            delete_btn.setProperty("role", "danger")
+            delete_btn.clicked.connect(self.on_delete_order)
+            button_layout.addWidget(delete_btn)
+        else:
+            # 🔒 Для читателя показываем информационную метку
+            info_lbl = QLabel("🔒 Режим только для просмотра. Изменения недоступны.")
+            info_lbl.setStyleSheet("color: #888; font-style: italic; padding: 5px;")
+            button_layout.addWidget(info_lbl)
+            button_layout.addStretch()
+            
         layout.addLayout(button_layout)
     
     def load_data(self):
@@ -102,13 +113,11 @@ class IncomingOrdersTab(QWidget):
     
     def on_add_order(self):
         """Обработчик кнопки добавления поручения"""
+        if self.is_read_only: return  # 🔒 Защита
         dialog = IncomingOrderDialog(self.db, self.krd_id, parent=self)
-        
-        if dialog.exec() == 1:  # QDialog.Accepted
-            # Обновить таблицу после добавления
+        if dialog.exec() == 1:
             self.load_data()
             self.data_changed.emit()
-            
             if self.audit_logger:
                 self.audit_logger.log_action(
                     action_type='INCOMING_ORDER_ADDED',
@@ -119,27 +128,18 @@ class IncomingOrdersTab(QWidget):
     
     def on_order_double_clicked(self, index):
         """Обработчик двойного клика по записи"""
+        if self.is_read_only: return  # 🔒 Защита
         row = index.row()
-        
-        # Получить ID поручения из скрытой колонки
         id_index = self.orders_model.index(row, 0)
         order_id = self.orders_model.data(id_index)
-        
-        if not order_id:
-            return
-        
-        # Загрузить полные данные поручения
-        order_data = self.load_order_data(order_id)
-        
-        if order_data:
-            # Открыть диалог редактирования
-            dialog = IncomingOrderDialog(self.db, self.krd_id, order_data, parent=self)
+        if not order_id: return
             
-            if dialog.exec() == 1:  # QDialog.Accepted
-                # Обновить таблицу после редактирования
+        order_data = self.load_order_data(order_id)
+        if order_data:
+            dialog = IncomingOrderDialog(self.db, self.krd_id, order_data, parent=self)
+            if dialog.exec() == 1:
                 self.load_data()
                 self.data_changed.emit()
-                
                 if self.audit_logger:
                     self.audit_logger.log_action(
                         action_type='INCOMING_ORDER_EDITED',
@@ -151,31 +151,25 @@ class IncomingOrdersTab(QWidget):
     
     def on_delete_order(self):
         """Обработчик кнопки удаления поручения"""
-        # Получить выбранную строку
-        selected_indexes = self.orders_table.selectedIndexes()
+        if self.is_read_only: return  # 🔒 Защита
         
+        selected_indexes = self.orders_table.selectedIndexes()
         if not selected_indexes:
             QMessageBox.warning(self, "Предупреждение", "⚠️ Выберите поручение для удаления")
             return
         
-        # Получить ID поручения
         row = selected_indexes[0].row()
         id_index = self.orders_model.index(row, 0)
         order_id = self.orders_model.data(id_index)
+        if not order_id: return
         
-        if not order_id:
-            return
-        
-        # Получить информацию о поручении для отображения в подтверждении
-        initiator_index = self.orders_model.index(row, 1)  # Колонка "Инициатор"
-        order_number_index = self.orders_model.index(row, 3)  # Колонка "Номер поручения"
+        initiator_index = self.orders_model.index(row, 1)
+        order_number_index = self.orders_model.index(row, 3)
         initiator = self.orders_model.data(initiator_index)
         order_number = self.orders_model.data(order_number_index)
         
-        # Подтверждение удаления
         reply = QMessageBox.question(
-            self,
-            "Подтверждение удаления",
+            self, "Подтверждение удаления",
             f"Вы действительно хотите удалить поручение?\n\n"
             f"📬 Инициатор: {initiator}\n"
             f"📋 Номер: {order_number}\n\n"
@@ -189,12 +183,10 @@ class IncomingOrdersTab(QWidget):
                 query = QSqlQuery(self.db)
                 query.prepare("DELETE FROM krd.incoming_orders WHERE id = ?")
                 query.addBindValue(order_id)
-                
                 if query.exec():
                     QMessageBox.information(self, "Успех", "✅ Поручение успешно удалено")
                     self.load_data()
                     self.data_changed.emit()
-                    
                     if self.audit_logger:
                         self.audit_logger.log_action(
                             action_type='INCOMING_ORDER_DELETED',
@@ -205,7 +197,6 @@ class IncomingOrdersTab(QWidget):
                         )
                 else:
                     raise Exception(f"Ошибка SQL: {query.lastError().text()}")
-                    
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"❌ Ошибка удаления поручения:\n{str(e)}")
     
@@ -214,27 +205,12 @@ class IncomingOrdersTab(QWidget):
         query = QSqlQuery(self.db)
         query.prepare("""
             SELECT 
-                id,
-                initiator_type_id,
-                initiator_full_name,
-                military_unit_id,
-                order_date,
-                order_number,
-                receipt_date,
-                receipt_number,
-                postal_index,
-                postal_region,
-                postal_district,
-                postal_town,
-                postal_street,
-                postal_house,
-                postal_building,
-                postal_letter,
-                postal_apartment,
-                postal_room,
-                initiator_contacts,
-                our_response_date,
-                our_response_number
+                id, initiator_type_id, initiator_full_name, military_unit_id,
+                order_date, order_number, receipt_date, receipt_number,
+                postal_index, postal_region, postal_district, postal_town,
+                postal_street, postal_house, postal_building, postal_letter,
+                postal_apartment, postal_room, initiator_contacts,
+                our_response_date, our_response_number
             FROM krd.incoming_orders
             WHERE id = ?
         """)
@@ -265,5 +241,4 @@ class IncomingOrdersTab(QWidget):
                 'our_response_date': query.value('our_response_date'),
                 'our_response_number': query.value('our_response_number') or ''
             }
-        
         return None

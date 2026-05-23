@@ -1,24 +1,32 @@
+# soch_episodes_tab.py
+"""
+Вкладка сведений о СОЧ
+✅ АДАПТИРОВАНО: Поддержка роли 'reader' (только просмотр)
+"""
+
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, QPushButton,
     QTableView, QMessageBox, QHeaderView, QAbstractItemView
 )
 from PyQt6.QtSql import QSqlQuery, QSqlQueryModel
-from PyQt6.QtCore import Qt
-from PyQt6.QtGui import QFont
 from PyQt6.QtCore import Qt, pyqtSignal 
+from PyQt6.QtGui import QFont
 
 from soch_episode_dialog import SochEpisodeDialog
-
+from ui_helpers import is_reader  # 🔒 Импорт проверки роли
 
 class SochEpisodesTab(QWidget):
     """Вкладка сведений о СОЧ"""
     data_changed = pyqtSignal() 
     
-    def __init__(self, krd_id, db_connection, audit_logger=None):
+    # ✅ Добавляем параметр user_info
+    def __init__(self, krd_id, db_connection, audit_logger=None, user_info=None):
         super().__init__()
         self.krd_id = krd_id
         self.db = db_connection
         self.audit_logger = audit_logger
+        self.user_info = user_info or {}
+        self.is_read_only = is_reader(self.user_info)  # 🔒 Флаг режима чтения
         
         self.init_ui()
         self.load_data()
@@ -30,7 +38,10 @@ class SochEpisodesTab(QWidget):
         layout.setContentsMargins(20, 20, 20, 20)
         
         # Заголовок
-        title_label = QLabel("📋 Эпизоды самовольного оставления части (СОЧ)")
+        title_text = "📋 Эпизоды самовольного оставления части (СОЧ)"
+        if self.is_read_only:
+            title_text += " — [Просмотр]"
+        title_label = QLabel(title_text)
         title_font = QFont("Arial", 14, QFont.Weight.Bold)
         title_label.setFont(title_font)
         layout.addWidget(title_label)
@@ -51,30 +62,41 @@ class SochEpisodesTab(QWidget):
         header.setSectionResizeMode(QHeaderView.ResizeMode.Interactive)
         self.episodes_table.verticalHeader().setDefaultSectionSize(35)
         
-        # Подключение двойного клика
-        self.episodes_table.doubleClicked.connect(self.on_episode_double_clicked)
+        # 🔒 Двойной клик только если НЕ читатель
+        if not self.is_read_only:
+            self.episodes_table.doubleClicked.connect(self.on_episode_double_clicked)
+            
         layout.addWidget(self.episodes_table)
         
         # Кнопки управления
         button_layout = QHBoxLayout()
         button_layout.addStretch()
         
-        add_btn = QPushButton("➕ Добавить эпизод СОЧ")
-        add_btn.setProperty("role", "info")
-        add_btn.clicked.connect(self.on_add_episode)
-        button_layout.addWidget(add_btn)
-        
-        # 🔥 КНОПКА МЯГКОГО УДАЛЕНИЯ
-        self.delete_btn = QPushButton("🗑️ Удалить эпизод")
-        self.delete_btn.setProperty("role", "danger")
-        self.delete_btn.clicked.connect(self.on_delete_episode)
-        self.delete_btn.setEnabled(False)  # Активируется только при выделении строки
-        button_layout.addWidget(self.delete_btn)
-        
+        if not self.is_read_only:
+            # 🟢 Кнопки видны только для редакторов/админов
+            add_btn = QPushButton("➕ Добавить эпизод СОЧ")
+            add_btn.setProperty("role", "info")
+            add_btn.clicked.connect(self.on_add_episode)
+            button_layout.addWidget(add_btn)
+            
+            # 🔥 КНОПКА МЯГКОГО УДАЛЕНИЯ
+            self.delete_btn = QPushButton("🗑️ Удалить эпизод")
+            self.delete_btn.setProperty("role", "danger")
+            self.delete_btn.clicked.connect(self.on_delete_episode)
+            self.delete_btn.setEnabled(False)
+            button_layout.addWidget(self.delete_btn)
+        else:
+            # 🔒 Для читателя показываем информационную метку
+            info_lbl = QLabel("🔒 Режим только для просмотра. Изменения недоступны.")
+            info_lbl.setStyleSheet("color: #888; font-style: italic; padding: 5px;")
+            button_layout.addWidget(info_lbl)
+            button_layout.addStretch()
+            
         layout.addLayout(button_layout)
         
-        # Отслеживание выделения для активации кнопки удаления
-        self.episodes_table.selectionModel().selectionChanged.connect(self.on_selection_changed)
+        # Отслеживание выделения только если есть кнопка удаления
+        if not self.is_read_only:
+            self.episodes_table.selectionModel().selectionChanged.connect(self.on_selection_changed)
     
     def on_selection_changed(self, selected, deselected):
         """Активируем кнопку удаления только если есть выделение"""
@@ -106,7 +128,7 @@ class SochEpisodesTab(QWidget):
         self.episodes_table.setColumnHidden(0, True)
     
     def on_add_episode(self):
-        """Обработчик кнопки добавления эпизода"""
+        if self.is_read_only: return  # 🔒 Защита
         dialog = SochEpisodeDialog(self.db, self.krd_id, parent=self)
         if dialog.exec() == 1:
             self.load_data()
@@ -118,7 +140,7 @@ class SochEpisodesTab(QWidget):
                 )
     
     def on_delete_episode(self):
-        """Мягкое удаление эпизода СОЧ (скрытие из списка)"""
+        if self.is_read_only: return  # 🔒 Защита
         selection = self.episodes_table.selectionModel()
         if not selection.hasSelection():
             return
@@ -128,7 +150,6 @@ class SochEpisodesTab(QWidget):
         if not episode_id:
             return
             
-        # Данные для подтверждения
         episode_date = self.episodes_model.data(self.episodes_model.index(row, 1)) or "не указана"
         episode_loc = self.episodes_model.data(self.episodes_model.index(row, 2)) or "не указано"
         
@@ -173,7 +194,7 @@ class SochEpisodesTab(QWidget):
                 QMessageBox.critical(self, "Ошибка", f"❌ Ошибка при удалении:\n{str(e)}")
     
     def on_episode_double_clicked(self, index):
-        """Обработчик двойного клика по записи"""
+        if self.is_read_only: return  # 🔒 Защита
         row = index.row()
         episode_id = self.episodes_model.data(self.episodes_model.index(row, 0))
         if not episode_id: return

@@ -1,6 +1,8 @@
+# service_places_tab.py
 """
 Вкладка мест службы
 Только таблица с кнопками добавления/удаления
+✅ АДАПТИРОВАНО: Поддержка роли 'reader' (только просмотр)
 ✅ ИСПРАВЛЕНО: Отображение названий из справочников (Военное управление, Гарнизон, Должность)
 """
 
@@ -13,17 +15,19 @@ from PyQt6.QtCore import Qt, pyqtSignal
 from PyQt6.QtGui import QFont
 
 from service_place_dialog import ServicePlaceDialog
-
+from ui_helpers import is_reader  # 🔒 Импорт проверки роли
 
 class ServicePlacesTab(QWidget):
     """Вкладка мест службы"""
     data_changed = pyqtSignal() 
     
-    def __init__(self, krd_id, db_connection, audit_logger=None):
+    def __init__(self, krd_id, db_connection, audit_logger=None, user_info=None):
         super().__init__()
         self.krd_id = krd_id
         self.db = db_connection
         self.audit_logger = audit_logger
+        self.user_info = user_info or {}
+        self.is_read_only = is_reader(self.user_info)  # 🔒 Флаг режима чтения
         
         self.init_ui()
         self.load_data()
@@ -34,8 +38,9 @@ class ServicePlacesTab(QWidget):
         layout.setSpacing(15)
         layout.setContentsMargins(20, 20, 20, 20)
         
-        # Заголовок
-        title_label = QLabel("📍 Места службы")
+        # Заголовок (добавляем метку режима для читателя)
+        title_text = "📍 Места службы" + (" — [Просмотр]" if self.is_read_only else "")
+        title_label = QLabel(title_text)
         title_font = QFont("Arial", 14, QFont.Weight.Bold)
         title_label.setFont(title_font)
         layout.addWidget(title_label)
@@ -58,25 +63,34 @@ class ServicePlacesTab(QWidget):
         # Настройка высоты строк
         self.places_table.verticalHeader().setDefaultSectionSize(35)
         
-        # Подключение двойного клика для редактирования
-        self.places_table.doubleClicked.connect(self.on_place_double_clicked)
-        
+        # 🔒 Двойной клик для редактирования только если НЕ читатель
+        if not self.is_read_only:
+            self.places_table.doubleClicked.connect(self.on_place_double_clicked)
+            
         layout.addWidget(self.places_table)
         
         # Кнопки внизу
         button_layout = QHBoxLayout()
         button_layout.addStretch()
         
-        add_btn = QPushButton("➕ Добавить место службы")
-        add_btn.setProperty("role", "info")
-        add_btn.clicked.connect(self.on_add_place)
-        button_layout.addWidget(add_btn)
-        
-        delete_btn = QPushButton("🗑️ Удалить место службы")
-        delete_btn.setProperty("role", "danger")
-        delete_btn.clicked.connect(self.on_delete_place)
-        button_layout.addWidget(delete_btn)
-        
+        if not self.is_read_only:
+            # 🟢 Кнопки видны только для редакторов/админов
+            add_btn = QPushButton("➕ Добавить место службы")
+            add_btn.setProperty("role", "info")
+            add_btn.clicked.connect(self.on_add_place)
+            button_layout.addWidget(add_btn)
+            
+            delete_btn = QPushButton("🗑️ Удалить место службы")
+            delete_btn.setProperty("role", "danger")
+            delete_btn.clicked.connect(self.on_delete_place)
+            button_layout.addWidget(delete_btn)
+        else:
+            # 🔒 Для читателя показываем информационную метку
+            info_lbl = QLabel("🔒 Режим только для просмотра. Изменения недоступны.")
+            info_lbl.setStyleSheet("color: #888; font-style: italic; padding: 5px;")
+            button_layout.addWidget(info_lbl)
+            button_layout.addStretch()
+            
         layout.addLayout(button_layout)
     
     def load_data(self):
@@ -85,7 +99,7 @@ class ServicePlacesTab(QWidget):
             SELECT
             s.id,
             s.place_name as "Место службы",
-            COALESCE(s.military_unit_number, '—') as "Номер в/ч",  -- ✅ ДОБАВЛЕНО
+            COALESCE(s.military_unit_number, '—') as "Номер в/ч",
             m.name as "Военное управление",
             g.name as "Гарнизон",
             p.name as "Должность",
@@ -101,17 +115,15 @@ class ServicePlacesTab(QWidget):
         query.exec()
         self.places_model.setQuery(query)
         self.places_table.setColumnHidden(0, True)
-        # Настройте ширину колонок при необходимости
     
     def on_add_place(self):
         """Обработчик кнопки добавления места службы"""
+        if self.is_read_only: return  # 🔒 Защита
         dialog = ServicePlaceDialog(self.db, self.krd_id, parent=self)
         
         if dialog.exec() == 1:  # QDialog.Accepted
-            # Обновить таблицу после добавления
             self.load_data()
             self.data_changed.emit()
-            
             if self.audit_logger:
                 self.audit_logger.log_action(
                     action_type='SERVICE_PLACE_ADDED',
@@ -122,27 +134,18 @@ class ServicePlacesTab(QWidget):
     
     def on_place_double_clicked(self, index):
         """Обработчик двойного клика по записи"""
+        if self.is_read_only: return  # 🔒 Защита
         row = index.row()
-        
-        # Получить ID места службы из скрытой колонки (индекс 0)
         id_index = self.places_model.index(row, 0)
         place_id = self.places_model.data(id_index)
-        
-        if not place_id:
-            return
-        
-        # Загрузить полные данные места службы (с ID для диалога)
-        place_data = self.load_place_data(place_id)
-        
-        if place_data:
-            # Открыть диалог редактирования
-            dialog = ServicePlaceDialog(self.db, self.krd_id, place_data, parent=self)
+        if not place_id: return
             
-            if dialog.exec() == 1:  # QDialog.Accepted
-                # Обновить таблицу после редактирования
+        place_data = self.load_place_data(place_id)
+        if place_data:
+            dialog = ServicePlaceDialog(self.db, self.krd_id, place_data, parent=self)
+            if dialog.exec() == 1:
                 self.load_data()
                 self.data_changed.emit()
-                
                 if self.audit_logger:
                     self.audit_logger.log_action(
                         action_type='SERVICE_PLACE_EDITED',
@@ -154,29 +157,23 @@ class ServicePlacesTab(QWidget):
     
     def on_delete_place(self):
         """Обработчик кнопки удаления места службы"""
-        # Получить выбранную строку
-        selected_indexes = self.places_table.selectedIndexes()
+        if self.is_read_only: return  # 🔒 Защита
         
+        selected_indexes = self.places_table.selectedIndexes()
         if not selected_indexes:
             QMessageBox.warning(self, "Предупреждение", "⚠️ Выберите место службы для удаления")
             return
         
-        # Получить ID места службы из модели (колонка 0 скрыта, но данные доступны)
         row = selected_indexes[0].row()
         id_index = self.places_model.index(row, 0)
         place_id = self.places_model.data(id_index)
+        if not place_id: return
         
-        if not place_id:
-            return
-        
-        # Получить информацию о месте службы для отображения в подтверждении (колонка 1 - "Место службы")
         place_name_index = self.places_model.index(row, 1)
         place_name = self.places_model.data(place_name_index)
         
-        # Подтверждение удаления
         reply = QMessageBox.question(
-            self,
-            "Подтверждение удаления",
+            self, "Подтверждение удаления",
             f"Вы действительно хотите удалить место службы?\n\n"
             f"📍 {place_name}\n\n"
             "Это действие нельзя отменить!",
@@ -189,12 +186,10 @@ class ServicePlacesTab(QWidget):
                 query = QSqlQuery(self.db)
                 query.prepare("DELETE FROM krd.service_places WHERE id = ?")
                 query.addBindValue(place_id)
-                
                 if query.exec():
                     QMessageBox.information(self, "Успех", "✅ Место службы успешно удалено")
                     self.load_data()
                     self.data_changed.emit()
-                    
                     if self.audit_logger:
                         self.audit_logger.log_action(
                             action_type='SERVICE_PLACE_DELETED',
@@ -205,7 +200,6 @@ class ServicePlacesTab(QWidget):
                         )
                 else:
                     raise Exception(f"Ошибка SQL: {query.lastError().text()}")
-                    
             except Exception as e:
                 QMessageBox.critical(self, "Ошибка", f"❌ Ошибка удаления места службы:\n{str(e)}")
     
@@ -214,24 +208,10 @@ class ServicePlacesTab(QWidget):
         query = QSqlQuery(self.db)
         query.prepare("""
             SELECT
-            id,
-            place_name,
-            military_unit_number,   -- ✅ ДОБАВЛЕНО: Выбор номера воинской части
-            military_unit_id,
-            garrison_id,
-            position_id,
-            commanders,
-            postal_index,
-            postal_region,
-            postal_district,
-            postal_town,
-            postal_street,
-            postal_house,
-            postal_building,
-            postal_letter,
-            postal_apartment,
-            postal_room,
-            place_contacts
+            id, place_name, military_unit_number, military_unit_id, garrison_id, position_id,
+            commanders, postal_index, postal_region, postal_district, postal_town,
+            postal_street, postal_house, postal_building, postal_letter,
+            postal_apartment, postal_room, place_contacts
             FROM krd.service_places
             WHERE id = ?
         """)

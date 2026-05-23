@@ -13,6 +13,7 @@ from PyQt6.QtGui import QCloseEvent
 from PyQt6.QtSql import QSqlQuery
 from PyQt6.QtCore import pyqtSignal
 import traceback
+from ui_helpers import is_reader, apply_readonly_mode
 
 # Импорт всех вкладок
 from social_data_tab import SocialDataTab
@@ -61,49 +62,43 @@ class KrdDetailsWindow(QDialog):
 
         # === ВЕРХНЯЯ ПАНЕЛЬ (HEADER) ===
         header_widget = QWidget()
-        header_widget.setProperty("role", "header") # Для стилизации
+        header_widget.setProperty("role", "header")
         header_layout = QHBoxLayout(header_widget)
         header_layout.setContentsMargins(15, 10, 15, 10)
         
-        # Заголовок с номером КРД
         title_label = QLabel(f"📋 <b>Карточка розыска №{self.krd_id}</b>")
         title_label.setStyleSheet("font-size: 16px; margin-right: 20px;")
         header_layout.addWidget(title_label)
-        
         header_layout.addWidget(QLabel("📌 Статус:"))
         
-        # === ВЫБОР СТАТУСА ===
         self.status_combo = QComboBox()
         self.status_combo.setMinimumWidth(200)
         self.status_combo.currentIndexChanged.connect(self.on_status_changed)
         header_layout.addWidget(self.status_combo)
         
-        # Кнопка настройки справочника статусов (Шестеренка)
         self.btn_edit_statuses = QPushButton("⚙️")
         self.btn_edit_statuses.setToolTip("Настроить справочник статусов")
         self.btn_edit_statuses.setProperty("role","edit")
         self.btn_edit_statuses.setFixedSize(30, 30)
         self.btn_edit_statuses.clicked.connect(self.open_status_editor)
         header_layout.addWidget(self.btn_edit_statuses)
-        
         header_layout.addStretch()
         
-        # Загрузка статусов в комбобокс
         self.load_statuses()
-        
         main_layout.addWidget(header_widget)
 
         # === ВКЛАДКИ ===
         self.tabs = QTabWidget()
         
-        # 🔧 СОХРАНЯЕМ ССЫЛКИ НА ВКЛАДКИ В АТРИБУТАХ КЛАССА
-        self.social_data_tab = SocialDataTab(self.krd_id, self.db, self.audit_logger)
-        self.addresses_tab = AddressesTab(self.krd_id, self.db, self.audit_logger)
-        self.incoming_orders_tab = IncomingOrdersTab(self.krd_id, self.db, self.audit_logger)
-        self.service_places_tab = ServicePlacesTab(self.krd_id, self.db, self.audit_logger)
-        self.soch_episodes_tab = SochEpisodesTab(self.krd_id, self.db, self.audit_logger)
-        self.outgoing_requests_tab = OutgoingRequestsTab(self.krd_id, self.db, self.audit_logger)
+        # 🔧 СОХРАНЯЕМ ССЫЛКИ НА ВКЛАДКИ
+        self.social_data_tab = SocialDataTab(self.krd_id, self.db, self.audit_logger, self.user_info)
+        self.addresses_tab = AddressesTab(self.krd_id, self.db, self.audit_logger, self.user_info)
+        self.incoming_orders_tab = IncomingOrdersTab(self.krd_id, self.db, self.audit_logger, self.user_info)
+        self.service_places_tab = ServicePlacesTab(self.krd_id, self.db, self.audit_logger, self.user_info)
+        self.soch_episodes_tab = SochEpisodesTab(self.krd_id, self.db, self.audit_logger, self.user_info)
 
+        # ✅ 1. ПЕРЕДАЕМ user_info В OUTGOING_REQUESTS_TAB
+        self.outgoing_requests_tab = OutgoingRequestsTab(self.krd_id, self.db, self.audit_logger, self.user_info)
         
         # Добавляем вкладки
         self.tabs.addTab(self.social_data_tab, "👤 Социально-демографические данные")
@@ -113,12 +108,13 @@ class KrdDetailsWindow(QDialog):
         self.tabs.addTab(self.soch_episodes_tab, "⚠️ Сведения о СОЧ")
         self.tabs.addTab(self.outgoing_requests_tab, "📤 Запросы и поручения")
         
-        # 🔥 ПОДКЛЮЧАЕМ СИГНАЛЫ АВТООБНОВЛЕНИЯ СПИСКОВ ВЫБОРА
-        self.addresses_tab.data_changed.connect(self.outgoing_requests_tab.generator_tab.load_related_records)
-        self.service_places_tab.data_changed.connect(self.outgoing_requests_tab.generator_tab.load_related_records)
-        self.soch_episodes_tab.data_changed.connect(self.outgoing_requests_tab.generator_tab.load_related_records)
-        self.incoming_orders_tab.data_changed.connect(self.outgoing_requests_tab.generator_tab.load_related_records)
-        
+        # ✅ 2. БЕЗОПАСНОЕ ПОДКЛЮЧЕНИЕ СИГНАЛОВ (Только если генератор существует)
+        if hasattr(self.outgoing_requests_tab, 'generator_tab') and self.outgoing_requests_tab.generator_tab is not None:
+            self.addresses_tab.data_changed.connect(self.outgoing_requests_tab.generator_tab.load_related_records)
+            self.service_places_tab.data_changed.connect(self.outgoing_requests_tab.generator_tab.load_related_records)
+            self.soch_episodes_tab.data_changed.connect(self.outgoing_requests_tab.generator_tab.load_related_records)
+            self.incoming_orders_tab.data_changed.connect(self.outgoing_requests_tab.generator_tab.load_related_records)
+            
         self.tabs.currentChanged.connect(self._on_tab_switched)
         main_layout.addWidget(self.tabs)
 
@@ -221,7 +217,15 @@ class KrdDetailsWindow(QDialog):
         """
         Захватывает Advisory Lock через встроенные функции PostgreSQL.
         Возвращает (True, "") если успешно, или (False, "Причина отказа").
+        📖 Пользователи с ролью 'reader' пропускают блокировку (только просмотр).
         """
+        # 📖 Проверяем роль: если читатель — блокировка не нужна
+        from ui_helpers import is_reader
+        if is_reader(self.user_info):
+            print(f"📖 [LOCK] Роль 'reader'. Advisory Lock пропускается (режим просмотра).")
+            self.setWindowTitle(f"Карточка №{self.krd_id} — [Просмотр]")
+            return True, ""
+
         try:
             print(f"\n{'='*70}")
             print(f"🔒 [LOCK] Попытка захвата блокировки для КРД-{self.krd_id}")
