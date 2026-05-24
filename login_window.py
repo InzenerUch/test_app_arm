@@ -82,19 +82,19 @@ class LoginWindow(QDialog):
             QMessageBox.information(self, "Настройки", "Настройки сохранены. Перезапустите приложение.")
 
 
-if __name__ == "__main__":
-    app = QApplication(sys.argv)
-    db = QSqlDatabase.addDatabase("QPSQL")
-    db.setHostName("localhost")
-    db.setDatabaseName("krd_system")
-    db.setUserName("arm_user")
-    db.setPassword("ArmUserSecurePass2026!")
+# if __name__ == "__main__":
+#     app = QApplication(sys.argv)
+#     db = QSqlDatabase.addDatabase("QPSQL")
+#     db.setHostName("localhost")
+#     db.setDatabaseName("krd_system")
+#     db.setUserName("arm_user")
+#     db.setPassword("ArmUserSecurePass2026!")
     
-    if not db.open():
-        QMessageBox.critical(None, "Ошибка", f"Не удалось подключиться к БД:\n{db.lastError().text()}")
-        sys.exit(1)
+#     if not db.open():
+#         QMessageBox.critical(None, "Ошибка", f"Не удалось подключиться к БД:\n{db.lastError().text()}")
+#         sys.exit(1)
 
-    win = LoginWindow(db)
-    win.login_successful.connect(lambda info: print(f"✅ Вход: {info['username']} ({info['role']})"))
-    win.show()
-    sys.exit(app.exec())
+#     win = LoginWindow(db)
+#     win.login_successful.connect(lambda info: print(f"✅ Вход: {info['username']} ({info['role']})"))
+#     win.show()
+#     sys.exit(app.exec())

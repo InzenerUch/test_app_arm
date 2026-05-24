@@ -59,9 +59,7 @@ class AddressesTab(QWidget):
         # Настройка высоты строк
         self.addresses_table.verticalHeader().setDefaultSectionSize(35)
         
-        # 🔒 Двойной клик для редактирования только если НЕ читатель
-        if not self.is_read_only:
-            self.addresses_table.doubleClicked.connect(self.on_address_double_clicked)
+        self.addresses_table.doubleClicked.connect(self.on_address_double_clicked)
             
         layout.addWidget(self.addresses_table)
         
@@ -133,17 +131,17 @@ class AddressesTab(QWidget):
 
     def on_address_double_clicked(self, index):
         """Обработчик двойного клика по записи"""
-        if self.is_read_only: return  # 🔒 Защита от вызова
+        # ✅ Убрана блокировка. Диалог откроется, а режим (просмотр/правка) определится внутри
         row = index.row()
         id_index = self.addresses_model.index(row, 0)
         address_id = self.addresses_model.data(id_index)
         if not address_id:
             return
-            
         address_data = self.load_address_data(address_id)
         if address_data:
-            dialog = AddressDialog(self.db, self.krd_id, address_data, parent=self)
-            if dialog.exec() == 1:  
+            # ✅ ПЕРЕДАЁМ read_only=self.is_read_only
+            dialog = AddressDialog(self.db, self.krd_id, address_data, parent=self, read_only=self.is_read_only)
+            if dialog.exec() == 1:
                 self.load_data()
                 self.data_changed.emit()
                 if self.audit_logger:
@@ -154,7 +152,6 @@ class AddressesTab(QWidget):
                         krd_id=self.krd_id,
                         description='Отредактирован адрес проживания'
                     )
-
     def on_delete_address(self):
         """Обработчик кнопки удаления адреса"""
         if self.is_read_only: return  # 🔒 Защита от вызова

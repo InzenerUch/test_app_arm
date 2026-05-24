@@ -59,9 +59,7 @@ class IncomingOrdersTab(QWidget):
         # Настройка высоты строк
         self.orders_table.verticalHeader().setDefaultSectionSize(35)
         
-        # 🔒 Двойной клик для редактирования только если НЕ читатель
-        if not self.is_read_only:
-            self.orders_table.doubleClicked.connect(self.on_order_double_clicked)
+        self.orders_table.doubleClicked.connect(self.on_order_double_clicked)
             
         layout.addWidget(self.orders_table)
         
@@ -128,19 +126,23 @@ class IncomingOrdersTab(QWidget):
     
     def on_order_double_clicked(self, index):
         """Обработчик двойного клика по записи"""
-        if self.is_read_only: return  # 🔒 Защита
+        # ✅ Убрана блокировка. Диалог откроется для всех ролей
         row = index.row()
         id_index = self.orders_model.index(row, 0)
         order_id = self.orders_model.data(id_index)
-        if not order_id: return
+        if not order_id: 
+            return
             
         order_data = self.load_order_data(order_id)
         if order_data:
-            dialog = IncomingOrderDialog(self.db, self.krd_id, order_data, parent=self)
+            # ✅ ПЕРЕДАЁМ read_only=self.is_read_only в конструктор диалога
+            dialog = IncomingOrderDialog(self.db, self.krd_id, order_data, parent=self, read_only=self.is_read_only)
+            
             if dialog.exec() == 1:
                 self.load_data()
                 self.data_changed.emit()
-                if self.audit_logger:
+                # ✅ Аудит фиксируется ТОЛЬКО если это режим редактирования (не читатель)
+                if self.audit_logger and not self.is_read_only:
                     self.audit_logger.log_action(
                         action_type='INCOMING_ORDER_EDITED',
                         table_name='incoming_orders',

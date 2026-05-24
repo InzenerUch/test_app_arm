@@ -62,10 +62,8 @@ class ServicePlacesTab(QWidget):
         
         # Настройка высоты строк
         self.places_table.verticalHeader().setDefaultSectionSize(35)
-        
-        # 🔒 Двойной клик для редактирования только если НЕ читатель
-        if not self.is_read_only:
-            self.places_table.doubleClicked.connect(self.on_place_double_clicked)
+    
+        self.places_table.doubleClicked.connect(self.on_place_double_clicked)
             
         layout.addWidget(self.places_table)
         
@@ -134,7 +132,7 @@ class ServicePlacesTab(QWidget):
     
     def on_place_double_clicked(self, index):
         """Обработчик двойного клика по записи"""
-        if self.is_read_only: return  # 🔒 Защита
+        # ✅ Убрана блокировка. Диалог откроется для всех ролей
         row = index.row()
         id_index = self.places_model.index(row, 0)
         place_id = self.places_model.data(id_index)
@@ -142,11 +140,14 @@ class ServicePlacesTab(QWidget):
             
         place_data = self.load_place_data(place_id)
         if place_data:
-            dialog = ServicePlaceDialog(self.db, self.krd_id, place_data, parent=self)
+            # ✅ ПЕРЕДАЁМ read_only=self.is_read_only в конструктор диалога
+            dialog = ServicePlaceDialog(self.db, self.krd_id, place_data, parent=self, read_only=self.is_read_only)
+            
             if dialog.exec() == 1:
                 self.load_data()
                 self.data_changed.emit()
-                if self.audit_logger:
+                # ✅ Аудит фиксируется ТОЛЬКО если это режим редактирования (не читатель)
+                if self.audit_logger and not self.is_read_only:
                     self.audit_logger.log_action(
                         action_type='SERVICE_PLACE_EDITED',
                         table_name='service_places',
@@ -154,7 +155,6 @@ class ServicePlacesTab(QWidget):
                         krd_id=self.krd_id,
                         description='Отредактировано место службы'
                     )
-    
     def on_delete_place(self):
         """Обработчик кнопки удаления места службы"""
         if self.is_read_only: return  # 🔒 Защита

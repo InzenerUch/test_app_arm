@@ -63,8 +63,7 @@ class SochEpisodesTab(QWidget):
         self.episodes_table.verticalHeader().setDefaultSectionSize(35)
         
         # 🔒 Двойной клик только если НЕ читатель
-        if not self.is_read_only:
-            self.episodes_table.doubleClicked.connect(self.on_episode_double_clicked)
+        self.episodes_table.doubleClicked.connect(self.on_episode_double_clicked)
             
         layout.addWidget(self.episodes_table)
         
@@ -194,21 +193,27 @@ class SochEpisodesTab(QWidget):
                 QMessageBox.critical(self, "Ошибка", f"❌ Ошибка при удалении:\n{str(e)}")
     
     def on_episode_double_clicked(self, index):
-        if self.is_read_only: return  # 🔒 Защита
+        """Обработчик двойного клика по записи"""
+        # ✅ Убрана блокировка. Диалог откроется для всех ролей
         row = index.row()
         episode_id = self.episodes_model.data(self.episodes_model.index(row, 0))
         if not episode_id: return
             
         episode_data = self.load_episode_data(episode_id)
         if episode_data:
-            dialog = SochEpisodeDialog(self.db, self.krd_id, episode_data, parent=self)
+            # ✅ ПЕРЕДАЁМ read_only=self.is_read_only в конструктор диалога
+            dialog = SochEpisodeDialog(self.db, self.krd_id, episode_data, parent=self, read_only=self.is_read_only)
+            
             if dialog.exec() == 1:
                 self.load_data()
                 self.data_changed.emit()
-                if self.audit_logger:
+                # ✅ Аудит фиксируется ТОЛЬКО если это режим редактирования (не читатель)
+                if self.audit_logger and not self.is_read_only:
                     self.audit_logger.log_action(
-                        action_type='SOCH_EDITED', table_name='soch_episodes',
-                        record_id=episode_id, krd_id=self.krd_id,
+                        action_type='SOCH_EDITED',
+                        table_name='soch_episodes',
+                        record_id=episode_id,
+                        krd_id=self.krd_id,
                         description='Отредактирован эпизод СОЧ'
                     )
     

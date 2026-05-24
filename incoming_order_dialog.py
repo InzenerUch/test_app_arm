@@ -1,6 +1,7 @@
 """
 Диалоговое окно для добавления/редактирования входящего поручения
 С поддержкой автодополнения, валидацией полей и кнопками настройки справочников
+✅ ДОБАВЛЕНО: Режим read_only для роли 'Читатель'
 ✅ ДОБАВЛЕНО: Кнопки ⚙️ для редактирования справочников (Тип инициатора, Военное управление)
 ✅ ДОБАВЛЕНО: Валидация QRegularExpressionValidator и setMaxLength по схеме БД
 ✅ УЛУЧШЕНО: Сохранение текущего выбора при обновлении списков справочников
@@ -15,12 +16,12 @@ from PyQt6.QtCore import QDate, QRegularExpression, pyqtSignal
 from PyQt6.QtGui import QRegularExpressionValidator, QFont
 from PyQt6.QtSql import QSqlQuery
 from autocomplete_helper import AutocompleteHelper
-from reference_editor_dialog import ReferenceEditorDialog  # ✅ Импорт редактора справочников
+from reference_editor_dialog import ReferenceEditorDialog
 
 
 class IncomingOrderDialog(QDialog):
     """Диалог для добавления/редактирования входящего поручения"""
-    def __init__(self, db_connection, krd_id, order_data=None, parent=None):
+    def __init__(self, db_connection, krd_id, order_data=None, parent=None, read_only=False):
         super().__init__(parent)
         self.db = db_connection
         self.krd_id = krd_id
@@ -28,17 +29,29 @@ class IncomingOrderDialog(QDialog):
         self.is_edit = order_data is not None
         self.order_id = order_data.get('id') if order_data else None
         self.parent_window = parent
+        self.read_only = read_only  # 🔒 Флаг режима просмотра
         
         self.autocomplete_helper = AutocompleteHelper(db_connection)
         
-        self.setWindowTitle("✏️ Редактирование поручения" if self.is_edit else "➕ Добавление поручения")
+        # Динамический заголовок
+        if self.read_only:
+            title = "👁️ Просмотр поручения"
+        elif self.is_edit:
+            title = "✏️ Редактирование поручения"
+        else:
+            title = "➕ Добавление поручения"
+        self.setWindowTitle(title)
+        
         self.setMinimumSize(950, 800)
         self.setModal(True)
         
         self.init_ui()
         self.load_data()
-        self.setup_autocomplete_fields()
-        self.setup_validators()
+        
+        # В режиме просмотра автодополнение и валидаторы не нужны
+        if not self.read_only:
+            self.setup_autocomplete_fields()
+            self.setup_validators()
 
     def _create_ref_combo(self, combo, table_name, reload_func):
         """Создает виджет: ComboBox + кнопка ⚙️ для настройки справочника"""
@@ -52,7 +65,6 @@ class IncomingOrderDialog(QDialog):
         btn.setToolTip(f"Настроить справочник: {table_name}")
         btn.setFixedSize(32, 32)
         btn.setProperty("role", "edit")
-       
         btn.clicked.connect(lambda: self.open_ref_editor(table_name, reload_func))
         lay.addWidget(btn)
         return widget
@@ -60,11 +72,8 @@ class IncomingOrderDialog(QDialog):
     def open_ref_editor(self, table_name, reload_func):
         """Открывает редактор справочников и подключается к сигналу data_changed"""
         dialog = ReferenceEditorDialog(self.db, self.parent_window or self, initial_table=table_name)
-        
-        # ✅ ПОДКЛЮЧАЕМСЯ К СИГНАЛУ data_changed
         dialog.data_changed.connect(lambda tbl: self._on_reference_changed(tbl, reload_func))
-        
-        dialog.exec()  # Не проверяем результат, сигнал сам вызовет обновление
+        dialog.exec()
 
     def _on_reference_changed(self, changed_table, reload_func):
         """Обработчик изменения справочника - обновляем ComboBox"""
@@ -76,7 +85,7 @@ class IncomingOrderDialog(QDialog):
         layout.setSpacing(15)
         layout.setContentsMargins(20, 20, 20, 20)
         
-        title_label = QLabel("✏️ Редактирование поручения" if self.is_edit else "➕ Добавление поручения")
+        title_label = QLabel(self.windowTitle())
         title_label.setFont(QFont("Arial", 14, QFont.Weight.Bold))
         layout.addWidget(title_label)
         
@@ -226,25 +235,69 @@ class IncomingOrderDialog(QDialog):
         scroll.setWidget(container)
         layout.addWidget(scroll)
         
-        button_box = QDialogButtonBox(
+        # 🔒 СОХРАНЯЕМ В АТРИБУТ ДЛЯ ПОСЛЕДУЮЩЕЙ МОДИФИКАЦИИ
+        self.button_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Save |
             QDialogButtonBox.StandardButton.Cancel
         )
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
+        self.button_box.accepted.connect(self.accept)
+        self.button_box.rejected.connect(self.reject)
         
-        save_btn = button_box.button(QDialogButtonBox.StandardButton.Save)
+        save_btn = self.button_box.button(QDialogButtonBox.StandardButton.Save)
         save_btn.setText("💾 Сохранить")
         save_btn.setProperty("role", "save")
         
-        cancel_btn = button_box.button(QDialogButtonBox.StandardButton.Cancel)
+        cancel_btn = self.button_box.button(QDialogButtonBox.StandardButton.Cancel)
         cancel_btn.setText("❌ Отмена")
         cancel_btn.setProperty("role", "danger")
         
-        layout.addWidget(button_box)
+        layout.addWidget(self.button_box)
+
+        # 🔒 ПРИМЕНЕНИЕ РЕЖИМА ПРОСМОТРА ПОСЛЕ ПОСТРОЕНИЯ UI
+        if self.read_only:
+            self._apply_readonly_mode()
+
+    def _apply_readonly_mode(self):
+        """Переводит все поля в режим ReadOnly и настраивает кнопки для просмотра"""
+        # Поля ввода -> ReadOnly
+        for w in [self.initiator_full_name_input, self.order_number_input, self.receipt_number_input,
+                  self.postal_index_input, self.postal_region_input, self.postal_district_input,
+                  self.postal_town_input, self.postal_street_input, self.postal_house_input,
+                  self.postal_building_input, self.postal_letter_input, self.postal_apartment_input,
+                  self.postal_room_input, self.initiator_contacts_input, self.our_response_number_input]:
+            if hasattr(w, 'setReadOnly'): w.setReadOnly(True)
+            
+        # Даты -> ReadOnly
+        for w in [self.order_date_input, self.receipt_date_input, self.our_response_date_input]:
+            if hasattr(w, 'setReadOnly'): w.setReadOnly(True)
+            
+        # Комбобоксы -> Disabled
+        for w in [self.initiator_type_combo, self.initiator_military_unit_combo]:
+            if hasattr(w, 'setEnabled'): w.setEnabled(False)
+            
+        # Кнопки ⚙️ -> Disabled
+        for btn in self.findChildren(QPushButton):
+            if btn.text() == "⚙️": btn.setEnabled(False)
+            
+        # ✅ ИЗМЕНЕНО: Безопасная настройка кнопок диалога
+        if hasattr(self, 'button_box'):
+            save_btn = self.button_box.button(QDialogButtonBox.StandardButton.Save)
+            if save_btn: 
+                save_btn.setVisible(False)
+                
+            cancel_btn = self.button_box.button(QDialogButtonBox.StandardButton.Cancel)
+            if cancel_btn:
+                cancel_btn.setText("🚪 Закрыть")
+                # ✅ ИСПРАВЛЕНО: Используем try/except, так как сигнал может быть не подключен явно
+                try:
+                    cancel_btn.clicked.disconnect()
+                except TypeError:
+                    pass
+                cancel_btn.clicked.connect(self.accept)
 
     def setup_validators(self):
         """✅ Настройка валидаторов и ограничений длины по схеме БД"""
+        if self.read_only: return  # 🔒 Пропускаем в режиме чтения
         
         # === Ограничения длины (VARCHAR) ===
         self.initiator_full_name_input.setMaxLength(255)
@@ -264,14 +317,8 @@ class IncomingOrderDialog(QDialog):
         self.initiator_contacts_input.setMaxLength(255)
 
         # === Регулярные выражения (QRegularExpressionValidator) ===
-        
-        # Индекс: только цифры
         self.postal_index_input.setValidator(QRegularExpressionValidator(QRegularExpression(r"^\d{0,20}$")))
-        
-        # Литер: буквы или цифры
         self.postal_letter_input.setValidator(QRegularExpressionValidator(QRegularExpression(r"^[а-яА-Яa-zA-Z0-9]{0,10}$")))
-        
-        # Номера документов: цифры, буквы, №, /, -
         doc_regex = QRegularExpression(r"^[0-9а-яА-Яa-zA-Z№/\-\s]{0,100}$")
         self.order_number_input.setValidator(QRegularExpressionValidator(doc_regex))
         self.receipt_number_input.setValidator(QRegularExpressionValidator(doc_regex))
@@ -282,37 +329,31 @@ class IncomingOrderDialog(QDialog):
         current_id = self.initiator_type_combo.currentData()
         self.initiator_type_combo.clear()
         self.initiator_type_combo.addItem("— Выберите тип —", None)
-        
         query = QSqlQuery(self.db)
         query.exec("SELECT id, name FROM krd.initiator_types ORDER BY name")
         while query.next():
             self.initiator_type_combo.addItem(query.value(1), query.value(0))
-            
         if current_id is not None:
             idx = self.initiator_type_combo.findData(current_id)
-            if idx >= 0: 
-                self.initiator_type_combo.setCurrentIndex(idx)
-                print(f"✅ Восстановлен выбор типа инициатора: {current_id}")
+            if idx >= 0: self.initiator_type_combo.setCurrentIndex(idx)
 
     def load_military_units(self):
         """Загрузка военных управлений с сохранением выбора"""
         current_id = self.initiator_military_unit_combo.currentData()
         self.initiator_military_unit_combo.clear()
         self.initiator_military_unit_combo.addItem("— Выберите управление —", None)
-        
         query = QSqlQuery(self.db)
         query.exec("SELECT id, name FROM krd.military_units ORDER BY name")
         while query.next():
             self.initiator_military_unit_combo.addItem(query.value(1), query.value(0))
-            
         if current_id is not None:
             idx = self.initiator_military_unit_combo.findData(current_id)
-            if idx >= 0: 
-                self.initiator_military_unit_combo.setCurrentIndex(idx)
-                print(f"✅ Восстановлен выбор военного управления: {current_id}")
+            if idx >= 0: self.initiator_military_unit_combo.setCurrentIndex(idx)
 
     def setup_autocomplete_fields(self):
         """Настройка автодополнения для почтовых полей"""
+        if self.read_only: return  # 🔒 Пропускаем в режиме чтения
+        
         fields_config = [
             (self.initiator_full_name_input, 'initiator_full_name', 30),
             (self.postal_region_input, 'postal_region', 20),
@@ -327,44 +368,31 @@ class IncomingOrderDialog(QDialog):
             (self.initiator_contacts_input, 'initiator_contacts', 20),
             (self.our_response_number_input, 'our_response_number', 15),
         ]
-        
         for field_widget, column_name, max_items in fields_config:
-            self.autocomplete_helper.setup_autocomplete(
-                field_widget, 'incoming_orders', column_name, 
-                max_items=max_items, show_on_focus=True
-            )
+            self.autocomplete_helper.setup_autocomplete(field_widget, 'incoming_orders', column_name, max_items=max_items, show_on_focus=True)
 
     def load_data(self):
         """Загрузка данных поручения для редактирования"""
-        if not self.order_data:
-            return
+        if not self.order_data: return
             
-        # Тип инициатора
         initiator_type_id = self.order_data.get('initiator_type_id')
         if initiator_type_id:
             index = self.initiator_type_combo.findData(initiator_type_id)
-            if index >= 0: 
-                self.initiator_type_combo.setCurrentIndex(index)
-                print(f"✅ Загружен тип инициатора: {initiator_type_id}")
+            if index >= 0: self.initiator_type_combo.setCurrentIndex(index)
             
         self.initiator_full_name_input.setText(self.order_data.get('initiator_full_name') or '')
         
-        # Военное управление
         military_unit_id = self.order_data.get('military_unit_id')
         if military_unit_id:
             index = self.initiator_military_unit_combo.findData(military_unit_id)
-            if index >= 0: 
-                self.initiator_military_unit_combo.setCurrentIndex(index)
-                print(f"✅ Загружено военное управление: {military_unit_id}")
+            if index >= 0: self.initiator_military_unit_combo.setCurrentIndex(index)
             
         order_date = self.order_data.get('order_date')
         if order_date: self.order_date_input.setDate(order_date)
-        
         self.order_number_input.setText(self.order_data.get('order_number') or '')
         
         receipt_date = self.order_data.get('receipt_date')
         if receipt_date: self.receipt_date_input.setDate(receipt_date)
-        
         self.receipt_number_input.setText(self.order_data.get('receipt_number') or '')
         
         self.postal_index_input.setText(self.order_data.get('postal_index') or '')
@@ -377,58 +405,40 @@ class IncomingOrderDialog(QDialog):
         self.postal_letter_input.setText(self.order_data.get('postal_letter') or '')
         self.postal_apartment_input.setText(self.order_data.get('postal_apartment') or '')
         self.postal_room_input.setText(self.order_data.get('postal_room') or '')
-        
         self.initiator_contacts_input.setText(self.order_data.get('initiator_contacts') or '')
         
         our_response_date = self.order_data.get('our_response_date')
         if our_response_date: self.our_response_date_input.setDate(our_response_date)
-        
         self.our_response_number_input.setText(self.order_data.get('our_response_number') or '')
 
     def validate_fields(self):
         """Валидация обязательных полей перед сохранением"""
         errors = []
-        
-        if self.initiator_type_combo.currentData() is None:
-            errors.append("• Выберите тип инициатора")
-        if not self.initiator_full_name_input.text().strip():
-            errors.append("• Введите полное наименование инициатора")
-        if self.initiator_military_unit_combo.currentData() is None:
-            errors.append("• Выберите военное управление")
-        if not self.order_date_input.date().isValid():
-            errors.append("• Укажите дату поручения")
-        if not self.order_number_input.text().strip():
-            errors.append("• Введите номер поручения")
-        if not self.receipt_date_input.date().isValid():
-            errors.append("• Укажите дату поступления в ВК")
-        if not self.receipt_number_input.text().strip():
-            errors.append("• Введите входящий номер в ВК")
-            
-        if errors:
-            return False, "Обнаружены ошибки в заполнении формы:\n\n" + "\n".join(errors)
+        if self.initiator_type_combo.currentData() is None: errors.append("• Выберите тип инициатора")
+        if not self.initiator_full_name_input.text().strip(): errors.append("• Введите полное наименование инициатора")
+        if self.initiator_military_unit_combo.currentData() is None: errors.append("• Выберите военное управление")
+        if not self.order_date_input.date().isValid(): errors.append("• Укажите дату поручения")
+        if not self.order_number_input.text().strip(): errors.append("• Введите номер поручения")
+        if not self.receipt_date_input.date().isValid(): errors.append("• Укажите дату поступления в ВК")
+        if not self.receipt_number_input.text().strip(): errors.append("• Введите входящий номер в ВК")
+        if errors: return False, "Обнаружены ошибки в заполнении формы:\n\n" + "\n".join(errors)
         return True, ""
 
     def get_data(self):
         """Получение данных из формы"""
         return {
-            "krd_id": self.krd_id,
-            "initiator_type_id": self.initiator_type_combo.currentData(),
+            "krd_id": self.krd_id, "initiator_type_id": self.initiator_type_combo.currentData(),
             "initiator_full_name": self.initiator_full_name_input.text().strip(),
             "military_unit_id": self.initiator_military_unit_combo.currentData(),
             "order_date": self.order_date_input.date().toString("yyyy-MM-dd"),
             "order_number": self.order_number_input.text().strip(),
             "receipt_date": self.receipt_date_input.date().toString("yyyy-MM-dd"),
             "receipt_number": self.receipt_number_input.text().strip(),
-            "postal_index": self.postal_index_input.text().strip(),
-            "postal_region": self.postal_region_input.text().strip(),
-            "postal_district": self.postal_district_input.text().strip(),
-            "postal_town": self.postal_town_input.text().strip(),
-            "postal_street": self.postal_street_input.text().strip(),
-            "postal_house": self.postal_house_input.text().strip(),
-            "postal_building": self.postal_building_input.text().strip(),
-            "postal_letter": self.postal_letter_input.text().strip(),
-            "postal_apartment": self.postal_apartment_input.text().strip(),
-            "postal_room": self.postal_room_input.text().strip(),
+            "postal_index": self.postal_index_input.text().strip(), "postal_region": self.postal_region_input.text().strip(),
+            "postal_district": self.postal_district_input.text().strip(), "postal_town": self.postal_town_input.text().strip(),
+            "postal_street": self.postal_street_input.text().strip(), "postal_house": self.postal_house_input.text().strip(),
+            "postal_building": self.postal_building_input.text().strip(), "postal_letter": self.postal_letter_input.text().strip(),
+            "postal_apartment": self.postal_apartment_input.text().strip(), "postal_room": self.postal_room_input.text().strip(),
             "initiator_contacts": self.initiator_contacts_input.text().strip(),
             "our_response_date": self.our_response_date_input.date().toString("yyyy-MM-dd"),
             "our_response_number": self.our_response_number_input.text().strip()
@@ -436,13 +446,16 @@ class IncomingOrderDialog(QDialog):
 
     def accept(self):
         """Сохранение данных при нажатии OK"""
+        if self.read_only:
+            super().accept()  # 🔒 В режиме чтения просто закрываем окно
+            return
+
         is_valid, error_message = self.validate_fields()
         if not is_valid:
             QMessageBox.warning(self, "Ошибка валидации", error_message, QMessageBox.StandardButton.Ok)
             return
             
         data = self.get_data()
-        
         try:
             query = QSqlQuery(self.db)
             self.db.transaction()
@@ -479,18 +492,12 @@ class IncomingOrderDialog(QDialog):
                         :our_response_date, :our_response_number
                     )
                 """)
-                
-            for key, value in data.items():
-                query.bindValue(f":{key}", value)
-                
-            if not query.exec():
-                raise Exception(f"Ошибка SQL: {query.lastError().text()}")
-                
+            for key, value in data.items(): query.bindValue(f":{key}", value)
+            if not query.exec(): raise Exception(f"Ошибка SQL: {query.lastError().text()}")
             self.db.commit()
             self.autocomplete_helper.clear_cache()
             QMessageBox.information(self, "Успех", "Поручение успешно " + ("обновлено" if self.is_edit else "добавлено"))
             super().accept()
-            
         except Exception as e:
             self.db.rollback()
             QMessageBox.critical(self, "Ошибка", f"Ошибка сохранения:\n{str(e)}")

@@ -23,7 +23,7 @@ class KrdExcelExporter:
         "social_data": {
             "title": "Социально-демографические данные",
             "fields": [
-                ("krd_number", "№ КРД"), ("tab_number", "Табельный номер"), ("personal_number", "Личный номер"),
+                ("krd_number", "№ КРД"), ("krd_status", "Статус КРД"), ("tab_number", "Табельный номер"), ("personal_number", "Личный номер"),
                 ("category_name", "Категория военнослужащего"), ("rank_name", "Воинское звание"),
                 ("surname", "Фамилия"), ("name", "Имя"), ("patronymic", "Отчество"),
                 ("birth_date", "Дата рождения"), ("birth_place_town", "Населенный пункт места рождения"),
@@ -64,7 +64,7 @@ class KrdExcelExporter:
         "service_places": {
             "title": "Места службы",
             "fields": [
-                ("place_name", "Наименование места службы"), ("military_unit_name", "Военное управление места службы"),
+                ("place_name", "Наименование места службы"), ("military_unit_number", "Номер в/ч"), ("military_unit_name", "Военное управление места службы"),
                 ("garrison_name", "Гарнизон места службы"), ("position_name", "Воинская должность"),
                 ("commanders", "Командиры (начальники)"), ("postal_index", "Индекс"),
                 ("postal_region", "Субъект РФ"), ("postal_town", "Населенный пункт"), ("postal_street", "Улица"),
@@ -296,9 +296,6 @@ class KrdExcelExporter:
                     ws.cell(row=row, column=c_idx, value=value).border = self.thin_border
                 
                 row += 1
-            
-            # Пустая строка-разделитель между КРД
-            row += 1
 
         self._log("DEBUG", f"🏁 Заполнение таблицы завершено. Последняя строка: {row}")
         return row
@@ -306,15 +303,22 @@ class KrdExcelExporter:
     # ================= ЗАГРУЗЧИКИ ДАННЫХ (БЕЗОПАСНЫЕ SQL) =================
     def _load_social_data_for_krd(self, krd_id):
         q = QSqlQuery(self.db)
-        q.prepare("""SELECT kr.id as krd_id, s.tab_number, s.personal_number, c.name as category_name, r.name as rank_name,
-            s.surname, s.name, s.patronymic, s.birth_date, s.birth_place_town, s.birth_place_district, s.birth_place_region, s.birth_place_country,
-            s.drafted_by_commissariat, s.draft_date, s.povsk, s.selection_date, s.education, s.criminal_record, s.social_media_account, s.bank_card_number,
-            s.passport_series, s.passport_number, s.passport_issue_date, s.passport_issued_by, s.military_id_series, s.military_id_number,
-            s.military_id_issue_date, s.military_id_issued_by, s.appearance_features, s.personal_marks, s.federal_search_info, s.military_contacts, s.relatives_info
-            FROM krd.social_data s 
-            LEFT JOIN krd.krd kr ON s.krd_id = kr.id 
-            LEFT JOIN krd.categories c ON s.category_id = c.id 
+        q.prepare(""" SELECT kr.id as krd_id, s.tab_number, s.personal_number, 
+                   c.name as category_name, r.name as rank_name,
+                   COALESCE(st.name, 'Не задан') as krd_status, 
+                   s.surname, s.name, s.patronymic, s.birth_date, 
+                   s.birth_place_town, s.birth_place_district, s.birth_place_region, s.birth_place_country,
+                   s.drafted_by_commissariat, s.draft_date, s.povsk, s.selection_date, 
+                   s.education, s.criminal_record, s.social_media_account, s.bank_card_number,
+                   s.passport_series, s.passport_number, s.passport_issue_date, s.passport_issued_by,
+                   s.military_id_series, s.military_id_number, s.military_id_issue_date, s.military_id_issued_by,
+                   s.appearance_features, s.personal_marks, s.federal_search_info, 
+                   s.military_contacts, s.relatives_info
+            FROM krd.social_data s
+            LEFT JOIN krd.krd kr ON s.krd_id = kr.id
+            LEFT JOIN krd.categories c ON s.category_id = c.id
             LEFT JOIN krd.ranks r ON s.rank_id = r.id
+            LEFT JOIN krd.statuses st ON kr.status_id = st.id
             WHERE s.krd_id = :krd_id ORDER BY s.id DESC LIMIT 1""")
         q.bindValue(":krd_id", krd_id)
         if not q.exec():
@@ -322,22 +326,42 @@ class KrdExcelExporter:
             return {}
         if q.next():
             return {
-                "krd_number": f"КРД-{q.value('krd_id')}", "tab_number": q.value("tab_number") or "", "personal_number": q.value("personal_number") or "",
-                "category_name": q.value("category_name") or "", "rank_name": q.value("rank_name") or "", "surname": q.value("surname") or "",
-                "name": q.value("name") or "", "patronymic": q.value("patronymic") or "", "birth_date": q.value("birth_date"),
-                "birth_place_town": q.value("birth_place_town") or "", "birth_place_district": q.value("birth_place_district") or "",
-                "birth_place_region": q.value("birth_place_region") or "", "birth_place_country": q.value("birth_place_country") or "",
-                "drafted_by_commissariat": q.value("drafted_by_commissariat") or "", "draft_date": q.value("draft_date"),
-                "povsk": q.value("povsk") or "", "selection_date": q.value("selection_date"), "education": q.value("education") or "",
-                "criminal_record": q.value("criminal_record") or "", "social_media_account": q.value("social_media_account") or "",
-                "bank_card_number": q.value("bank_card_number") or "", "passport_series": q.value("passport_series") or "",
-                "passport_number": q.value("passport_number") or "", "passport_issue_date": q.value("passport_issue_date"),
-                "passport_issued_by": q.value("passport_issued_by") or "", "military_id_series": q.value("military_id_series") or "",
-                "military_id_number": q.value("military_id_number") or "", "military_id_issue_date": q.value("military_id_issue_date"),
-                "military_id_issued_by": q.value("military_id_issued_by") or "", "appearance_features": q.value("appearance_features") or "",
-                "personal_marks": q.value("personal_marks") or "", "federal_search_info": q.value("federal_search_info") or "",
-                "military_contacts": q.value("military_contacts") or "", "relatives_info": q.value("relatives_info") or ""
-            }
+                 "krd_number": f"КРД-{q.value('krd_id')}",
+                "krd_status": q.value("krd_status"), # ✅ ВОЗВРАЩАЕМ СТАТУС
+                "tab_number": q.value("tab_number") or "", 
+                "personal_number": q.value("personal_number") or "",
+                "category_name": q.value("category_name") or "", 
+                "rank_name": q.value("rank_name") or "", 
+                "surname": q.value("surname") or "",
+                "name": q.value("name") or "", 
+                "patronymic": q.value("patronymic") or "", 
+                "birth_date": q.value("birth_date"),
+                "birth_place_town": q.value("birth_place_town") or "", 
+                "birth_place_district": q.value("birth_place_district") or "",
+                "birth_place_region": q.value("birth_place_region") or "", 
+                "birth_place_country": q.value("birth_place_country") or "",
+                "drafted_by_commissariat": q.value("drafted_by_commissariat") or "", 
+                "draft_date": q.value("draft_date"),
+                "povsk": q.value("povsk") or "", 
+                "selection_date": q.value("selection_date"), 
+                "education": q.value("education") or "",
+                "criminal_record": q.value("criminal_record") or "", 
+                "social_media_account": q.value("social_media_account") or "",
+                "bank_card_number": q.value("bank_card_number") or "", 
+                "passport_series": q.value("passport_series") or "",
+                "passport_number": q.value("passport_number") or "", 
+                "passport_issue_date": q.value("passport_issue_date"),
+                "passport_issued_by": q.value("passport_issued_by") or "", 
+                "military_id_series": q.value("military_id_series") or "",
+                "military_id_number": q.value("military_id_number") or "", 
+                "military_id_issue_date": q.value("military_id_issue_date"),
+                "military_id_issued_by": q.value("military_id_issued_by") or "", 
+                "appearance_features": q.value("appearance_features") or "",
+                "personal_marks": q.value("personal_marks") or "", 
+                "federal_search_info": q.value("federal_search_info") or "",
+                "military_contacts": q.value("military_contacts") or "", 
+                "relatives_info": q.value("relatives_info") or ""
+                }
         return {}
 
     def _load_addresses_for_krd(self, krd_id):
@@ -363,26 +387,38 @@ class KrdExcelExporter:
 
     def _load_service_places_for_krd(self, krd_id):
         q = QSqlQuery(self.db)
-        q.prepare("""SELECT s.place_name, m.name as military_unit_name, g.name as garrison_name, p.name as position_name, s.commanders, 
-            s.postal_index, s.postal_region, s.postal_district, s.postal_town, s.postal_street, s.postal_house, s.place_contacts 
-            FROM krd.service_places s 
-            LEFT JOIN krd.military_units m ON s.military_unit_id = m.id 
-            LEFT JOIN krd.garrisons g ON s.garrison_id = g.id 
-            LEFT JOIN krd.positions p ON s.position_id = p.id 
-            WHERE s.krd_id = :krd_id ORDER BY s.id DESC""")
+        q.prepare("""
+            SELECT s.place_name, s.military_unit_number, m.name as military_unit_name, 
+                   g.name as garrison_name, p.name as position_name, s.commanders,
+                   s.postal_index, s.postal_region, s.postal_district, s.postal_town, 
+                   s.postal_street, s.postal_house, s.place_contacts
+            FROM krd.service_places s
+            LEFT JOIN krd.military_units m ON s.military_unit_id = m.id
+            LEFT JOIN krd.garrisons g ON s.garrison_id = g.id
+            LEFT JOIN krd.positions p ON s.position_id = p.id
+            WHERE s.krd_id = :krd_id ORDER BY s.id DESC
+        """)
         q.bindValue(":krd_id", krd_id)
         if not q.exec():
             self._log("SQL", f"❌ Ошибка SQL (service_places): {q.lastError().text()}")
             return []
+            
         results = []
         while q.next():
             results.append({
-                "place_name": q.value("place_name") or "", "military_unit_name": q.value("military_unit_name") or "",
-                "garrison_name": q.value("garrison_name") or "", "position_name": q.value("position_name") or "",
-                "commanders": q.value("commanders") or "", "postal_index": q.value("postal_index") or "",
-                "postal_region": q.value("postal_region") or "", "postal_district": q.value("postal_district") or "",
-                "postal_town": q.value("postal_town") or "", "postal_street": q.value("postal_street") or "",
-                "postal_house": q.value("postal_house") or "", "place_contacts": q.value("place_contacts") or ""
+                "place_name": q.value("place_name") or "",
+                "military_unit_number": q.value("military_unit_number") or "", # ✅ НОВОЕ ПОЛЕ
+                "military_unit_name": q.value("military_unit_name") or "",
+                "garrison_name": q.value("garrison_name") or "", 
+                "position_name": q.value("position_name") or "",
+                "commanders": q.value("commanders") or "", 
+                "postal_index": q.value("postal_index") or "",
+                "postal_region": q.value("postal_region") or "", 
+                "postal_district": q.value("postal_district") or "",
+                "postal_town": q.value("postal_town") or "", 
+                "postal_street": q.value("postal_street") or "",
+                "postal_house": q.value("postal_house") or "", 
+                "place_contacts": q.value("place_contacts") or ""
             })
         self._log("DATA", f"   🎖️ Загружено мест службы: {len(results)}")
         return results

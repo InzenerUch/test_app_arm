@@ -90,30 +90,35 @@ class KrdDetailsWindow(QDialog):
         # === ВКЛАДКИ ===
         self.tabs = QTabWidget()
         
-        # 🔧 СОХРАНЯЕМ ССЫЛКИ НА ВКЛАДКИ
+        # 🔧 СОХРАНЯЕМ ССЫЛКИ НА ОСНОВНЫЕ ВКЛАДКИ (доступны всем)
         self.social_data_tab = SocialDataTab(self.krd_id, self.db, self.audit_logger, self.user_info)
         self.addresses_tab = AddressesTab(self.krd_id, self.db, self.audit_logger, self.user_info)
         self.incoming_orders_tab = IncomingOrdersTab(self.krd_id, self.db, self.audit_logger, self.user_info)
         self.service_places_tab = ServicePlacesTab(self.krd_id, self.db, self.audit_logger, self.user_info)
         self.soch_episodes_tab = SochEpisodesTab(self.krd_id, self.db, self.audit_logger, self.user_info)
 
-        # ✅ 1. ПЕРЕДАЕМ user_info В OUTGOING_REQUESTS_TAB
-        self.outgoing_requests_tab = OutgoingRequestsTab(self.krd_id, self.db, self.audit_logger, self.user_info)
-        
-        # Добавляем вкладки
+        # Добавляем базовые вкладки
         self.tabs.addTab(self.social_data_tab, "👤 Социально-демографические данные")
         self.tabs.addTab(self.addresses_tab, "🏠 Адреса проживания")
         self.tabs.addTab(self.incoming_orders_tab, "📬 Входящие поручения")
         self.tabs.addTab(self.service_places_tab, "🎖️ Места службы")
         self.tabs.addTab(self.soch_episodes_tab, "⚠️ Сведения о СОЧ")
-        self.tabs.addTab(self.outgoing_requests_tab, "📤 Запросы и поручения")
         
-        # ✅ 2. БЕЗОПАСНОЕ ПОДКЛЮЧЕНИЕ СИГНАЛОВ (Только если генератор существует)
-        if hasattr(self.outgoing_requests_tab, 'generator_tab') and self.outgoing_requests_tab.generator_tab is not None:
-            self.addresses_tab.data_changed.connect(self.outgoing_requests_tab.generator_tab.load_related_records)
-            self.service_places_tab.data_changed.connect(self.outgoing_requests_tab.generator_tab.load_related_records)
-            self.soch_episodes_tab.data_changed.connect(self.outgoing_requests_tab.generator_tab.load_related_records)
-            self.incoming_orders_tab.data_changed.connect(self.outgoing_requests_tab.generator_tab.load_related_records)
+        # ✅ СКРЫВАЕМ ВКЛАДКУ ЗАПРОСОВ ДЛЯ РОЛИ 'READER'
+        if not is_reader(self.user_info):
+            self.outgoing_requests_tab = OutgoingRequestsTab(self.krd_id, self.db, self.audit_logger, self.user_info)
+            self.tabs.addTab(self.outgoing_requests_tab, "📤 Запросы и поручения")
+            
+            # ✅ ПОДКЛЮЧЕНИЕ СИГНАЛОВ (только для операторов/админов)
+            if hasattr(self.outgoing_requests_tab, 'generator_tab') and self.outgoing_requests_tab.generator_tab is not None:
+                self.addresses_tab.data_changed.connect(self.outgoing_requests_tab.generator_tab.load_related_records)
+                self.service_places_tab.data_changed.connect(self.outgoing_requests_tab.generator_tab.load_related_records)
+                self.soch_episodes_tab.data_changed.connect(self.outgoing_requests_tab.generator_tab.load_related_records)
+                self.incoming_orders_tab.data_changed.connect(self.outgoing_requests_tab.generator_tab.load_related_records)
+        else:
+            # Для читателя вкладка не создаётся, чтобы исключить лишнюю нагрузку и доступ к генератору
+            self.outgoing_requests_tab = None
+            print("👁️ [READ-ONLY] Вкладка '📤 Запросы и поручения' скрыта для роли 'reader'.")
             
         self.tabs.currentChanged.connect(self._on_tab_switched)
         main_layout.addWidget(self.tabs)

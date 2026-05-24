@@ -344,6 +344,9 @@ class SocialDataTab(QWidget):
         return ";\n".join(errors) if errors else None
 
     def setup_autocomplete_fields(self):
+        if self.is_read_only:
+            print("🔒 [AUTO-COMPLETE] Отключено для режима чтения.")
+            return
         fields = [
             (self.surname_input, 'surname', 50), (self.name_input, 'name', 50), (self.patronymic_input, 'patronymic', 50),
             (self.tab_number_input, 'tab_number', 30), (self.personal_number_input, 'personal_number', 30),

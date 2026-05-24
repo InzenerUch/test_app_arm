@@ -73,8 +73,9 @@ class MainWindow(QMainWindow):
             1: "s.surname",     # Фамилия
             2: "s.name",        # Имя
             3: "s.patronymic",  # Отчество
-            4: "st.name",       # Статус
-            5: "lk.usename"     # Занято пользователем (сортировка по логину)
+            4: "s.birth_date",
+            5: "st.name",       # Статус
+            6: "lk.usename"     # Занято пользователем (сортировка по логину)
         }
         
         self.search_timer = QTimer()
@@ -112,7 +113,10 @@ class MainWindow(QMainWindow):
     
     def create_menu_bar(self):
         menu_bar = self.menuBar()
-        
+        # Определяем роль текущего пользователя
+        is_reader = self.user_info.get('role', '').lower() == 'reader'
+        is_admin = self.user_info.get('role') == 'admin'
+
         # === МЕНЮ "ФАЙЛ" ===
         file_menu = menu_bar.addMenu("Файл")
         exit_action = QAction("Выход", self)
@@ -120,45 +124,47 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
         
-        # === МЕНЮ "ОТЧЕТЫ" ===
+        # === МЕНЮ "ОТЧЕТЫ" (Блокируется для читателя) ===
         reports_menu = menu_bar.addMenu("📊 Отчеты")
-        generate_all_reports_action = QAction("📥 Отчеты по всем КРД...", self)
-        generate_all_reports_action.setShortcut("Ctrl+E")
-        generate_all_reports_action.setToolTip("Сгенерировать отчеты по всем КРД в базе данных с выбором шаблона")
-        generate_all_reports_action.triggered.connect(self.on_generate_all_reports)
-        reports_menu.addAction(generate_all_reports_action)
-        
-        # === МЕНЮ "СПРАВОЧНИКИ" ===
+        if is_reader:
+            reports_menu.setEnabled(False)
+            reports_menu.setToolTip("🔒 Выгрузка отчетов доступна только операторам и администраторам")
+        else:
+            generate_all_reports_action = QAction("📥 Отчеты по всем КРД...", self)
+            generate_all_reports_action.setShortcut("Ctrl+E")
+            generate_all_reports_action.setToolTip("Сгенерировать отчеты по всем КРД в базе данных с выбором шаблона")
+            generate_all_reports_action.triggered.connect(self.on_generate_all_reports)
+            reports_menu.addAction(generate_all_reports_action)
+            
+        # === МЕНЮ "СПРАВОЧНИКИ" (Блокируется для читателя) ===
         ref_menu = menu_bar.addMenu("📚 Справочники")
-        all_refs_action = QAction("📋 Все справочники", self)
-        all_refs_action.setShortcut("Ctrl+R")
-        all_refs_action.triggered.connect(self.open_reference_editor)
-        ref_menu.addAction(all_refs_action)
-        ref_menu.addSeparator()
-        
-        for name, table in [("Категории", "categories"), ("Звания", "ranks"), ("Статусы", "statuses"), 
-                            ("Военные управления", "military_units"), ("Гарнизоны", "garrisons"), 
-                            ("Должности", "positions"), ("Типы запросов", "request_types"), ("Типы инициаторов", "initiator_types")]:
-            act = QAction(name, self)
-            act.triggered.connect(lambda checked, t=table: self.open_reference_editor(t))
-            ref_menu.addAction(act)
+        if is_reader:
+            ref_menu.setEnabled(False)
+            ref_menu.setToolTip("🔒 Редактирование справочников доступно только операторам и администраторам")
+        else:
+            all_refs_action = QAction("📋 Все справочники", self)
+            all_refs_action.setShortcut("Ctrl+R")
+            all_refs_action.triggered.connect(self.open_reference_editor)
+            ref_menu.addAction(all_refs_action)
+            ref_menu.addSeparator()
+            
+            for name, table in [("Категории", "categories"), ("Звания", "ranks"), ("Статусы", "statuses"), 
+                                ("Военные управления", "military_units"), ("Гарнизоны", "garrisons"), 
+                                ("Должности", "positions"), ("Типы запросов", "request_types"), ("Типы инициаторов", "initiator_types")]:
+                act = QAction(name, self)
+                act.triggered.connect(lambda checked, t=table: self.open_reference_editor(t))
+                ref_menu.addAction(act)
 
-        # === МЕНЮ "АДМИНИСТРИРОВАНИЕ" (НОВОЕ) ===
+        # === МЕНЮ "АДМИНИСТРИРОВАНИЕ" ===
         admin_menu = menu_bar.addMenu("🛡️ Администрирование")
-        
-        # Пункты для всех (или можно скрыть по роли, но обычно аудит видят все или только админы)
-        # Переносим сюда функции управления
-        
-        # Только для администраторов
-        if self.user_info.get('role') == 'admin':
+        if is_admin:
             admin_menu.addAction("👥 Управление пользователями", self.open_user_management)
             admin_menu.addAction("📁 Удаленные записи", self.open_deleted_records_window)
             admin_menu.addAction("📋 Аудит действий пользователей", self.open_user_audit_window)
             admin_menu.addAction("⚙️ Управление шаблонами отчетов", self.on_manage_templates)
         else:
-            # Если нужно показать что-то обычным пользователям, добавьте сюда
-            admin_menu.addAction("📋 Аудит действий пользователей", self.open_user_audit_window)
-            admin_menu.setEnabled(False) # Пример: отключить меню для не-админов
+            # Скрываем меню полностью для обычных пользователей и читателей
+            admin_menu.setVisible(False) 
         
         # === МЕНЮ "НАСТРОЙКИ" ===
         settings_menu = self.menuBar().addMenu("⚙️ Настройки")
@@ -167,7 +173,6 @@ class MainWindow(QMainWindow):
         # === МЕНЮ "СПРАВКА" ===
         help_menu = menu_bar.addMenu("Справка")
         help_menu.addAction("О программе", self.show_about_dialog)
-    
     def create_toolbar(self):
         toolbar = self.addToolBar("Основная панель")
         toolbar.addAction("🔄 Обновить", self.load_krd_data)
@@ -350,28 +355,32 @@ class MainWindow(QMainWindow):
     def _get_base_query(self):
         """Формирует базовый SQL-запрос с учетом новой структуры колонок"""
         return """
-            SELECT
-                k.id AS "№ КРД",
-                COALESCE(s.surname, '') AS "Фамилия",
-                COALESCE(s.name, '') AS "Имя",
-                COALESCE(s.patronymic, '') AS "Отчество",
-                COALESCE(st.name, 'Неизвестен') AS "Статус",
-                -- ✅ ИЗМЕНЕНО: Теперь показываем application_name (логин программы)
-                CASE 
-                    WHEN lk.application_name IS NOT NULL THEN lk.application_name
-                    ELSE '🟢 Не занято'
-                END AS "Занято пользователем"
-            FROM krd.krd k
-            LEFT JOIN krd.social_data s ON k.id = s.krd_id
-            LEFT JOIN krd.statuses st ON k.status_id = st.id
-            LEFT JOIN pg_locks pl ON pl.locktype = 'advisory' 
-                AND pl.classid = 0 
-                AND pl.objid = k.id 
-                AND pl.objsubid = 1 
-                AND pl.granted = true
-            LEFT JOIN pg_stat_activity lk ON lk.pid = pl.pid
-            WHERE k.is_deleted = FALSE
-            ORDER BY {sort_field} {sort_order}
+        SELECT
+            k.id AS "№ КРД",
+            COALESCE(s.surname, '') AS "Фамилия",
+            COALESCE(s.name, '') AS "Имя",
+            COALESCE(s.patronymic, '') AS "Отчество",
+            
+            -- ✅ ДОБАВЛЕНО: Дата рождения
+            s.birth_date AS "Дата рождения", 
+            
+            COALESCE(st.name, 'Неизвестен') AS "Статус",
+            -- ✅ ИЗМЕНЕНО: Теперь показываем application_name (логин программы)
+            CASE
+                WHEN lk.application_name IS NOT NULL THEN lk.application_name
+                ELSE '🟢 Не занято'
+            END AS "Занято пользователем"
+        FROM krd.krd k
+        LEFT JOIN krd.social_data s ON k.id = s.krd_id
+        LEFT JOIN krd.statuses st ON k.status_id = st.id
+        LEFT JOIN pg_locks pl ON pl.locktype = 'advisory'
+            AND pl.classid = 0
+            AND pl.objid = k.id
+            AND pl.objsubid = 1
+            AND pl.granted = true
+        LEFT JOIN pg_stat_activity lk ON lk.pid = pl.pid
+        WHERE k.is_deleted = FALSE
+        ORDER BY {sort_field} {sort_order}
         """
 
     def load_krd_data(self):
@@ -387,11 +396,12 @@ class MainWindow(QMainWindow):
                 "WHERE k.is_deleted = FALSE",
                 """WHERE k.is_deleted = FALSE
                 AND (
-                    LOWER(s.surname) LIKE LOWER(:search) OR
-                    LOWER(s.name) LIKE LOWER(:search) OR
-                    LOWER(s.patronymic) LIKE LOWER(:search) OR
-                    LOWER(k.id::text) LIKE LOWER(:search) OR
-                    LOWER(s.surname || ' ' || s.name || ' ' || s.patronymic) LIKE LOWER(:search)
+                LOWER(s.surname) LIKE LOWER(:search) OR
+                LOWER(s.name) LIKE LOWER(:search) OR
+                LOWER(s.patronymic) LIKE LOWER(:search) OR
+                LOWER(k.id::text) LIKE LOWER(:search) OR
+                LOWER(s.surname || ' ' || s.name || ' ' || s.patronymic) LIKE LOWER(:search) OR
+                TO_CHAR(s.birth_date, 'DD.MM.YYYY') LIKE LOWER(:search)
                 )"""
             )
             query.prepare(search_sql)

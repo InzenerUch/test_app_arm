@@ -1,6 +1,7 @@
 """
 Диалоговое окно для добавления/редактирования эпизода СОЧ
 С поддержкой автодополнения текстовых полей
+АДАПТИРОВАНО: Поддержка режима 'только чтение' (read_only)
 """
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QGroupBox, QGridLayout,
@@ -12,18 +13,20 @@ from PyQt6.QtSql import QSqlQuery
 from PyQt6.QtGui import QFont
 
 from autocomplete_helper import AutocompleteHelper
+from ui_helpers import apply_readonly_mode  # Импорт хелпера для блокировки интерфейса
 
 
 class SochEpisodeDialog(QDialog):
     """Диалог для добавления/редактирования эпизода СОЧ"""
     
-    def __init__(self, db_connection, krd_id, episode_data=None, parent=None):
+    def __init__(self, db_connection, krd_id, episode_data=None, parent=None, read_only=False):
         """
         Args:
             db_connection: соединение с БД
             krd_id: ID карточки розыска
             episode_data: данные эпизода для редактирования (None для нового)
             parent: родительское окно
+            read_only: флаг режима только для чтения
         """
         super().__init__(parent)
         self.db = db_connection
@@ -31,11 +34,19 @@ class SochEpisodeDialog(QDialog):
         self.episode_data = episode_data
         self.is_edit = episode_data is not None
         self.episode_id = episode_data.get('id') if episode_data else None
+        self.read_only = read_only
         
         # === ИНИЦИАЛИЗАЦИЯ ПОМОЩНИКА АВТОДОПОЛНЕНИЯ ===
         self.autocomplete_helper = AutocompleteHelper(db_connection)
         
-        self.setWindowTitle("✏️ Редактирование эпизода СОЧ" if self.is_edit else "➕ Добавление эпизода СОЧ")
+        # Установка заголовка в зависимости от режима
+        if self.read_only:
+            self.setWindowTitle("👁️ Просмотр эпизода СОЧ")
+        elif self.is_edit:
+            self.setWindowTitle("✏️ Редактирование эпизода СОЧ")
+        else:
+            self.setWindowTitle("➕ Добавление эпизода СОЧ")
+            
         self.setMinimumSize(900, 750)
         self.setModal(True)
         
@@ -43,7 +54,9 @@ class SochEpisodeDialog(QDialog):
         self.load_data()
         
         # === НАСТРОЙКА АВТОДОПОЛНЕНИЯ ПОСЛЕ ЗАГРУЗКИ ДАННЫХ ===
-        self.setup_autocomplete_fields()
+        # В режиме чтения автодополнение не настраиваем
+        if not self.read_only:
+            self.setup_autocomplete_fields()
     
     def init_ui(self):
         """Инициализация интерфейса"""
@@ -51,8 +64,9 @@ class SochEpisodeDialog(QDialog):
         layout.setSpacing(15)
         layout.setContentsMargins(20, 20, 20, 20)
         
-        # Заголовок
-        title_label = QLabel("✏️ Редактирование эпизода СОЧ" if self.is_edit else "➕ Добавление эпизода СОЧ")
+        # Заголовок (текстовая метка внутри окна)
+        title_text = "👁️ Просмотр эпизода СОЧ" if self.read_only else ("✏️ Редактирование эпизода СОЧ" if self.is_edit else "➕ Добавление эпизода СОЧ")
+        title_label = QLabel(title_text)
         title_font = QFont("Arial", 14, QFont.Weight.Bold)
         title_label.setFont(title_font)
         layout.addWidget(title_label)
@@ -220,31 +234,46 @@ class SochEpisodeDialog(QDialog):
         layout.addWidget(scroll)
         
         # Кнопки
-        button_box = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Save | 
-            QDialogButtonBox.StandardButton.Cancel
-        )
-        button_box.accepted.connect(self.accept)
-        button_box.rejected.connect(self.reject)
+        if self.read_only:
+            # В режиме просмотра только кнопка "Закрыть"
+            self.button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+            # Маппим кнопку "Закрыть" на accept, чтобы exec() вернул 1 (успешное закрытие)
+            self.button_box.rejected.connect(self.accept) 
+        else:
+            # В режиме редактирования кнопки "Сохранить" и "Отмена"
+            self.button_box = QDialogButtonBox(
+                QDialogButtonBox.StandardButton.Save | 
+                QDialogButtonBox.StandardButton.Cancel
+            )
+            self.button_box.accepted.connect(self.accept)
+            self.button_box.rejected.connect(self.reject)
+            
+            save_btn = self.button_box.button(QDialogButtonBox.StandardButton.Save)
+            save_btn.setText("💾 Сохранить")
+            save_btn.setProperty("role", "save")
+            
+            cancel_btn = self.button_box.button(QDialogButtonBox.StandardButton.Cancel)
+            cancel_btn.setText("❌ Отмена")
+            cancel_btn.setProperty("role", "danger")
+            
+        layout.addWidget(self.button_box)
         
-        save_btn = button_box.button(QDialogButtonBox.StandardButton.Save)
-        save_btn.setText("💾 Сохранить")
-        save_btn.setProperty("role", "save")
-        
-        cancel_btn = button_box.button(QDialogButtonBox.StandardButton.Cancel)
-        cancel_btn.setText("❌ Отмена")
-        cancel_btn.setProperty("role", "danger")
-        
-        layout.addWidget(button_box)
+        # Применение режима read-only ко всем виджетам (блокировка полей ввода)
+        if self.read_only:
+            apply_readonly_mode(self, True)
+            # Восстанавливаем доступность кнопки "Закрыть", так как apply_readonly_mode отключает все кнопки
+            close_btn = self.button_box.button(QDialogButtonBox.StandardButton.Close)
+            if close_btn:
+                close_btn.setEnabled(True)
     
     def setup_autocomplete_fields(self):
         """
         🎯 НАСТРОЙКА АВТОДОПОЛНЕНИЯ ДЛЯ ВСЕХ ТЕКСТОВЫХ ПОЛЕЙ
-        ✅ QLineEdit - стандартное автодополнение (QCompleter)
-        ✅ QTextEdit - кастомное всплывающее окно
-        ❌ QDateEdit - без автодополнения (календарь)
         """
-        
+        # Если режим чтения, автодополнение не настраиваем
+        if self.read_only:
+            return
+
         # === QLineEdit ПОЛЯ (7 полей) ===
         line_edit_fields = [
             (self.soch_location_input, 'soch_location', 20),
@@ -347,6 +376,11 @@ class SochEpisodeDialog(QDialog):
     
     def accept(self):
         """Сохранение данных при нажатии OK"""
+        # В режиме чтения сохранение не выполняется, просто закрываем окно
+        if self.read_only:
+            super().accept()
+            return
+            
         data = self.get_data()
         
         if not data["soch_date"]:

@@ -1,8 +1,3 @@
-"""
-Диалоговое окно для добавления/редактирования адреса проживания
-С поддержкой автодополнения
-"""
-
 from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QGroupBox, QGridLayout,
     QLineEdit, QDateEdit, QTextEdit, QLabel, QPushButton,
@@ -11,20 +6,19 @@ from PyQt6.QtWidgets import (
 from PyQt6.QtCore import QDate
 from PyQt6.QtSql import QSqlQuery
 from PyQt6.QtGui import QFont
-
 from autocomplete_helper import AutocompleteHelper
-
 
 class AddressDialog(QDialog):
     """Диалог для добавления/редактирования адреса"""
     
-    def __init__(self, db_connection, krd_id, address_data=None, parent=None):
+    def __init__(self, db_connection, krd_id, address_data=None, parent=None, read_only=False):
         """
         Args:
             db_connection: соединение с БД
             krd_id: ID карточки розыска
             address_data: данные адреса для редактирования (None для нового)
             parent: родительское окно
+            read_only: флаг режима только для чтения (для роли "Читатель")
         """
         super().__init__(parent)
         self.db = db_connection
@@ -32,11 +26,18 @@ class AddressDialog(QDialog):
         self.address_data = address_data
         self.is_edit = address_data is not None
         self.address_id = address_data.get('id') if address_data else None
+        self.read_only = read_only
         
         # === ИНИЦИАЛИЗАЦИЯ ПОМОЩНИКА АВТОДОПОЛНЕНИЯ ===
         self.autocomplete_helper = AutocompleteHelper(db_connection)
         
-        self.setWindowTitle("✏️ Редактирование адреса" if self.is_edit else "➕ Добавление адреса")
+        # Если режим только для чтения, меняем заголовок и отключаем режим редактирования
+        if self.read_only:
+            self.setWindowTitle("👁️ Просмотр адреса")
+            self.is_edit = False 
+        else:
+            self.setWindowTitle("✏️ Редактирование адреса" if self.is_edit else "➕ Добавление адреса")
+
         self.setMinimumSize(700, 600)
         self.setModal(True)
         
@@ -44,109 +45,132 @@ class AddressDialog(QDialog):
         self.load_data()
         
         # === НАСТРОЙКА АВТОДОПОЛНЕНИЯ ПОСЛЕ ЗАГРУЗКИ ДАННЫХ ===
-        self.setup_autocomplete_fields()
-    
+        # Автодополнение нужно только в режиме редактирования
+        if not self.read_only:
+            self.setup_autocomplete_fields()
+
     def init_ui(self):
         """Инициализация интерфейса"""
         layout = QVBoxLayout(self)
         layout.setSpacing(15)
         layout.setContentsMargins(20, 20, 20, 20)
         
-        # Заголовок
-        title_label = QLabel("✏️ Редактирование адреса" if self.is_edit else "➕ Добавление адреса")
-        title_font = QFont("Arial", 14, QFont.Weight.Bold)
-        title_label.setFont(title_font)
-        layout.addWidget(title_label)
-        
         # === Группа: Адресные данные ===
         group = QGroupBox("📍 Адресные данные")
         group.setFont(QFont("Arial", 10, QFont.Weight.Bold))
         form_layout = QGridLayout()
         form_layout.setSpacing(8)
-        
+
         form_layout.addWidget(QLabel("Субъект РФ:"), 0, 0)
         self.region_input = QLineEdit()
         self.region_input.setPlaceholderText("Например: Красноярский край")
         form_layout.addWidget(self.region_input, 0, 1)
-        
+
         form_layout.addWidget(QLabel("Административный район:"), 0, 2)
         self.district_input = QLineEdit()
         self.district_input.setPlaceholderText("Например: Центральный район")
         form_layout.addWidget(self.district_input, 0, 3)
-        
+
         form_layout.addWidget(QLabel("Населенный пункт *:"), 1, 0)
         self.town_input = QLineEdit()
         self.town_input.setPlaceholderText("Например: г. Красноярск")
         form_layout.addWidget(self.town_input, 1, 1)
-        
+
         form_layout.addWidget(QLabel("Улица:"), 1, 2)
         self.street_input = QLineEdit()
         self.street_input.setPlaceholderText("Например: ул. Ленина")
         form_layout.addWidget(self.street_input, 1, 3)
-        
+
         form_layout.addWidget(QLabel("Дом:"), 2, 0)
         self.house_input = QLineEdit()
         self.house_input.setPlaceholderText("Например: 10")
         form_layout.addWidget(self.house_input, 2, 1)
-        
+
         form_layout.addWidget(QLabel("Корпус:"), 2, 2)
         self.building_input = QLineEdit()
         self.building_input.setPlaceholderText("Например: 2")
         form_layout.addWidget(self.building_input, 2, 3)
-        
+
         form_layout.addWidget(QLabel("Литер:"), 3, 0)
         self.letter_input = QLineEdit()
         self.letter_input.setPlaceholderText("Например: А")
         form_layout.addWidget(self.letter_input, 3, 1)
-        
+
         form_layout.addWidget(QLabel("Квартира:"), 3, 2)
         self.apartment_input = QLineEdit()
         self.apartment_input.setPlaceholderText("Например: 50")
         form_layout.addWidget(self.apartment_input, 3, 3)
-        
+
         form_layout.addWidget(QLabel("Комната:"), 4, 0)
         self.room_input = QLineEdit()
         self.room_input.setPlaceholderText("Например: 1")
         form_layout.addWidget(self.room_input, 4, 1)
-        
+
         form_layout.addWidget(QLabel("Дата проверки:"), 5, 0)
         self.check_date_input = QDateEdit()
         self.check_date_input.setCalendarPopup(True)
         self.check_date_input.setDate(QDate.currentDate())
         form_layout.addWidget(self.check_date_input, 5, 1)
-        
+
         form_layout.addWidget(QLabel("Результат проверки:"), 6, 0)
         self.check_result_input = QTextEdit()
         self.check_result_input.setMaximumHeight(60)
         self.check_result_input.setPlaceholderText("Результаты проверки адреса")
         form_layout.addWidget(self.check_result_input, 6, 1, 1, 3)
-        
+
         group.setLayout(form_layout)
         layout.addWidget(group)
-        
-        # Кнопки
-        button_box = QDialogButtonBox(
-            QDialogButtonBox.StandardButton.Save | 
-            QDialogButtonBox.StandardButton.Cancel
-        )
+
+                # === КНОПКИ (Исправлено) ===
+        if self.read_only:
+            # Для режима чтения создаем только кнопку "Закрыть"
+            button_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+            close_btn = button_box.button(QDialogButtonBox.StandardButton.Close)
+            if close_btn:
+                close_btn.setText("🚪 Закрыть")
+        else:
+            # Для режима редактирования создаем "Сохранить" и "Отмена"
+            button_box = QDialogButtonBox(
+                QDialogButtonBox.StandardButton.Save |
+                QDialogButtonBox.StandardButton.Cancel
+            )
+            save_btn = button_box.button(QDialogButtonBox.StandardButton.Save)
+            cancel_btn = button_box.button(QDialogButtonBox.StandardButton.Cancel)
+            
+            # Безопасная настройка текстов и ролей
+            if save_btn:
+                save_btn.setText("💾 Сохранить")
+                save_btn.setProperty("role", "save")
+            if cancel_btn:
+                cancel_btn.setText("❌ Отмена")
+                cancel_btn.setProperty("role", "danger")
+
+        # Подключение сигналов (работает для любых кнопок в QDialogButtonBox)
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
-        
-        save_btn = button_box.button(QDialogButtonBox.StandardButton.Save)
-        save_btn.setText("💾 Сохранить")
-        save_btn.setProperty("role", "save")
-        save_btn.setStyleSheet("")
-        
-        cancel_btn = button_box.button(QDialogButtonBox.StandardButton.Cancel)
-        cancel_btn.setText("❌ Отмена")
-        cancel_btn.setProperty("role", "danger")
-        cancel_btn.setStyleSheet("")
-        
         layout.addWidget(button_box)
-    
+        
+        # Если режим read_only, блокируем поля ввода
+        if self.read_only:
+            self._make_read_only()
+
+    def _make_read_only(self):
+        """Делает все поля ввода доступными только для чтения"""
+        # Для QLineEdit
+        for le in [self.region_input, self.district_input, self.town_input, 
+                   self.street_input, self.house_input, self.building_input, 
+                   self.letter_input, self.apartment_input, self.room_input]:
+            le.setReadOnly(True)
+            
+        # Для QTextEdit
+        self.check_result_input.setReadOnly(True)
+        
+        # Для QDateEdit (ReadOnly позволяет видеть дату, но запрещает ввод)
+        self.check_date_input.setReadOnly(True) 
+
     def setup_autocomplete_fields(self):
         """Настройка автодополнения для всех текстовых полей"""
-        
+        # Этот метод вызывается только если not self.read_only
         fields_config = [
             (self.region_input, 'region', 20),
             (self.district_input, 'district', 20),
@@ -158,23 +182,21 @@ class AddressDialog(QDialog):
             (self.apartment_input, 'apartment', 15),
             (self.room_input, 'room', 15),
         ]
-        
         for field_widget, column_name, max_items in fields_config:
             self.autocomplete_helper.setup_autocomplete(
-                field_widget, 
-                'addresses', 
+                field_widget,
+                'addresses',
                 column_name,
                 max_items=max_items,
                 show_on_focus=True
             )
-        
         print(f"✅ Автодополнение настроено для {len(fields_config)} полей адреса")
-    
+
     def load_data(self):
         """Загрузка данных адреса для редактирования"""
         if not self.address_data:
             return
-        
+            
         self.region_input.setText(self.address_data.get('region') or '')
         self.district_input.setText(self.address_data.get('district') or '')
         self.town_input.setText(self.address_data.get('town') or '')
@@ -188,9 +210,9 @@ class AddressDialog(QDialog):
         check_date = self.address_data.get('check_date')
         if check_date:
             self.check_date_input.setDate(check_date)
-        
+            
         self.check_result_input.setPlainText(self.address_data.get('check_result') or '')
-    
+
     def get_data(self):
         """Получение данных из формы"""
         return {
@@ -207,34 +229,30 @@ class AddressDialog(QDialog):
             "check_date": self.check_date_input.date().toString("yyyy-MM-dd"),
             "check_result": self.check_result_input.toPlainText()
         }
-    
+
     def accept(self):
         """Сохранение данных при нажатии OK"""
+        # Если режим только для чтения, мы просто закрываем окно
+        if self.read_only:
+            super().reject() 
+            return
+
         data = self.get_data()
-        
         if not data["town"]:
             QMessageBox.warning(self, "Ошибка", "⚠️ Поле 'Населенный пункт' обязательно для заполнения")
             return
-        
+
         try:
             query = QSqlQuery(self.db)
             self.db.transaction()
-            
             if self.is_edit:
                 # Обновление существующей записи
                 query.prepare("""
                     UPDATE krd.addresses SET
-                        region = :region,
-                        district = :district,
-                        town = :town,
-                        street = :street,
-                        house = :house,
-                        building = :building,
-                        letter = :letter,
-                        apartment = :apartment,
-                        room = :room,
-                        check_date = :check_date,
-                        check_result = :check_result
+                    region = :region, district = :district, town = :town, street = :street,
+                    house = :house, building = :building, letter = :letter,
+                    apartment = :apartment, room = :room,
+                    check_date = :check_date, check_result = :check_result
                     WHERE id = :id
                 """)
                 query.bindValue(":id", self.address_id)
@@ -242,28 +260,27 @@ class AddressDialog(QDialog):
                 # Добавление новой записи
                 query.prepare("""
                     INSERT INTO krd.addresses (
-                        krd_id, region, district, town, street, house, building,
-                        letter, apartment, room, check_date, check_result
+                    krd_id, region, district, town, street, house, building,
+                    letter, apartment, room, check_date, check_result
                     ) VALUES (
-                        :krd_id, :region, :district, :town, :street, :house, :building,
-                        :letter, :apartment, :room, :check_date, :check_result
+                    :krd_id, :region, :district, :town, :street, :house, :building,
+                    :letter, :apartment, :room, :check_date, :check_result
                     )
                 """)
-            
-            for key, value in data.items():
-                query.bindValue(f":{key}", value)
-            
+                for key, value in data.items():
+                    query.bindValue(f":{key}", value)
+
             if not query.exec():
                 raise Exception(f"Ошибка SQL: {query.lastError().text()}")
-            
+
             self.db.commit()
             
-            # === ОБНОВЛЕНИЕ КЭША АВТОДОПОЛНЕНИЯ ПОСЛЕ СОХРАНЕНИЯ ===
-            self.autocomplete_helper.clear_cache()
-            
+            # Обновляем кэш автодополнения после сохранения
+            if not self.read_only:
+                self.autocomplete_helper.clear_cache()
+                
             QMessageBox.information(self, "Успех", "Адрес успешно " + ("обновлён" if self.is_edit else "добавлен"))
             super().accept()
-            
         except Exception as e:
             self.db.rollback()
-            QMessageBox.critical(self, "Ошибка", f"Ошибка сохранения:\n{str(e)}")
+            QMessageBox.critical(self, "Ошибка", f"Ошибка сохранения: {str(e)}")

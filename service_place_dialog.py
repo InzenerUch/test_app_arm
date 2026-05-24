@@ -1,5 +1,6 @@
 """
 Диалоговое окно для добавления/редактирования места службы
+✅ АДАПТИРОВАНО: Поддержка режима 'read_only' для роли 'Читатель'
 ✅ ИСПРАВЛЕНО: Добавлено поле military_unit_number в SQL запросы сохранения
 """
 from PyQt6.QtWidgets import (
@@ -17,24 +18,56 @@ from reference_editor_dialog import ReferenceEditorDialog
 class ServicePlaceDialog(QDialog):
     """Диалог для добавления/редактирования места службы"""
     
-    def __init__(self, db_connection, krd_id, place_data=None, parent=None):
+    def __init__(self, db_connection, krd_id, place_data=None, parent=None, read_only=False):
         super().__init__(parent)
         self.db = db_connection
         self.krd_id = krd_id
         self.place_data = place_data
         self.is_edit = place_data is not None
         self.place_id = place_data.get('id') if place_data else None
+        self.read_only = read_only  # 🔒 Флаг режима чтения
         
         self.autocomplete_helper = AutocompleteHelper(db_connection)
         
-        self.setWindowTitle("✏️ Редактирование места службы" if self.is_edit else "➕ Добавление места службы")
+        # Устанавливаем заголовок в зависимости от режима
+        if self.read_only:
+            self.setWindowTitle("👁️ Просмотр места службы")
+        else:
+            self.setWindowTitle("✏️ Редактирование места службы" if self.is_edit else "➕ Добавление места службы")
+            
         self.setMinimumSize(900, 750)
         self.setModal(True)
         
         self.init_ui()
         self.load_data()
-        self.setup_validators()
-        self.setup_autocomplete_fields()
+        
+        # 🔒 Применяем режим чтения или инициализируем валидацию/автодополнение
+        if self.read_only:
+            self._apply_readonly_mode()
+        else:
+            self.setup_validators()
+            self.setup_autocomplete_fields()
+
+    def _apply_readonly_mode(self):
+        """Блокирует все поля ввода и настраивает кнопки для режима просмотра"""
+        # Поля ввода только для чтения
+        for le in self.findChildren(QLineEdit):
+            le.setReadOnly(True)
+        for te in self.findChildren(QTextEdit):
+            te.setReadOnly(True)
+        for cb in self.findChildren(QComboBox):
+            cb.setEnabled(False)
+            
+        # Настраиваем кнопки
+        for btn in self.findChildren(QPushButton):
+            if "Сохранить" in btn.text():
+                btn.hide()
+            elif "Отмена" in btn.text():
+                btn.setText("❌ Закрыть")
+                btn.clicked.disconnect()
+                btn.clicked.connect(self.accept)
+            elif "⚙️" in btn.text():
+                btn.hide()  # Скрываем кнопки настройки справочников
 
     def _setup_ref_combo(self, combo, table_name, reload_func):
         """Создает контейнер: ComboBox + кнопка ⚙️ для настройки справочника"""
@@ -108,7 +141,6 @@ class ServicePlaceDialog(QDialog):
         self.load_positions()
         group1_layout.addWidget(self._setup_ref_combo(self.position_combo, 'positions', self.load_positions), 2, 1)
         
-        # ✅ НОВОЕ ПОЛЕ: Номер воинской части
         group1_layout.addWidget(QLabel("Номер воинской части:"), 2, 2)
         self.unit_number_input = QLineEdit()
         self.unit_number_input.setPlaceholderText("Например: в/ч 54321")
@@ -208,16 +240,21 @@ class ServicePlaceDialog(QDialog):
         )
         button_box.accepted.connect(self.accept)
         button_box.rejected.connect(self.reject)
+        
         save_btn = button_box.button(QDialogButtonBox.StandardButton.Save)
         save_btn.setText("💾 Сохранить")
         save_btn.setProperty("role", "save")
+        
         cancel_btn = button_box.button(QDialogButtonBox.StandardButton.Cancel)
         cancel_btn.setText("❌ Отмена")
         cancel_btn.setProperty("role", "danger")
+        
         layout.addWidget(button_box)
 
     def setup_validators(self):
         """Настройка валидаторов"""
+        if self.read_only: return  # 🔒 Пропускаем в режиме чтения
+        
         index_regex = QRegularExpression(r"^\d{0,20}$")
         self.postal_index_input.setValidator(QRegularExpressionValidator(index_regex))
         
@@ -261,6 +298,9 @@ class ServicePlaceDialog(QDialog):
             if idx >= 0: self.position_combo.setCurrentIndex(idx)
 
     def setup_autocomplete_fields(self):
+        """Настройка автодополнения"""
+        if self.read_only: return  # 🔒 Пропускаем в режиме чтения
+        
         fields_config = [
             (self.postal_region_input, 'postal_region', 20),
             (self.postal_district_input, 'postal_district', 20),
@@ -299,10 +339,7 @@ class ServicePlaceDialog(QDialog):
         self.commanders_input.setPlainText(self.place_data.get('commanders') or '')
         self.postal_index_input.setText(self.place_data.get('postal_index') or '')
         self.postal_region_input.setText(self.place_data.get('postal_region') or '')
-        
-        # ✅ Загрузка нового поля
         self.unit_number_input.setText(self.place_data.get('military_unit_number') or '')
-        
         self.postal_district_input.setText(self.place_data.get('postal_district') or '')
         self.postal_town_input.setText(self.place_data.get('postal_town') or '')
         self.postal_street_input.setText(self.place_data.get('postal_street') or '')
@@ -317,7 +354,7 @@ class ServicePlaceDialog(QDialog):
         return {
             "krd_id": self.krd_id,
             "place_name": self.place_name_input.text().strip(),
-            "military_unit_number": self.unit_number_input.text().strip(), # ✅ Новое поле
+            "military_unit_number": self.unit_number_input.text().strip(),
             "military_unit_id": self.military_unit_combo.currentData(),
             "garrison_id": self.garrison_combo.currentData(),
             "position_id": self.position_combo.currentData(),
@@ -337,8 +374,12 @@ class ServicePlaceDialog(QDialog):
 
     def accept(self):
         """Сохранение данных"""
+        # 🔒 В режиме чтения просто закрываем окно
+        if self.read_only:
+            super().accept()
+            return
+            
         data = self.get_data()
-        
         if not data["place_name"]:
             QMessageBox.warning(self, "Ошибка", "⚠️ Поле 'Наименование места службы' обязательно")
             return

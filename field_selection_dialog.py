@@ -20,6 +20,7 @@ class FieldSelectionDialog(QDialog):
             "title": "Социально-демографические данные",
             "fields": [
                 ("krd_number", "№ КРД"),
+                ("krd_status", "Статус КРД"), 
                 ("tab_number", "Табельный номер"),
                 ("personal_number", "Личный номер"),
                 ("category_name", "Категория военнослужащего"),
@@ -94,6 +95,7 @@ class FieldSelectionDialog(QDialog):
             "title": "Места службы",
             "fields": [
                 ("place_name", "Наименование места службы"),
+                ("military_unit_number", "Номер в/ч"), 
                 ("military_unit_name", "Военное управление места службы"),
                 ("garrison_name", "Гарнизон места службы"),
                 ("position_name", "Воинская должность"),
