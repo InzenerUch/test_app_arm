@@ -7,7 +7,7 @@ from PyQt6.QtWidgets import (
     QComboBox, QTableView, QPushButton, QLabel, QDateEdit,
     QMessageBox, QHeaderView, QAbstractItemView, QSplitter, QWidget
 )
-from PyQt6.QtCore import Qt, QDate
+from PyQt6.QtCore import Qt, QDate,QDateTime
 from PyQt6.QtSql import QSqlQueryModel, QSqlQuery
 from PyQt6.QtGui import QFont
 
@@ -299,22 +299,62 @@ class UserAuditWindow(QDialog):
             )
     
     def export_to_csv(self, file_path):
-        """Экспорт данных в CSV файл"""
+        """Экспорт данных в CSV файл с пояснительной шапкой и корректным форматированием"""
         import csv
-        
+        from datetime import datetime
+
         with open(file_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
             writer = csv.writer(csvfile, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-            
-            # Записываем заголовки
+
+            # === 1. ЗАГОЛОВОК ОТЧЕТА ===
+            writer.writerow([f"ОТЧЕТ ПО АУДИТУ ДЕЙСТВИЙ ПОЛЬЗОВАТЕЛЕЙ"])
+            writer.writerow([f"Дата формирования: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"])
+            writer.writerow([]) # Пустая строка-разделитель
+
+            # === 2. ПОЯСНЕНИЕ К ТАБЛИЦЕ И ТИПАМ ОПЕРАЦИЙ ===
+            writer.writerow(["📖 ПОЯСНЕНИЕ К СТОЛБЦАМ И ТИПАМ ДАННЫХ:"])
+            writer.writerow([
+                "• Дата и время | Формат: ДД.ММ.ГГГГ ЧЧ:ММ:СС. Момент фиксации действия в системе."
+            ])
+            writer.writerow([
+                "• Тип действия   | Код операции. Примеры: LOGIN/LOGOUT (вход/выход), "
+                "CREATE/UPDATE/DELETE/VIEW (CRUD операции), EXPORT (выгрузка данных), "
+                "REFERENCE_CREATE/UPDATE/DELETE (изменение справочников), "
+                "DOCUMENT_GENERATE/SAVE (работа с шаблонами), STATUS_CHANGE (смена статуса КРД)."
+            ])
+            writer.writerow([
+                "• Таблица        | Имя таблицы БД или модуля, к которому относится действие "
+                "(например: krd, users, social_data, ranks, statuses, outgoing_requests)."
+            ])
+            writer.writerow([
+                "• ID записи      | Внутренний первичный ключ (ID) конкретной измененной записи в таблице."
+            ])
+            writer.writerow([
+                "• ID КРД         | Идентификатор карточки розыска, к которой привязано действие. "
+                "Значение 0 или пусто означает системное/глобальное действие."
+            ])
+            writer.writerow([
+                "• Описание       | Человеко-читаемый лог с деталями операции (ФИО, номера документов, старые/новые значения)."
+            ])
+            writer.writerow([]) # Пустая строка перед данными
+
+            # === 3. ЗАГОЛОВКИ СТОЛБЦОВ ===
             headers = []
             for col in range(self.audit_model.columnCount()):
                 headers.append(self.audit_model.headerData(col, Qt.Orientation.Horizontal))
             writer.writerow(headers)
-            
-            # Записываем данные
+
+            # === 4. ДАННЫЕ С КОРРЕКТНЫМ ПРЕОБРАЗОВАНИЕМ ===
             for row in range(self.audit_model.rowCount()):
                 row_data = []
                 for col in range(self.audit_model.columnCount()):
                     value = self.audit_model.data(self.audit_model.index(row, col))
+
+                    # ✅ ИСПРАВЛЕНИЕ: Явное форматирование объектов даты и времени
+                    if isinstance(value, QDateTime):
+                        value = value.toString("dd.MM.yyyy HH:mm:ss")
+                    elif isinstance(value, QDate):
+                        value = value.toString("dd.MM.yyyy")
+                    
                     row_data.append(str(value) if value is not None else "")
                 writer.writerow(row_data)

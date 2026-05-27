@@ -290,3 +290,47 @@ class AuditLogger:
             },
             description=f'Экспортированы данные КРД-{krd_id} в формате {export_type}'
         )
+    def capture_krd_snapshot(self, krd_id: int, user_id: int, description: str = "Ручное сохранение"):
+        """Создаёт JSONB-снапшот всей КРД и сохраняет в krd_versions"""
+        try:
+            # 1. Получаем текущий номер версии
+            q = QSqlQuery(self.db)
+            q.prepare("SELECT COALESCE(MAX(version_number), 0) + 1 FROM krd.krd_versions WHERE krd_id = :krd_id")
+            q.bindValue(":krd_id", krd_id)
+            q.exec()
+            q.next()
+            new_version = q.value(0)
+
+            # 2. Формируем снапшот через один SQL-запрос (быстро и атомарно)
+            q2 = QSqlQuery(self.db)
+            q2.prepare("""
+                SELECT jsonb_build_object(
+                    'krd', (SELECT row_to_json(k) FROM krd.krd k WHERE id = :krd_id),
+                    'social_data', (SELECT row_to_json(s) FROM krd.social_data s WHERE krd_id = :krd_id),
+                    'addresses', (SELECT jsonb_agg(row_to_json(a)) FROM krd.addresses a WHERE krd_id = :krd_id),
+                    'service_places', (SELECT jsonb_agg(row_to_json(sp)) FROM krd.service_places sp WHERE krd_id = :krd_id),
+                    'soch_episodes', (SELECT jsonb_agg(row_to_json(so)) FROM krd.soch_episodes so WHERE krd_id = :krd_id),
+                    'incoming_orders', (SELECT jsonb_agg(row_to_json(io)) FROM krd.incoming_orders io WHERE krd_id = :krd_id)
+                )
+            """)
+            q2.bindValue(":krd_id", krd_id)
+            q2.exec()
+            q2.next()
+            snapshot_json = q2.value(0)
+
+            # 3. Сохраняем версию
+            q3 = QSqlQuery(self.db)
+            q3.prepare("""
+                INSERT INTO krd.krd_versions (krd_id, version_number, created_by, description, snapshot_data)
+                VALUES (:krd_id, :version, :user_id, :desc, :snapshot)
+            """)
+            q3.bindValue(":krd_id", krd_id)
+            q3.bindValue(":version", new_version)
+            q3.bindValue(":user_id", user_id)
+            q3.bindValue(":desc", description)
+            q3.bindValue(":snapshot", snapshot_json)
+            
+            return q3.exec()
+        except Exception as e:
+            print(f"❌ Ошибка захвата версии: {e}")
+            return False

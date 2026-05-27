@@ -2,10 +2,10 @@
 -- PostgreSQL database dump
 --
 
-\restrict VKvN3dEwDa8bbqEM6pTtZqxaMfIMkYnxAE9osWGkXF9fB7PFKzznwecy6M0gs9s
+\restrict FTfoTfqEa10Tco86GdPwNceAYpqu8C0EK7f4S9MSmKdTbrVsaSfh4lpfXbZgBMS
 
--- Dumped from database version 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)
--- Dumped by pg_dump version 16.13 (Ubuntu 16.13-0ubuntu0.24.04.1)
+-- Dumped from database version 16.14 (Ubuntu 16.14-0ubuntu0.24.04.1)
+-- Dumped by pg_dump version 16.14 (Ubuntu 16.14-0ubuntu0.24.04.1)
 
 SET statement_timeout = 0;
 SET lock_timeout = 0;
@@ -675,6 +675,62 @@ CREATE SEQUENCE krd.krd_id_seq
 --
 
 ALTER SEQUENCE krd.krd_id_seq OWNED BY krd.krd.id;
+
+
+--
+-- Name: krd_versions; Type: TABLE; Schema: krd; Owner: -
+--
+
+CREATE TABLE krd.krd_versions (
+    id integer NOT NULL,
+    krd_id integer NOT NULL,
+    version_number integer NOT NULL,
+    created_at timestamp with time zone DEFAULT CURRENT_TIMESTAMP,
+    created_by integer,
+    description text,
+    snapshot_data jsonb NOT NULL
+);
+
+
+--
+-- Name: TABLE krd_versions; Type: COMMENT; Schema: krd; Owner: -
+--
+
+COMMENT ON TABLE krd.krd_versions IS 'Журнал версий КРД для отката изменений';
+
+
+--
+-- Name: COLUMN krd_versions.description; Type: COMMENT; Schema: krd; Owner: -
+--
+
+COMMENT ON COLUMN krd.krd_versions.description IS 'Примечание: "Автосохранение", "Ручной откат", и т.п.';
+
+
+--
+-- Name: COLUMN krd_versions.snapshot_data; Type: COMMENT; Schema: krd; Owner: -
+--
+
+COMMENT ON COLUMN krd.krd_versions.snapshot_data IS 'JSONB-снимок всех таблиц КРД (social_data, addresses, и т.д.)';
+
+
+--
+-- Name: krd_versions_id_seq; Type: SEQUENCE; Schema: krd; Owner: -
+--
+
+CREATE SEQUENCE krd.krd_versions_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: krd_versions_id_seq; Type: SEQUENCE OWNED BY; Schema: krd; Owner: -
+--
+
+ALTER SEQUENCE krd.krd_versions_id_seq OWNED BY krd.krd_versions.id;
 
 
 --
@@ -1724,6 +1780,13 @@ ALTER TABLE ONLY krd.krd ALTER COLUMN id SET DEFAULT nextval('krd.krd_id_seq'::r
 
 
 --
+-- Name: krd_versions id; Type: DEFAULT; Schema: krd; Owner: -
+--
+
+ALTER TABLE ONLY krd.krd_versions ALTER COLUMN id SET DEFAULT nextval('krd.krd_versions_id_seq'::regclass);
+
+
+--
 -- Name: military_units id; Type: DEFAULT; Schema: krd; Owner: -
 --
 
@@ -1913,6 +1976,22 @@ ALTER TABLE ONLY krd.initiator_types
 
 ALTER TABLE ONLY krd.krd
     ADD CONSTRAINT krd_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: krd_versions krd_versions_krd_id_version_number_key; Type: CONSTRAINT; Schema: krd; Owner: -
+--
+
+ALTER TABLE ONLY krd.krd_versions
+    ADD CONSTRAINT krd_versions_krd_id_version_number_key UNIQUE (krd_id, version_number);
+
+
+--
+-- Name: krd_versions krd_versions_pkey; Type: CONSTRAINT; Schema: krd; Owner: -
+--
+
+ALTER TABLE ONLY krd.krd_versions
+    ADD CONSTRAINT krd_versions_pkey PRIMARY KEY (id);
 
 
 --
@@ -2174,6 +2253,20 @@ CREATE INDEX idx_krd_status_id ON krd.krd USING btree (status_id);
 
 
 --
+-- Name: idx_krd_versions_created; Type: INDEX; Schema: krd; Owner: -
+--
+
+CREATE INDEX idx_krd_versions_created ON krd.krd_versions USING btree (created_at DESC);
+
+
+--
+-- Name: idx_krd_versions_krd_id; Type: INDEX; Schema: krd; Owner: -
+--
+
+CREATE INDEX idx_krd_versions_krd_id ON krd.krd_versions USING btree (krd_id);
+
+
+--
 -- Name: idx_outgoing_requests_is_deleted; Type: INDEX; Schema: krd; Owner: -
 --
 
@@ -2365,6 +2458,22 @@ ALTER TABLE ONLY krd.krd
 
 
 --
+-- Name: krd_versions krd_versions_created_by_fkey; Type: FK CONSTRAINT; Schema: krd; Owner: -
+--
+
+ALTER TABLE ONLY krd.krd_versions
+    ADD CONSTRAINT krd_versions_created_by_fkey FOREIGN KEY (created_by) REFERENCES krd.users(id) ON DELETE SET NULL;
+
+
+--
+-- Name: krd_versions krd_versions_krd_id_fkey; Type: FK CONSTRAINT; Schema: krd; Owner: -
+--
+
+ALTER TABLE ONLY krd.krd_versions
+    ADD CONSTRAINT krd_versions_krd_id_fkey FOREIGN KEY (krd_id) REFERENCES krd.krd(id) ON DELETE CASCADE;
+
+
+--
 -- Name: outgoing_requests outgoing_requests_krd_id_fkey; Type: FK CONSTRAINT; Schema: krd; Owner: -
 --
 
@@ -2520,5 +2629,5 @@ ALTER TABLE ONLY krd.users
 -- PostgreSQL database dump complete
 --
 
-\unrestrict VKvN3dEwDa8bbqEM6pTtZqxaMfIMkYnxAE9osWGkXF9fB7PFKzznwecy6M0gs9s
+\unrestrict FTfoTfqEa10Tco86GdPwNceAYpqu8C0EK7f4S9MSmKdTbrVsaSfh4lpfXbZgBMS
 

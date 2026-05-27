@@ -59,7 +59,6 @@ class SocialDataTab(QWidget):
 
     def init_ui(self):
         """Инициализация интерфейса"""
-        # ✅ СОХРАНЯЕМ scroll_area В АТРИБУТ КЛАССА, чтобы apply_readonly_mode мог его найти
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
@@ -94,12 +93,10 @@ class SocialDataTab(QWidget):
         self.personal_number_input = QLineEdit()
         g1.addWidget(self.personal_number_input, 1, 3)
         
-        # Категория (со справочником)
         g1.addWidget(QLabel("Категория военнослужащего:"), 2, 0)
         self.category_combo = QComboBox()
         g1.addWidget(self._create_ref_combo_widget(self.category_combo, 'categories', self.load_categories), 2, 1)
         
-        # Звание (со справочником)
         g1.addWidget(QLabel("Воинское звание:"), 2, 2)
         self.rank_combo = QComboBox()
         g1.addWidget(self._create_ref_combo_widget(self.rank_combo, 'ranks', self.load_ranks), 2, 3)
@@ -119,19 +116,43 @@ class SocialDataTab(QWidget):
         
         group2.setLayout(g2); layout.addWidget(group2)
 
-        # === Группа 3: Призыв ===
-        group3 = QGroupBox("Призыв")
-        group3.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-        g3 = QGridLayout(); g3.setSpacing(8)
+        # === Группа 3: Призыв (ИЗМЕНЕНО) ===
+        group3_draft = QGroupBox("Призыв")
+        group3_draft.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        g3d = QGridLayout(); g3d.setSpacing(8)
         
-        g3.addWidget(QLabel("Каким комиссариатом призван:"), 0, 0); self.drafted_by_commissariat_input = QLineEdit(); g3.addWidget(self.drafted_by_commissariat_input, 0, 1, 1, 3)
-        g3.addWidget(QLabel("Дата призыва:"), 1, 0); self.draft_date_input = QDateEdit(); self.draft_date_input.setCalendarPopup(True); self.draft_date_input.setDate(QDate.currentDate()); g3.addWidget(self.draft_date_input, 1, 1)
-        g3.addWidget(QLabel("Каким ПОВСК отобран:"), 1, 2); self.povsk_input = QLineEdit(); g3.addWidget(self.povsk_input, 1, 3)
-        g3.addWidget(QLabel("Дата отбора:"), 2, 0); self.selection_date_input = QDateEdit(); self.selection_date_input.setCalendarPopup(True); self.selection_date_input.setDate(QDate.currentDate()); g3.addWidget(self.selection_date_input, 2, 1)
+        g3d.addWidget(QLabel("Каким комиссариатом призван:"), 0, 0)
+        self.drafted_by_commissariat_input = QLineEdit()
+        g3d.addWidget(self.drafted_by_commissariat_input, 0, 1, 1, 2)
         
-        group3.setLayout(g3); layout.addWidget(group3)
+        g3d.addWidget(QLabel("Дата призыва:"), 1, 0)
+        self.draft_date_input = QDateEdit()
+        self.draft_date_input.setCalendarPopup(True)
+        self.draft_date_input.setDate(QDate.currentDate())
+        g3d.addWidget(self.draft_date_input, 1, 1, 1, 2)
+        
+        group3_draft.setLayout(g3d)
+        layout.addWidget(group3_draft)
 
-        # === Группа 4: Образование и судимость ===
+        # === Группа 4: Отбор (ИЗМЕНЕНО) ===
+        group3_selection = QGroupBox("Отбор")
+        group3_selection.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        g3s = QGridLayout(); g3s.setSpacing(8)
+        
+        g3s.addWidget(QLabel("Каким ПОВСК отобран:"), 0, 0)
+        self.povsk_input = QLineEdit()
+        g3s.addWidget(self.povsk_input, 0, 1, 1, 2)
+        
+        g3s.addWidget(QLabel("Дата отбора:"), 1, 0)
+        self.selection_date_input = QDateEdit()
+        self.selection_date_input.setCalendarPopup(True)
+        self.selection_date_input.setDate(QDate.currentDate())
+        g3s.addWidget(self.selection_date_input, 1, 1, 1, 2)
+        
+        group3_selection.setLayout(g3s)
+        layout.addWidget(group3_selection)
+
+        # === Группа 5: Образование и судимость ===
         group4 = QGroupBox("Образование и судимость")
         group4.setFont(QFont("Arial", 10, QFont.Weight.Bold))
         g4 = QGridLayout(); g4.setSpacing(8)
@@ -143,7 +164,7 @@ class SocialDataTab(QWidget):
         
         group4.setLayout(g4); layout.addWidget(group4)
 
-        # === Группа 5: Паспортные данные ===
+        # === Группа 6: Паспортные данные ===
         group5 = QGroupBox("Паспортные данные")
         group5.setFont(QFont("Arial", 10, QFont.Weight.Bold))
         g5 = QGridLayout(); g5.setSpacing(8)
@@ -155,7 +176,7 @@ class SocialDataTab(QWidget):
         
         group5.setLayout(g5); layout.addWidget(group5)
 
-        # === Группа 6: Военный билет ===
+        # === Группа 7: Военный билет ===
         group6 = QGroupBox("Военный билет (удостоверение личности)")
         group6.setFont(QFont("Arial", 10, QFont.Weight.Bold))
         g6 = QGridLayout(); g6.setSpacing(8)
@@ -167,7 +188,7 @@ class SocialDataTab(QWidget):
         
         group6.setLayout(g6); layout.addWidget(group6)
 
-        # === Группа 7: Внешность и фотографии ===
+        # === Группа 8: Внешность и фотографии ===
         group7 = QGroupBox("Особенности внешности и фотографии")
         group7.setFont(QFont("Arial", 10, QFont.Weight.Bold))
         g7 = QVBoxLayout(); g7.setSpacing(10)
@@ -197,10 +218,9 @@ class SocialDataTab(QWidget):
         layout.addStretch()
         self.scroll_area.setWidget(container)
 
-        # ✅ УСТАНОВКА ГЛАВНОГО LAYOUT'А
         main_layout = QVBoxLayout(self)
         main_layout.addWidget(self.scroll_area)
-        self.setLayout(main_layout)
+        self.setLayout(main_layout)    
     def _create_ref_combo_widget(self, combo, table_name, reload_func):
         """Вспомогательный метод: ComboBox + кнопка ⚙️ с автообновлением"""
         w = QWidget()

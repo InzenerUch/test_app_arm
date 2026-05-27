@@ -1138,6 +1138,50 @@ class AuditLogger:
             },
             description=f'Экспортированы данные КРД-{krd_id} в формате {export_type}'
         )
+    def capture_krd_snapshot(self, krd_id: int, user_id: int, description: str = "Ручное сохранение"):
+        """Создаёт JSONB-снапшот всей КРД и сохраняет в krd_versions"""
+        try:
+            # 1. Получаем текущий номер версии
+            q = QSqlQuery(self.db)
+            q.prepare("SELECT COALESCE(MAX(version_number), 0) + 1 FROM krd.krd_versions WHERE krd_id = :krd_id")
+            q.bindValue(":krd_id", krd_id)
+            q.exec()
+            q.next()
+            new_version = q.value(0)
+
+            # 2. Формируем снапшот через один SQL-запрос (быстро и атомарно)
+            q2 = QSqlQuery(self.db)
+            q2.prepare("""
+                SELECT jsonb_build_object(
+                    'krd', (SELECT row_to_json(k) FROM krd.krd k WHERE id = :krd_id),
+                    'social_data', (SELECT row_to_json(s) FROM krd.social_data s WHERE krd_id = :krd_id),
+                    'addresses', (SELECT jsonb_agg(row_to_json(a)) FROM krd.addresses a WHERE krd_id = :krd_id),
+                    'service_places', (SELECT jsonb_agg(row_to_json(sp)) FROM krd.service_places sp WHERE krd_id = :krd_id),
+                    'soch_episodes', (SELECT jsonb_agg(row_to_json(so)) FROM krd.soch_episodes so WHERE krd_id = :krd_id),
+                    'incoming_orders', (SELECT jsonb_agg(row_to_json(io)) FROM krd.incoming_orders io WHERE krd_id = :krd_id)
+                )
+            """)
+            q2.bindValue(":krd_id", krd_id)
+            q2.exec()
+            q2.next()
+            snapshot_json = q2.value(0)
+
+            # 3. Сохраняем версию
+            q3 = QSqlQuery(self.db)
+            q3.prepare("""
+                INSERT INTO krd.krd_versions (krd_id, version_number, created_by, description, snapshot_data)
+                VALUES (:krd_id, :version, :user_id, :desc, :snapshot)
+            """)
+            q3.bindValue(":krd_id", krd_id)
+            q3.bindValue(":version", new_version)
+            q3.bindValue(":user_id", user_id)
+            q3.bindValue(":desc", description)
+            q3.bindValue(":snapshot", snapshot_json)
+            
+            return q3.exec()
+        except Exception as e:
+            print(f"❌ Ошибка захвата версии: {e}")
+            return False
 
 ========================================
 📄 FILE: ./authorization.py
@@ -1679,7 +1723,7 @@ class AutocompleteHelper:
 """
 Виджет для управления составными полями (Composite Fields)
 ✅ ИСПОЛЬЗУЕТ: ЕДИНЫЙ СПРАВОЧНИК из db_mappings.py
-✅ ИСПРАВЛЕНО: Убраны дубликаты и несуществующие колонки (например, recipient_name)
+✅ ИСПРАВЛЕНО: Убраны дубликаты и несуществующие колонки
 """
 import json
 import traceback
@@ -1691,21 +1735,19 @@ from PyQt6.QtCore import Qt
 from PyQt6.QtGui import QFont
 from searchable_combo import SearchableComboBox
 
-# ✅ ПОДКЛЮЧЕНИЕ: Импорт словарей из единого источника
+# ✅ ПОДКЛЮЧЕНИЕ: Импорт словарей и функции описания
 try:
-    from db_mappings import TABLE_NAMES_RU, COLUMN_DESCRIPTIONS
+    from db_mappings import TABLE_NAMES_RU, COLUMN_DESCRIPTIONS, get_field_description
 except ImportError:
-    # Фоллбэк, если файл еще не создан (чтобы интерфейс не падал)
     TABLE_NAMES_RU = {}
     COLUMN_DESCRIPTIONS = {}
+    def get_field_description(t, c): return c  # Фоллбэк
     print("⚠️ Не удалось импортировать db_mappings.py. Описания полей будут использоваться по умолчанию.")
-
 
 class CompositeFieldWidget:
     def __init__(self, parent):
         self.parent = parent
         if not hasattr(parent, 'db_columns'):
-            # Если у родителя нет карты колонок, загружаем её из db_mappings
             try:
                 from db_mappings import DB_COLUMNS_MAP
                 parent.db_columns = DB_COLUMNS_MAP
@@ -1716,7 +1758,7 @@ class CompositeFieldWidget:
         try:
             combo = SearchableComboBox()
             if combo is None: return None
-
+            
             combo.setMaxVisibleItems(50)
             combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             combo.view().setMinimumHeight(400)
@@ -1731,43 +1773,35 @@ class CompositeFieldWidget:
                 completer.setCompletionMode(QCompleter.CompletionMode.PopupCompletion)
 
             all_columns = []
-            # Получаем список таблиц из родителя (обычно это DB_COLUMNS_MAP)
             target_tables = self.parent.db_columns.keys()
             
             for tbl in target_tables:
                 columns = self.parent.db_columns.get(tbl, [])
                 for col in columns:
-                    # ✅ Берем описание из импортированного словаря
-                    desc = COLUMN_DESCRIPTIONS.get(col, col)
+                    # ✅ ИСПОЛЬЗУЕМ get_field_description для получения русского названия
+                    desc = get_field_description(tbl, col)
                     table_name_ru = TABLE_NAMES_RU.get(tbl, tbl)
                     display_desc = f"[{table_name_ru}] {desc}"
-                    
-                    # ✅ Сохраняем связку "таблица|колонка"
                     all_columns.append((f"{tbl}|{col}", display_desc))
             
             all_columns.sort(key=lambda x: x[1])
+
             for col_data, col_desc in all_columns:
                 combo.addItem(col_desc, col_data)
-            
-            # ✅ УЛУЧШЕННАЯ ЛОГИКА ВЫБОРА (ищет "таблица|колонка" или "*|колонка")
+
             if selected_column:
                 search_val = selected_column.strip()
                 idx = -1
-                
-                # 1. Точный поиск с учетом таблицы (если она передана)
                 if table_name:
                     idx = combo.findData(f"{table_name}|{search_val}")
-                
-                # 2. Поиск по окончанию (для обратной совместимости)
                 if idx < 0:
                     for i in range(combo.count()):
                         item_data = combo.itemData(i)
                         if item_data and item_data.endswith(f"|{search_val}"):
                             idx = i
                             break
-                
                 if idx >= 0: combo.setCurrentIndex(idx)
-                
+            
             return combo
         except Exception as e:
             print(f"❌ Ошибка создания ComboBox: {e}")
@@ -1775,9 +1809,6 @@ class CompositeFieldWidget:
             combo.addItem("Ошибка загрузки", None)
             return combo
 
-    # Остальные методы остаются без изменений, так как они работают с данными виджета,
-    # а не со словарями напрямую.
-    
     def create_composite_field_row(self, row, field_name, db_columns_json, table_name, mapping_table):
         try:
             mapping_table.insertRow(row)
@@ -1786,20 +1817,21 @@ class CompositeFieldWidget:
             var_combo.addItems(vars_list if vars_list else [])
             var_combo.setCurrentText(field_name)
             var_combo.setMinimumWidth(200)
-            
+
             composite_widget = QWidget()
             composite_layout = QVBoxLayout(composite_widget)
             composite_layout.setContentsMargins(5, 5, 5, 5)
             composite_layout.setSpacing(5)
-            
+
             db_columns = json.loads(db_columns_json) if isinstance(db_columns_json, str) else db_columns_json
             if not db_columns: db_columns = [{'column': '', 'separator': ', '}]
-            
+
             for idx, col_info in enumerate(db_columns):
                 col_widget = self._create_composite_column_widget(row, idx, col_info, table_name)
                 composite_layout.addWidget(col_widget)
-            
+
             self._add_add_column_button(composite_layout, row, table_name)
+
             mapping_table.setCellWidget(row, 0, var_combo)
             mapping_table.setCellWidget(row, 1, composite_widget)
             mapping_table.setCellWidget(row, 2, self._create_type_label("Составное"))
@@ -1813,30 +1845,31 @@ class CompositeFieldWidget:
         col_layout = QHBoxLayout(col_widget)
         col_layout.setContentsMargins(8, 5, 8, 5)
         col_layout.setSpacing(8)
-        
+
         num_label = QLabel(f"{idx + 1}.")
         num_label.setStyleSheet("font-weight: bold; color: #2196F3; min-width: 20px;")
         col_layout.addWidget(num_label)
-        
+
         col_combo = self._create_column_combo(col_info.get('column', ''), None)
         col_combo.setObjectName(f"col_{row}_{idx}")
         col_layout.addWidget(col_combo, 2)
-        
+
         sep_label = QLabel("Разделитель:")
         sep_label.setStyleSheet("color: #666; font-size: 10px;")
         col_layout.addWidget(sep_label)
-        
+
         sep_input = QLineEdit()
         sep_input.setText(col_info.get('separator', ', '))
         sep_input.setFixedWidth(70)
         sep_input.setObjectName(f"sep_{row}_{idx}")
         col_layout.addWidget(sep_input)
-        
+
         remove_btn = QPushButton("×")
         remove_btn.setFixedSize(26, 26)
         remove_btn.setStyleSheet("QPushButton { background-color: #ff6b6b; color: white; border-radius: 13px; }")
         remove_btn.clicked.connect(lambda checked=False, r=row, i=idx, w=col_widget: self._remove_composite_column(r, i, w))
         col_layout.addWidget(remove_btn)
+
         return col_widget
 
     def _remove_composite_column(self, row, idx, widget_to_remove):
@@ -1844,9 +1877,11 @@ class CompositeFieldWidget:
         if not composite_widget: return
         layout = composite_widget.layout()
         if not layout: return
-        if layout.count() <= 2: # 1 столбец + 1 кнопка
+
+        if layout.count() <= 2: 
             QMessageBox.warning(self.parent, "Внимание", "Нельзя удалить последний столбец.")
             return
+
         layout.removeWidget(widget_to_remove)
         widget_to_remove.deleteLater()
         self._update_column_numbers(layout)
@@ -1871,6 +1906,7 @@ class CompositeFieldWidget:
         add_btn_layout = QHBoxLayout(add_btn_container)
         add_btn_layout.setContentsMargins(0, 8, 0, 0)
         add_btn_layout.addSpacerItem(QSpacerItem(40, 20, QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Minimum))
+        
         add_col_btn = QPushButton("+ Добавить столбец")
         add_col_btn.setFixedSize(140, 28)
         add_col_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; border-radius: 6px; }")
@@ -1883,15 +1919,19 @@ class CompositeFieldWidget:
         if not composite_widget: return
         layout = composite_widget.layout()
         if not layout: return
+        
         add_btn_container = composite_widget.findChild(QWidget, f"add_btn_container_{row}")
         if not add_btn_container: return
+        
         insert_idx = layout.indexOf(add_btn_container)
         tbl_name = table_name or getattr(self.parent, 'current_table_name', 'social_data')
         column_count = sum(1 for i in range(layout.count()) if layout.itemAt(i).widget() and layout.itemAt(i).widget().objectName().startswith('col_widget_'))
+        
         col_info = {'column': '', 'separator': ', '}
         col_widget = self._create_composite_column_widget(row, column_count, col_info, tbl_name)
         col_widget.setObjectName(f"col_widget_{row}_{column_count}")
         layout.insertWidget(insert_idx, col_widget)
+        
         self._update_column_numbers(layout)
         self.parent.mapping_table.resizeRowToContents(row)
 
@@ -1903,19 +1943,20 @@ class CompositeFieldWidget:
         var_combo.addItems(vars_list if vars_list else [])
         var_combo.setMinimumWidth(200)
         mapping_table.setCellWidget(row, 0, var_combo)
-        
+
         composite_widget = QWidget()
         composite_layout = QVBoxLayout(composite_widget)
         composite_layout.setContentsMargins(5, 5, 5, 5)
         composite_layout.setSpacing(5)
-        
+
         tbl_name = getattr(self.parent, 'current_table_name', 'social_data')
         col_info = {'column': '', 'separator': ', '}
         col_widget = self._create_composite_column_widget(row, 0, col_info, tbl_name)
         col_widget.setObjectName(f"col_widget_{row}_0")
         composite_layout.addWidget(col_widget)
+
         self._add_add_column_button(composite_layout, row, tbl_name)
-        
+
         mapping_table.setCellWidget(row, 1, composite_widget)
         mapping_table.setCellWidget(row, 2, self._create_type_label("Составное"))
         mapping_table.resizeRowToContents(row)
@@ -1929,7 +1970,6 @@ class CompositeFieldWidget:
     def get_composite_columns(self, composite_widget):
         """
         Извлекает список колонок и разделителей из виджета составного поля.
-        ✅ ИСПРАВЛЕНО: Корректно парсит новый формат данных ComboBox ("table|column")
         """
         db_columns = []
         layout = composite_widget.layout()
@@ -1938,45 +1978,32 @@ class CompositeFieldWidget:
 
         for i in range(layout.count()):
             item = layout.itemAt(i)
-            if not item:
-                continue
-                
+            if not item: continue
             col_widget = item.widget()
-            if not col_widget or not col_widget.layout():
-                continue
+            if not col_widget or not col_widget.layout(): continue
 
             col_combo = None
             sep_input = None
-
-            # 🔍 Находим ComboBox и QLineEdit внутри контейнера столбца
             for j in range(col_widget.layout().count()):
                 w = col_widget.layout().itemAt(j).widget()
-                if isinstance(w, QComboBox):
-                    col_combo = w
-                elif isinstance(w, QLineEdit):
-                    sep_input = w
+                if isinstance(w, QComboBox): col_combo = w
+                elif isinstance(w, QLineEdit): sep_input = w
 
             if col_combo and sep_input:
                 raw_data = col_combo.currentData()
                 col_name = None
-
                 if raw_data:
-                    # ✅ НОВЫЙ ФОРМАТ: "table_name|db_column"
                     if "|" in str(raw_data):
                         _, col_name = str(raw_data).split("|", 1)
                         col_name = col_name.strip()
                     else:
-                        # 🔙 Фоллбэк для старых сопоставлений (только имя колонки)
                         col_name = str(raw_data).strip()
                 elif col_combo.count() > 0:
-                    # Крайний случай: если currentData пуст, но элемент выбран
                     col_name = col_combo.currentText().strip()
 
                 separator = sep_input.text()
-                
                 if col_name:
                     db_columns.append({'column': col_name, 'separator': separator})
-
         return db_columns
 
 ========================================
@@ -2232,9 +2259,14 @@ class DatabaseConnector:
 ========================================
 
 # db_mappings.py
-# ⚠️ СТРОГО СООТВЕТСТВУЕТ schema_only.sql
-# Технические поля (id, is_deleted, created_at, updated_at, deleted_*) исключены из UI-маппингов
+"""
+Единый справочник маппингов БД
+⚠️ СТРОГО СООТВЕТСТВУЕТ schema_only.sql
+✅ ИСПРАВЛЕНО: Все ключи уникальны (формат: table_column)
+✅ ДОБАВЛЕНО: Безопасный резолвер описаний для UI
+"""
 
+# 📋 Русские названия таблиц
 TABLE_NAMES_RU = {
     'social_data': 'Социально-демографические данные',
     'addresses': 'Адреса проживания',
@@ -2254,144 +2286,156 @@ TABLE_NAMES_RU = {
     'krd': 'Карточки розыска (КРД)'
 }
 
+# 📝 Описания полей (уникальные ключи: table_column)
 COLUMN_DESCRIPTIONS = {
     # === SOCIAL_DATA ===
-    "surname": "👤 Фамилия военнослужащего",
-    "name": "👤 Имя военнослужащего",
-    "patronymic": "👤 Отчество военнослужащего",
-    "birth_date": "📅 Дата рождения",
-    "birth_place_town": "🌍 Населенный пункт места рождения",
-    "birth_place_district": "🌍 Район места рождения",
-    "birth_place_region": "🌍 Субъект РФ места рождения",
-    "birth_place_country": "🌍 Страна места рождения",
-    "tab_number": "🔢 Табельный номер",
-    "personal_number": "🔢 Личный номер",
-    "category_id": "📋 ID категории (справочник)",
-    "rank_id": "⭐ ID воинского звания (справочник)",
-    "drafted_by_commissariat": "🎖️ Наименование военкомата призыва",
-    "draft_date": "📅 Дата призыва на военную службу",
-    "povsk": "🎖️ Наименование ПОВСК",
-    "selection_date": "📅 Дата отбора на военную службу",
-    "education": "🎓 Образование военнослужащего",
-    "criminal_record": "⚖️ Сведения о судимости",
-    "social_media_account": "📱 Аккаунты в социальных сетях",
-    "bank_card_number": "💳 Номер банковской карты",
-    "passport_series": "📄 Серия паспорта",
-    "passport_number": "📄 Номер паспорта",
-    "passport_issue_date": "📅 Дата выдачи паспорта",
-    "passport_issued_by": "📄 Кем выдан паспорт",
-    "military_id_series": "🎫 Серия военного билета",
-    "military_id_number": "🎫 Номер военного билета",
-    "military_id_issue_date": "📅 Дата выдачи военного билета",
-    "military_id_issued_by": "🎫 Кем выдан военный билет",
-    "appearance_features": "👁️ Особенности внешности",
-    "personal_marks": "👁️ Личные приметы (татуировки, шрамы)",
-    "federal_search_info": "🔍 Сведения о федеральном розыске",
-    "military_contacts": "📞 Контакты военнослужащего",
-    "relatives_info": "👨‍👩‍👧 Сведения о близких родственниках",
+    "social_data_surname": "👤 Фамилия военнослужащего",
+    "social_data_name": "👤 Имя военнослужащего",
+    "social_data_patronymic": "👤 Отчество военнослужащего",
+    "social_data_birth_date": "📅 Дата рождения",
+    "social_data_birth_place_town": "🌍 Населенный пункт места рождения",
+    "social_data_birth_place_district": "🌍 Район места рождения",
+    "social_data_birth_place_region": "🌍 Субъект РФ места рождения",
+    "social_data_birth_place_country": "🌍 Страна места рождения",
+    "social_data_tab_number": "🔢 Табельный номер",
+    "social_data_personal_number": "🔢 Личный номер",
+    "social_data_category_id": "📋 ID категории (справочник)",
+    "social_data_rank_id": "⭐ ID воинского звания (справочник)",
+    "social_data_drafted_by_commissariat": "🎖️ Наименование военкомата призыва",
+    "social_data_draft_date": "📅 Дата призыва на военную службу",
+    "social_data_povsk": "🎖️ Наименование ПОВСК",
+    "social_data_selection_date": "📅 Дата отбора на военную службу",
+    "social_data_education": "🎓 Образование военнослужащего",
+    "social_data_criminal_record": "⚖️ Сведения о судимости",
+    "social_data_social_media_account": "📱 Аккаунты в социальных сетях",
+    "social_data_bank_card_number": "💳 Номер банковской карты",
+    "social_data_passport_series": "📄 Серия паспорта",
+    "social_data_passport_number": "📄 Номер паспорта",
+    "social_data_passport_issue_date": "📅 Дата выдачи паспорта",
+    "social_data_passport_issued_by": "📄 Кем выдан паспорт",
+    "social_data_military_id_series": "🎫 Серия военного билета",
+    "social_data_military_id_number": "🎫 Номер военного билета",
+    "social_data_military_id_issue_date": "📅 Дата выдачи военного билета",
+    "social_data_military_id_issued_by": "🎫 Кем выдан военный билет",
+    "social_data_appearance_features": "👁️ Особенности внешности",
+    "social_data_personal_marks": "👁️ Личные приметы (татуировки, шрамы)",
+    "social_data_federal_search_info": "🔍 Сведения о федеральном розыске",
+    "social_data_military_contacts": "📞 Контакты военнослужащего",
+    "social_data_relatives_info": "👨‍👩‍👧 Сведения о близких родственниках",
 
     # === ADDRESSES ===
-    "region": "📍 Субъект РФ (область, край, республика)",
-    "district": "📍 Административный район",
-    "town": "📍 Населенный пункт (город, село)",
-    "street": "📍 Улица",
-    "house": "🏠 Номер дома",
-    "building": "🏢 Номер корпуса",
-    "letter": "🔤 Литера здания",
-    "apartment": "🚪 Номер квартиры",
-    "room": "🚪 Номер комнаты",
-    "check_date": "📅 Дата адресной проверки",
-    "check_result": "✅ Результат проверки адреса",
-    "postal_index": "📮 Почтовый индекс",
+    "addresses_region": "📍 Субъект РФ (область, край, республика)",
+    "addresses_district": "📍 Административный район",
+    "addresses_town": "📍 Населенный пункт (город, село)",
+    "addresses_street": "📍 Улица",
+    "addresses_house": "🏠 Номер дома",
+    "addresses_building": "🏢 Номер корпуса",
+    "addresses_letter": "🔤 Литера здания",
+    "addresses_apartment": "🚪 Номер квартиры",
+    "addresses_room": "🚪 Номер комнаты",
+    "addresses_check_date": "📅 Дата адресной проверки",
+    "addresses_check_result": "✅ Результат проверки адреса",
+    "addresses_postal_index": "📮 Почтовый индекс (проживание)",
 
     # === SERVICE_PLACES ===
-    "place_name": "🎖️ Наименование места службы",
-    "military_unit_number": "🔢 Номер воинской части (в/ч)",
-    "military_unit_id": "🎖️ ID военного управления (справочник)",
-    "garrison_id": "🏢 ID гарнизона (справочник)",
-    "position_id": "💼 ID воинской должности (справочник)",
-    "commanders": "👨‍✈️ Командиры (ФИО, контакты)",
-    "postal_region": "📮 Субъект РФ почтового адреса",
-    "postal_district": "📮 Район почтового адреса",
-    "postal_town": "📮 Город почтового адреса",
-    "postal_street": "📮 Улица почтового адреса",
-    "postal_house": "📮 Дом почтового адреса",
-    "postal_building": "📮 Корпус почтового адреса",
-    "postal_letter": "📮 Литера почтового адреса",
-    "postal_apartment": "📮 Квартира почтового адреса",
-    "postal_room": "📮 Комната почтового адреса",
-    "place_contacts": "📞 Контакты места службы",
+    "service_places_place_name": "🎖️ Наименование места службы",
+    "service_places_military_unit_number": "🔢 Номер воинской части (в/ч)",
+    "service_places_military_unit_id": "🎖️ ID военного управления (место службы)",
+    "service_places_garrison_id": "🏢 ID гарнизона (справочник)",
+    "service_places_position_id": "💼 ID воинской должности (справочник)",
+    "service_places_commanders": "👨‍✈️ Командиры (ФИО, контакты)",
+    "service_places_postal_index": "📮 Почтовый индекс (почтовый адрес части)",
+    "service_places_postal_region": "📮 Субъект РФ почтового адреса",
+    "service_places_postal_district": "📮 Район почтового адреса",
+    "service_places_postal_town": "📮 Город почтового адреса",
+    "service_places_postal_street": "📮 Улица почтового адреса",
+    "service_places_postal_house": "📮 Дом почтового адреса",
+    "service_places_postal_building": "📮 Корпус почтового адреса",
+    "service_places_postal_letter": "📮 Литера почтового адреса",
+    "service_places_postal_apartment": "📮 Квартира почтового адреса",
+    "service_places_postal_room": "📮 Комната почтового адреса",
+    "service_places_place_contacts": "📞 Контакты места службы",
 
     # === SOCH_EPISODES ===
-    "soch_date": "⚠️ Дата СОЧ",
-    "soch_location": "⚠️ Место СОЧ",
-    "order_date_number": "⚠️ Дата и номер приказа о СОЧ",
-    "witnesses": "👥 Очевидцы СОЧ",
-    "reasons": "💡 Вероятные причины СОЧ",
-    "weapon_info": "🔫 Сведения о наличии оружия",
-    "clothing": "🧥 Описание одежды",
-    "movement_options": "🚶 Возможные направления движения",
-    "other_info": "📝 Другая значимая информация",
-    "duty_officer_commissariat": "📞 Дежурный по военкомату",
-    "duty_officer_omvd": "📞 Дежурный по ОМВД",
-    "investigation_info": "📋 Сведения о проверке",
-    "prosecution_info": "📋 Сведения о прокуратуре",
-    "criminal_case_info": "📋 Сведения об уголовном деле",
-    "search_date": "🔍 Дата розыска",
-    "found_by": "✅ Кем разыскан",
-    "search_circumstances": "🔍 Обстоятельства розыска",
-    "notification_recipient": "📬 Адресат уведомления",
-    "notification_date": "📅 Дата уведомления",
-    "notification_number": "📬 Номер уведомления",
+    "soch_episodes_soch_date": "⚠️ Дата СОЧ",
+    "soch_episodes_soch_location": "⚠️ Место СОЧ",
+    "soch_episodes_order_date_number": "⚠️ Дата и номер приказа о СОЧ",
+    "soch_episodes_witnesses": "👥 Очевидцы СОЧ",
+    "soch_episodes_reasons": "💡 Вероятные причины СОЧ",
+    "soch_episodes_weapon_info": "🔫 Сведения о наличии оружия",
+    "soch_episodes_clothing": "🧥 Описание одежды",
+    "soch_episodes_movement_options": "🚶 Возможные направления движения",
+    "soch_episodes_other_info": "📝 Другая значимая информация",
+    "soch_episodes_duty_officer_commissariat": "📞 Дежурный по военкомату",
+    "soch_episodes_duty_officer_omvd": "📞 Дежурный по ОМВД",
+    "soch_episodes_investigation_info": "📋 Сведения о проверке",
+    "soch_episodes_prosecution_info": "📋 Сведения о прокуратуре",
+    "soch_episodes_criminal_case_info": "📋 Сведения об уголовном деле",
+    "soch_episodes_search_date": "🔍 Дата розыска",
+    "soch_episodes_found_by": "✅ Кем разыскан",
+    "soch_episodes_search_circumstances": "🔍 Обстоятельства розыска",
+    "soch_episodes_notification_recipient": "📬 Адресат уведомления",
+    "soch_episodes_notification_date": "📅 Дата уведомления",
+    "soch_episodes_notification_number": "📬 Номер уведомления",
 
     # === INCOMING_ORDERS ===
-    "initiator_type_id": "📩 ID типа инициатора (справочник)",
-    "initiator_full_name": "📩 Наименование инициатора",
-    "military_unit_id": "🎖️ ID военного управления (справочник)",
-    "order_date": "📩 Дата поручения",
-    "order_number": "📩 Номер поручения",
-    "receipt_date": "📩 Дата поступления",
-    "receipt_number": "📩 Входящий номер",
-    "initiator_contacts": "📩 Контакты инициатора",
-    "our_response_date": "📩 Дата ответа",
-    "our_response_number": "📩 Исходящий номер ответа",
+    "incoming_orders_initiator_type_id": "📩 ID типа инициатора (справочник)",
+    "incoming_orders_initiator_full_name": "📩 Наименование инициатора",
+    "incoming_orders_military_unit_id": "🎖️ ID военного управления (инициатор)",
+    "incoming_orders_order_date": "📩 Дата поручения",
+    "incoming_orders_order_number": "📩 Номер поручения",
+    "incoming_orders_receipt_date": "📩 Дата поступления",
+    "incoming_orders_receipt_number": "📩 Входящий номер",
+    "incoming_orders_postal_index": "📮 Почтовый индекс (адрес инициатора)",
+    "incoming_orders_postal_region": "📮 Субъект РФ (адрес инициатора)",
+    "incoming_orders_postal_district": "📮 Район (адрес инициатора)",
+    "incoming_orders_postal_town": "📮 Город (адрес инициатора)",
+    "incoming_orders_postal_street": "📮 Улица (адрес инициатора)",
+    "incoming_orders_postal_house": "📮 Дом (адрес инициатора)",
+    "incoming_orders_postal_building": "📮 Корпус (адрес инициатора)",
+    "incoming_orders_postal_letter": "📮 Литера (адрес инициатора)",
+    "incoming_orders_postal_apartment": "📮 Квартира (адрес инициатора)",
+    "incoming_orders_postal_room": "📮 Комната (адрес инициатора)",
+    "incoming_orders_initiator_contacts": "📩 Контакты инициатора",
+    "incoming_orders_our_response_date": "📩 Дата ответа",
+    "incoming_orders_our_response_number": "📩 Исходящий номер ответа",
 
     # === OUTGOING_REQUESTS ===
-    "request_type_id": "📤 ID типа запроса (справочник)",
-    "military_unit_id": "🎖️ ID военного управления адресата (справочник)",
-    "issue_date": "📤 Дата запроса",
-    "issue_number": "📤 Номер запроса",
-    "request_text": "📤 Текст запроса",
-    "signed_by_position": "📤 Должность подписанта",
-    "recipient_id": "👥 ID адресата (справочник)",
-    "response_date": "📅 Дата получения ответа",
-    "response_number": "📬 Номер ответа",
-    "response_status": "📊 Статус ответа",
+    "outgoing_requests_request_type_id": "📤 ID типа запроса (справочник)",
+    "outgoing_requests_military_unit_id": "🎖️ ID военного управления адресата (справочник)",
+    "outgoing_requests_issue_date": "📤 Дата запроса",
+    "outgoing_requests_issue_number": "📤 Номер запроса",
+    "outgoing_requests_request_text": "📤 Текст запроса",
+    "outgoing_requests_signed_by_position": "📤 Должность подписанта",
+    "outgoing_requests_recipient_id": "👥 ID адресата (справочник)",
+    "outgoing_requests_response_date": "📅 Дата получения ответа",
+    "outgoing_requests_response_number": "📬 Номер ответа",
+    "outgoing_requests_response_status": "📊 Статус ответа",
 
-    # === RECIPIENTS (⚠️ В БД поле называется name, а НЕ recipient_name!) ===
-    "name": "👥 Наименование адресата",
-    "contacts": "👥 Контакты адресата (телефон, email)",
-    "postal_index": "👥 Почтовый индекс адресата",
-    "postal_region": "👥 Субъект РФ адресата",
-    "postal_district": "👥 Административный район адресата",
-    "postal_town": "👥 Город/населенный пункт адресата",
-    "postal_street": "👥 Улица адресата",
-    "postal_house": "👥 Дом адресата",
-    "postal_building": "👥 Корпус/строение адресата",
-    "postal_letter": "👥 Литера адресата",
-    "postal_apartment": "👥 Квартира адресата",
-    "postal_room": "👥 Комната адресата",
-    "request_type_id": "📤 ID типа запроса по умолчанию (справочник)",
+    # === RECIPIENTS ===
+    "recipients_name": "👥 Наименование адресата",
+    "recipients_contacts": "👥 Контакты адресата (телефон, email)",
+    "recipients_postal_index": "👥 Почтовый индекс адресата",
+    "recipients_postal_region": "👥 Субъект РФ адресата",
+    "recipients_postal_district": "👥 Административный район адресата",
+    "recipients_postal_town": "👥 Город/населенный пункт адресата",
+    "recipients_postal_street": "👥 Улица адресата",
+    "recipients_postal_house": "👥 Дом адресата",
+    "recipients_postal_building": "👥 Корпус/строение адресата",
+    "recipients_postal_letter": "👥 Литера адресата",
+    "recipients_postal_apartment": "👥 Квартира адресата",
+    "recipients_postal_room": "👥 Комната адресата",
+    "recipients_request_type_id": "📤 ID типа запроса по умолчанию (справочник)",
 
     # === KRD (доп. поля) ===
-    "status_id": "📊 ID статуса КРД (справочник)",
-    "last_service_place_id": "🎖️ ID последнего места службы",
-    "is_locked": "🔒 Заблокировано для редактирования",
-    "locked_by": "👤 ID пользователя, заблокировавшего КРД",
-    "locked_at": "📅 Дата и время блокировки"
+    "krd_status_id": "📊 ID статуса КРД (справочник)",
+    "krd_last_service_place_id": "🎖️ ID последнего места службы",
+    "krd_is_locked": "🔒 Заблокировано для редактирования",
+    "krd_locked_by": "👤 ID пользователя, заблокировавшего КРД",
+    "krd_locked_at": "📅 Дата и время блокировки"
 }
 
-# Группировка по таблицам (для Mapping Editor и Doc Generator)
+# 🗂️ Группировка по таблицам (для Mapping Editor и Doc Generator)
 DB_COLUMNS_MAP = {
     "social_data": [
         "surname", "name", "patronymic", "birth_date", "birth_place_town",
@@ -2455,6 +2499,15 @@ LOOKUP_TABLES = {
     'position_id': ('krd.positions', 'name'),
     'recipient_id': ('krd.recipients', 'name')
 }
+
+# 🛠️ ВСПОМОГАТЕЛЬНЫЙ РЕЗОЛВЕР (использовать в UI вместо прямого доступа к словарю)
+def get_field_description(table_name: str, column_name: str) -> str:
+    """
+    Безопасно получает описание поля с учетом контекста таблицы.
+    Алгоритм: 1) table_column -> 2) column -> 3) column_name (fallback)
+    """
+    return COLUMN_DESCRIPTIONS.get(f"{table_name}_{column_name}", 
+           COLUMN_DESCRIPTIONS.get(column_name, column_name))
 
 ========================================
 📄 FILE: ./debug_app.py
@@ -5309,7 +5362,7 @@ class IncomingOrderDialog(QDialog):
             self._apply_readonly_mode()
 
     def _apply_readonly_mode(self):
-        """Переводит все поля в режим ReadOnly и скрывает кнопку сохранения"""
+        """Переводит все поля в режим ReadOnly и настраивает кнопки для просмотра"""
         # Поля ввода -> ReadOnly
         for w in [self.initiator_full_name_input, self.order_number_input, self.receipt_number_input,
                   self.postal_index_input, self.postal_region_input, self.postal_district_input,
@@ -5330,16 +5383,20 @@ class IncomingOrderDialog(QDialog):
         for btn in self.findChildren(QPushButton):
             if btn.text() == "⚙️": btn.setEnabled(False)
             
-        # Изменяем поведение диалоговой панели: скрываем Сохранить, Отмена -> Закрыть
+        # ✅ ИЗМЕНЕНО: Безопасная настройка кнопок диалога
         if hasattr(self, 'button_box'):
             save_btn = self.button_box.button(QDialogButtonBox.StandardButton.Save)
-            if save_btn: save_btn.setVisible(False)
-            
+            if save_btn: 
+                save_btn.setVisible(False)
+                
             cancel_btn = self.button_box.button(QDialogButtonBox.StandardButton.Cancel)
-            if cancel_btn: 
+            if cancel_btn:
                 cancel_btn.setText("🚪 Закрыть")
-                # Отключаем reject, чтобы работало как accept (просто закрытие)
-                cancel_btn.clicked.disconnect(self.reject)
+                # ✅ ИСПРАВЛЕНО: Используем try/except, так как сигнал может быть не подключен явно
+                try:
+                    cancel_btn.clicked.disconnect()
+                except TypeError:
+                    pass
                 cancel_btn.clicked.connect(self.accept)
 
     def setup_validators(self):
@@ -5907,208 +5964,209 @@ if __name__ == "__main__":
 
 """
 Модуль для окна просмотра и редактирования данных КРД
-✅ РЕАЛИЗОВАНО: PostgreSQL Advisory Locks (Уровень 3)
-✅ АВТОСБРОС: Блокировка снимается мгновенно при разрыве соединения/крахе
-✅ БЕЗОПАСНО: Используются именованные параметры (:krd_id) для обхода бага QPSQL
-✅ ДОБАВЛЕНО: Управление статусом КРД с возможностью редактирования справочника
+✅ ИСПРАВЛЕНО: Проблема фокуса в Ubuntu/Linux (Z-order fighting)
+✅ ДОБАВЛЕНО: WindowStaysOnTopHint для окна предпросмотра
+✅ БЕЗОПАСНО: Используются именованные параметры (:krd_id)
 """
 from PyQt6.QtWidgets import (
-    QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QMessageBox, 
-    QComboBox, QPushButton, QLabel, QWidget
+    QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QMessageBox,
+    QComboBox, QPushButton, QLabel, QWidget, QHeaderView, QAbstractItemView
 )
-from PyQt6.QtGui import QCloseEvent
+from PyQt6.QtGui import QCloseEvent, QStandardItemModel, QStandardItem
 from PyQt6.QtSql import QSqlQuery
-from PyQt6.QtCore import pyqtSignal
+from PyQt6.QtCore import pyqtSignal, Qt, QTimer
 import traceback
+import json
 from ui_helpers import is_reader, apply_readonly_mode
-
-# Импорт всех вкладок
+# Импорт всех вкладок и менеджеров
 from social_data_tab import SocialDataTab
 from addresses_tab import AddressesTab
 from incoming_orders_tab import IncomingOrdersTab
 from service_places_tab import ServicePlacesTab
 from soch_episodes_tab import SochEpisodesTab
 from outgoing_requests_tab import OutgoingRequestsTab
-from document_generator_tab import DocumentGeneratorTab
+from krd_version_manager import KrdVersionManager
+from krd_version_history_dialog import KrdVersionHistoryDialog
+from krd_version_preview_window import KrdVersionPreviewWindow
 
 class KrdDetailsWindow(QDialog):
-    """Окно просмотра и редактирования данных КРД с Advisory Locks"""
+    """Окно просмотра и редактирования данных КРД с Advisory Locks и версионированием"""
     krd_window_closed = pyqtSignal()
 
-    def __init__(self, krd_id, db_connection, user_info, audit_logger=None):
-        super().__init__()
+    def __init__(self, krd_id, db_connection, user_info, audit_logger=None, preview_version_id=None):
+        # ✅ ВАЖНО: super() вызывается БЕЗ родителя (None), чтобы окно стало независимым
+        super().__init__(None)
+        
         self.krd_id = krd_id
         self.db = db_connection
         self.user_info = user_info
         self.audit_logger = audit_logger
-        
         self.current_user_id = user_info.get('id')
         self.current_username = user_info.get('username', 'Неизвестный')
         self.previous_tab_index = -1
+        self.version_mgr = KrdVersionManager(db_connection)
+        self._tabs_list = []
         
-        # ✅ 1. Пытаемся установить Advisory Lock ПЕРЕД созданием интерфейса
-        lock_success, lock_message = self.try_acquire_lock()
-        
-        if not lock_success:
-            QMessageBox.warning(self, "Доступ запрещен", lock_message)
-            self.reject() # Закрываем окно, не создавая интерфейс
-            return
+        # Параметры режима предпросмотра версии
+        self.preview_version_id = preview_version_id
+        self.preview_mode = preview_version_id is not None
+        self.preview_banner = None
+        self._preview_window = None  # Ссылка для удержания окна от GC
 
-        self.setWindowTitle(f"Карточка розыска №{krd_id} — [Редактирование]")
-        self.setModal(True) 
+        # === ЛОГИКА НАСТРОЙКИ ОКНА ===
+        if self.preview_mode:
+            self.setWindowTitle(f"Карточка розыска №{krd_id} — [Просмотр версии #{preview_version_id}]")
+            
+            # ✅ КЛЮЧЕВОЕ ИСПРАВЛЕНИЕ ДЛЯ UBUNTU:
+            # 1. Убираем флаг Dialog
+            # 2. Делаем окно полноценным Window
+            # 3. Добавляем WindowStaysOnTopHint, чтобы оно не перекрывалось модальным окном редактора
+            self.setWindowFlags(
+                Qt.WindowType.Window |
+                Qt.WindowType.WindowStaysOnTopHint | 
+                Qt.WindowType.WindowCloseButtonHint |
+                Qt.WindowType.WindowMinimizeButtonHint |
+                Qt.WindowType.WindowMaximizeButtonHint
+            )
+            
+            self.setWindowModality(Qt.WindowModality.NonModal)
+            self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        else:
+            # Обычный режим: Модальное окно с блокировкой
+            lock_success, lock_message = self.try_acquire_lock()
+            if not lock_success:
+                QMessageBox.warning(self, "Доступ запрещен", lock_message)
+                self.reject()
+                return
+            self.setWindowTitle(f"Карточка розыска №{krd_id} — [Редактирование]")
+            self.setModal(True)
+            
         self.resize(1100, 750)
-
-        # Если блокировка успешна — инициализируем интерфейс
         self.init_ui()
+        
+        # Загрузка снапшота строго после отрисовки
+        if self.preview_mode:
+            QTimer.singleShot(20, self._load_version_snapshot)
 
     def init_ui(self):
         """Инициализация пользовательского интерфейса"""
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.setSpacing(0)
-
         # === ВЕРХНЯЯ ПАНЕЛЬ (HEADER) ===
         header_widget = QWidget()
         header_widget.setProperty("role", "header")
         header_layout = QHBoxLayout(header_widget)
         header_layout.setContentsMargins(15, 10, 15, 10)
-        
         title_label = QLabel(f"📋 <b>Карточка розыска №{self.krd_id}</b>")
         title_label.setStyleSheet("font-size: 16px; margin-right: 20px;")
         header_layout.addWidget(title_label)
         header_layout.addWidget(QLabel("📌 Статус:"))
-        
         self.status_combo = QComboBox()
         self.status_combo.setMinimumWidth(200)
         self.status_combo.currentIndexChanged.connect(self.on_status_changed)
         header_layout.addWidget(self.status_combo)
-        
         self.btn_edit_statuses = QPushButton("⚙️")
         self.btn_edit_statuses.setToolTip("Настроить справочник статусов")
         self.btn_edit_statuses.setProperty("role","edit")
         self.btn_edit_statuses.setFixedSize(30, 30)
         self.btn_edit_statuses.clicked.connect(self.open_status_editor)
         header_layout.addWidget(self.btn_edit_statuses)
+        # Кнопка версий
+        self.btn_versions = QPushButton("📜 Версии")
+        self.btn_versions.setProperty("role", "info")
+        self.btn_versions.clicked.connect(self.open_versions_dialog)
+        header_layout.addWidget(self.btn_versions)
         header_layout.addStretch()
-        
         self.load_statuses()
         main_layout.addWidget(header_widget)
-
+        # === БАННЕР ПРЕДПРОСМОТРА ===
+        self.preview_banner = QLabel("👁️ РЕЖИМ ПРЕДПРОСМОТРА: данные только для чтения.")
+        self.preview_banner.setStyleSheet("background-color: #fff3cd; color: #856404; padding: 10px; font-weight: bold; border-radius: 0px; text-align: center;")
+        self.preview_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.preview_banner.hide()
+        main_layout.addWidget(self.preview_banner)
         # === ВКЛАДКИ ===
         self.tabs = QTabWidget()
-        
-        # 🔧 СОХРАНЯЕМ ССЫЛКИ НА ВКЛАДКИ
         self.social_data_tab = SocialDataTab(self.krd_id, self.db, self.audit_logger, self.user_info)
         self.addresses_tab = AddressesTab(self.krd_id, self.db, self.audit_logger, self.user_info)
         self.incoming_orders_tab = IncomingOrdersTab(self.krd_id, self.db, self.audit_logger, self.user_info)
         self.service_places_tab = ServicePlacesTab(self.krd_id, self.db, self.audit_logger, self.user_info)
         self.soch_episodes_tab = SochEpisodesTab(self.krd_id, self.db, self.audit_logger, self.user_info)
-
-        # ✅ 1. ПЕРЕДАЕМ user_info В OUTGOING_REQUESTS_TAB
-        self.outgoing_requests_tab = OutgoingRequestsTab(self.krd_id, self.db, self.audit_logger, self.user_info)
-        
-        # Добавляем вкладки
+        self._tabs_list = [
+            self.social_data_tab, self.addresses_tab, self.incoming_orders_tab,
+            self.service_places_tab, self.soch_episodes_tab
+        ]
         self.tabs.addTab(self.social_data_tab, "👤 Социально-демографические данные")
         self.tabs.addTab(self.addresses_tab, "🏠 Адреса проживания")
         self.tabs.addTab(self.incoming_orders_tab, "📬 Входящие поручения")
         self.tabs.addTab(self.service_places_tab, "🎖️ Места службы")
         self.tabs.addTab(self.soch_episodes_tab, "⚠️ Сведения о СОЧ")
-        self.tabs.addTab(self.outgoing_requests_tab, "📤 Запросы и поручения")
-        
-        # ✅ 2. БЕЗОПАСНОЕ ПОДКЛЮЧЕНИЕ СИГНАЛОВ (Только если генератор существует)
-        if hasattr(self.outgoing_requests_tab, 'generator_tab') and self.outgoing_requests_tab.generator_tab is not None:
-            self.addresses_tab.data_changed.connect(self.outgoing_requests_tab.generator_tab.load_related_records)
-            self.service_places_tab.data_changed.connect(self.outgoing_requests_tab.generator_tab.load_related_records)
-            self.soch_episodes_tab.data_changed.connect(self.outgoing_requests_tab.generator_tab.load_related_records)
-            self.incoming_orders_tab.data_changed.connect(self.outgoing_requests_tab.generator_tab.load_related_records)
-            
+        if not is_reader(self.user_info):
+            self.outgoing_requests_tab = OutgoingRequestsTab(self.krd_id, self.db, self.audit_logger, self.user_info)
+            self.tabs.addTab(self.outgoing_requests_tab, "📤 Запросы и поручения")
+            self._tabs_list.append(self.outgoing_requests_tab)
+            if hasattr(self.outgoing_requests_tab, 'generator_tab') and self.outgoing_requests_tab.generator_tab is not None:
+                self.addresses_tab.data_changed.connect(self.outgoing_requests_tab.generator_tab.load_related_records)
+                self.service_places_tab.data_changed.connect(self.outgoing_requests_tab.generator_tab.load_related_records)
+                self.soch_episodes_tab.data_changed.connect(self.outgoing_requests_tab.generator_tab.load_related_records)
+                self.incoming_orders_tab.data_changed.connect(self.outgoing_requests_tab.generator_tab.load_related_records)
+        else:
+            self.outgoing_requests_tab = None
         self.tabs.currentChanged.connect(self._on_tab_switched)
         main_layout.addWidget(self.tabs)
 
     # =========================================================================
     # === ЛОГИКА СТАТУСОВ ===
     # =========================================================================
-
     def load_statuses(self):
-        """Загрузка статусов в комбобокс и выбор текущего"""
-        self.status_combo.blockSignals(True) # Блокируем сигналы во время загрузки
+        self.status_combo.blockSignals(True)
         self.status_combo.clear()
-        
         q = QSqlQuery(self.db)
-        # Загружаем все статусы
         q.exec("SELECT id, name FROM krd.statuses ORDER BY id")
-        
         current_status_id = self.get_current_status_id()
         found_current = False
-        
         while q.next():
-            sid = q.value(0)
-            sname = q.value(1)
+            sid, sname = q.value(0), q.value(1)
             self.status_combo.addItem(sname, sid)
-            
-            # Если это текущий статус записи - запоминаем индекс
-            if sid == current_status_id:
-                found_current = True
-                # Устанавливаем индекс после цикла, чтобы не сбивать выбор
-        
-        # Устанавливаем выбор
+            if sid == current_status_id: found_current = True
         if found_current:
             idx = self.status_combo.findData(current_status_id)
-            if idx >= 0:
-                self.status_combo.setCurrentIndex(idx)
-        
-        self.status_combo.blockSignals(False) # Разблокируем сигналы
+            if idx >= 0: self.status_combo.setCurrentIndex(idx)
+        self.status_combo.blockSignals(False)
 
     def get_current_status_id(self):
-        """Получает текущий статус из БД для этой КРД"""
         if not self.krd_id: return 1
         q = QSqlQuery(self.db)
         q.prepare("SELECT status_id FROM krd.krd WHERE id = :id")
         q.bindValue(":id", self.krd_id)
-        
-        if q.exec() and q.next():
-            return q.value(0)
-        return 1 # По умолчанию
+        if q.exec() and q.next(): return q.value(0)
+        return 1
 
     def on_status_changed(self, index):
-        """Обработчик изменения статуса в ComboBox"""
+        if self.preview_mode: return
         new_status_id = self.status_combo.currentData()
         if new_status_id is not None:
             self.save_status_to_db(new_status_id)
 
     def save_status_to_db(self, new_status_id):
-        """Сохраняет новый статус в базу данных"""
         try:
             q = QSqlQuery(self.db)
             q.prepare("UPDATE krd.krd SET status_id = :sid WHERE id = :id")
             q.bindValue(":sid", new_status_id)
             q.bindValue(":id", self.krd_id)
-            
-            if q.exec():
-                print(f"✅ Статус КРД-{self.krd_id} изменен на ID={new_status_id}")
-                # Здесь можно добавить логирование в audit_logger
-            else:
+            if not q.exec():
                 QMessageBox.critical(self, "Ошибка БД", f"Не удалось сохранить статус:\n{q.lastError().text()}")
-                # Если ошибка, возвращаем статус обратно (опционально)
                 self.load_statuses()
         except Exception as e:
             print(f"❌ Ошибка сохранения статуса: {e}")
 
     def open_status_editor(self):
-        """Открывает редактор справочника статусов с автообновлением"""
         try:
             from reference_editor_dialog import ReferenceEditorDialog
-            
-            # Открываем редактор для таблицы 'statuses'
             dlg = ReferenceEditorDialog(self.db, self, initial_table='statuses')
-            
-            # ✅ МАГИЯ АВТООБНОВЛЕНИЯ:
-            # Подключаем сигнал data_changed (издается при добавлении/удалении/редактировании)
-            # к нашему методу load_statuses
             dlg.data_changed.connect(self.load_statuses)
-            
             dlg.exec()
-            
         except Exception as e:
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Не удалось открыть редактор:\n{str(e)}")
@@ -6116,238 +6174,582 @@ class KrdDetailsWindow(QDialog):
     # =========================================================================
     # === ЛОГИКА БЛОКИРОВОК И ЗАКРЫТИЯ ===
     # =========================================================================
-
-    # В файл: krd_details_window.py
-# Заменить метод: try_acquire_lock
-
     def try_acquire_lock(self):
-        """
-        Захватывает Advisory Lock через встроенные функции PostgreSQL.
-        Возвращает (True, "") если успешно, или (False, "Причина отказа").
-        📖 Пользователи с ролью 'reader' пропускают блокировку (только просмотр).
-        """
-        # 📖 Проверяем роль: если читатель — блокировка не нужна
-        from ui_helpers import is_reader
         if is_reader(self.user_info):
-            print(f"📖 [LOCK] Роль 'reader'. Advisory Lock пропускается (режим просмотра).")
             self.setWindowTitle(f"Карточка №{self.krd_id} — [Просмотр]")
             return True, ""
-
         try:
-            print(f"\n{'='*70}")
-            print(f"🔒 [LOCK] Попытка захвата блокировки для КРД-{self.krd_id}")
-            print(f"{'='*70}")
-            
-            # 🔍 Диагностика: Проверяем текущее состояние блокировок
             check_query = QSqlQuery(self.db)
-            check_query.prepare("""
-                SELECT 
-                    pl.locktype,
-                    pl.granted,
-                    lk.usename,
-                    lk.application_name,
-                    lk.state
-                FROM pg_locks pl
-                LEFT JOIN pg_stat_activity lk ON lk.pid = pl.pid
-                WHERE pl.locktype = 'advisory'
-                AND pl.objid = :krd_id
-            """)
+            check_query.prepare("""SELECT pl.locktype, pl.granted, lk.usename FROM pg_locks pl LEFT JOIN pg_stat_activity lk ON lk.pid = pl.pid WHERE pl.locktype = 'advisory' AND pl.objid = :krd_id""")
             check_query.bindValue(":krd_id", int(self.krd_id))
-            
-            print(f"🔍 [LOCK] Проверка существующих блокировок...")
-            if check_query.exec():
-                existing_locks = 0
-                while check_query.next():
-                    existing_locks += 1
-                    print(f"   ⚠️ Найдена блокировка:")
-                    print(f"      - Тип: {check_query.value(0)}")
-                    print(f"      - Granted: {check_query.value(1)}")
-                    print(f"      - User: {check_query.value(2)}")
-                    print(f"      - App: {check_query.value(3)}")
-                    print(f"      - State: {check_query.value(4)}")
-                
-                if existing_locks == 0:
-                    print(f"   ✅ Существующих блокировок не найдено")
-            else:
-                print(f"   ⚠️ Ошибка проверки: {check_query.lastError().text()}")
-            
-            # Пытаемся захватить блокировку
             query = QSqlQuery(self.db)
             query.prepare("SELECT pg_try_advisory_lock(:krd_id)")
             query.bindValue(":krd_id", int(self.krd_id))
-            
-            print(f"🔐 [LOCK] Выполняем pg_try_advisory_lock({self.krd_id})...")
-            
-            if not query.exec():
-                error_msg = f"Ошибка БД: {query.lastError().text()}"
-                print(f"❌ [LOCK] {error_msg}")
-                return False, error_msg
-                
-            if query.next():
-                is_locked = query.value(0)
-                if is_locked:
-                    print(f"✅ [LOCK] Блокировка УСПЕШНО захвачена!")
-                    print(f"{'='*70}\n")
-                    return True, ""
-                else:
-                    print(f"❌ [LOCK] Не удалось захватить блокировку - запись занята")
-                    print(f"{'='*70}\n")
-                    return False, (
-                        f"Запись №{self.krd_id} сейчас открыта в другой сессии или окне.\n"
-                        f"Закройте её в другом приложении или дождитесь освобождения."
-                    )
-            
-            print(f"❌ [LOCK] Не получен результат от pg_try_advisory_lock")
-            print(f"{'='*70}\n")
-            return False, "Не удалось проверить статус блокировки"
-            
+            if query.exec() and query.next() and query.value(0):
+                return True, ""
+            return False, f"Запись №{self.krd_id} сейчас открыта в другой сессии."
         except Exception as e:
-            print(f"❌ [LOCK] Исключение при захвате блокировки: {str(e)}")
-            print(f"{'='*70}\n")
             return False, f"Исключение при блокировке: {str(e)}"
 
     def release_lock(self):
-            """Снимает Advisory Lock с полной диагностикой."""
-            try:
-                print(f"\n{'='*70}")
-                print(f"🔓 [LOCK] Попытка снять блокировку для КРД-{self.krd_id}")
-                print(f"{'='*70}")
-                
-                # 🔍 Шаг 1: Проверяем, есть ли у нас блокировка
-                print(f"🔍 [LOCK] Шаг 1: Проверка наличия блокировки...")
-                check_query = QSqlQuery(self.db)
-                check_query.prepare("""
-                    SELECT 
-                        pl.objid,
-                        lk.usename,
-                        lk.application_name
-                    FROM pg_locks pl
-                    LEFT JOIN pg_stat_activity lk ON lk.pid = pl.pid
-                    WHERE pl.locktype = 'advisory'
-                    AND pl.objid = :krd_id
-                    AND pl.granted = true
-                """)
-                check_query.bindValue(":krd_id", int(self.krd_id))
-                
-                has_lock = False
-                if check_query.exec():
-                    while check_query.next():
-                        has_lock = True
-                        print(f"   ✅ Найдена активная блокировка:")
-                        print(f"      - KRD ID: {check_query.value(0)}")
-                        print(f"      - User: {check_query.value(1)}")
-                        print(f"      - App: {check_query.value(2)}")
-                else:
-                    print(f"   ⚠️ Ошибка проверки: {check_query.lastError().text()}")
-                
-                if not has_lock:
-                    print(f"ℹ️ [LOCK] Активная блокировка не найдена (уже снята?)")
-                    print(f"{'='*70}\n")
-                    return
-                
-                # 🔍 Шаг 2: Проверяем текущее соединение
-                print(f"🔍 [LOCK] Шаг 2: Проверка соединения...")
-                if not self.db.isOpen():
-                    print(f"   ⚠️ Соединение с БД закрыто!")
-                else:
-                    print(f"   ✅ Соединение активно")
-                
-                # 🔍 Шаг 3: Пытаемся снять блокировку
-                print(f"🔍 [LOCK] Шаг 3: Выполняем pg_advisory_unlock({self.krd_id})...")
-                query = QSqlQuery(self.db)
-                query.prepare("SELECT pg_advisory_unlock(:krd_id)")
-                query.bindValue(":krd_id", int(self.krd_id))
-                
-                if query.exec():
-                    if query.next():
-                        unlocked = query.value(0)
-                        if unlocked:
-                            print(f"✅ [LOCK] Блокировка УСПЕШНО снята!")
-                        else:
-                            print(f"⚠️ [LOCK] pg_advisory_unlock вернул False (блокировка не принадлежала этой сессии)")
-                    else:
-                        print(f"⚠️ [LOCK] Не получен результат от pg_advisory_unlock")
-                else:
-                    print(f"❌ [LOCK] Ошибка SQL: {query.lastError().text()}")
-                    print(f"   Driver Error: {query.lastError().driverText()}")
-                    print(f"   Database Error: {query.lastError().databaseText()}")
-                
-                # 🔍 Шаг 4: Финальная проверка
-                print(f"🔍 [LOCK] Шаг 4: Финальная проверка блокировок...")
-                final_check = QSqlQuery(self.db)
-                final_check.prepare("""
-                    SELECT COUNT(*)
-                    FROM pg_locks
-                    WHERE locktype = 'advisory'
-                    AND objid = :krd_id
-                    AND granted = true
-                """)
-                final_check.bindValue(":krd_id", int(self.krd_id))
-                
-                if final_check.exec() and final_check.next():
-                    remaining = final_check.value(0)
-                    if remaining == 0:
-                        print(f"   ✅ Блокировок не осталось")
-                    else:
-                        print(f"   ⚠️ Осталось блокировок: {remaining}")
-                else:
-                    print(f"   ⚠️ Ошибка финальной проверки")
-                
-                print(f"{'='*70}\n")
-                
-            except Exception as e:
-                print(f"❌ [LOCK] Исключение при снятии блокировки: {e}")
-                import traceback
-                traceback.print_exc()
-                print(f"{'='*70}\n")
+        try:
+            query = QSqlQuery(self.db)
+            query.prepare("SELECT pg_advisory_unlock(:krd_id)")
+            query.bindValue(":krd_id", int(self.krd_id))
+            query.exec()
+        except Exception as e:
+            print(f"❌ Ошибка снятия блокировки: {e}")
 
     def closeEvent(self, event: QCloseEvent):
-            """
-            Обработка закрытия окна.
-            Испускает сигнал перед закрытием, чтобы MainWindow мог перехватить управление.
-            """
-            print(f"\n{'='*70}")
-            print(f"🚪 [WINDOW] Закрытие окна КРД-{self.krd_id}")
-            print(f"{'='*70}")
-            
-            # 1. Сохранение и снятие блокировки
-            if hasattr(self, 'tabs') and self.tabs is not None:
-                current_widget = self.tabs.currentWidget()
-                if current_widget:
-                    print(f"💾 [WINDOW] Автосохранение текущей вкладки...")
-                    self._save_widget_silent(current_widget)
-            
-            # 2. Снимаем блокировку
-            print(f"🔓 [WINDOW] Вызов release_lock()...")
+        if hasattr(self, 'tabs') and self.tabs is not None:
+            current_widget = self.tabs.currentWidget()
+            if current_widget and not self.preview_mode:
+                self._save_widget_silent(current_widget)
+        if not self.preview_mode:
             self.release_lock()
-            
-            # 3. ИСПУСКАЕМ СИГНАЛ
-            print(f"📡 [WINDOW] Испускаю сигнал krd_window_closed...")
-            self.krd_window_closed.emit()
-            
-            # 4. Принимаем событие закрытия
-            print(f"✅ [WINDOW] Окно закрыто")
-            print(f"{'='*70}\n")
-            
-            event.accept()
+        self.krd_window_closed.emit()
+        event.accept()
 
     def _on_tab_switched(self, new_index):
-        """Автосохранение предыдущей вкладки при переключении"""
         if self.previous_tab_index != -1 and self.previous_tab_index != new_index:
             prev_widget = self.tabs.widget(self.previous_tab_index)
-            if prev_widget:
+            if prev_widget and not self.preview_mode:
                 self._save_widget_silent(prev_widget)
             self.previous_tab_index = new_index
 
+    def _on_field_changed(self):
+        if self.preview_mode: return
+        for tab in self._tabs_list:
+            if hasattr(tab, '_auto_save_timer') and tab._auto_save_timer:
+                tab._auto_save_timer.start(400)
+
     def _save_widget_silent(self, widget):
-        """Тихое сохранение данных виджета"""
+        if self.preview_mode: return
         if hasattr(widget, 'save_data'):
             try:
                 widget.save_data()
-            except ValueError as e:
-                pass 
+                if self.version_mgr.capture_snapshot(self.krd_id, self.current_user_id, "Автосохранение"):
+                    print(f"✅ Снапшот версии сохранен для КРД-{self.krd_id}")
+            except ValueError: pass
             except Exception as e:
-                print(f"⚠️ Ошибка автосохранения вкладки {widget.__class__.__name__}: {e}")
+                print(f"⚠️ Ошибка автосохранения: {e}")
+
+    # =========================================================================
+    # === ЛОГИКА ВЕРСИЙ И ПРЕДПРОСМОТРА ===
+    # =====================================    
+    def open_versions_dialog(self):
+        """Открывает диалог истории версий"""
+        dlg = KrdVersionHistoryDialog(self.db, self.krd_id, self)
+        # Явное подключение сигнала. Убедитесь, что имя метода совпадает!
+        dlg.preview_requested.connect(self._open_preview_window)
+        dlg.restore_requested.connect(self.restore_version_from_db)
+        dlg.exec()
+    def _open_preview_window(self, version_id: int):
+        """Открывает отдельное окно КРД для просмотра исторической версии"""
+        print(f"🟡 [DEBUG] _open_preview_window вызван с version_id={version_id}")
+        if not version_id: 
+            print("❌ version_id is None")
+            return
+        
+        try:
+            # ✅ Убедитесь, что файл krd_version_preview_window.py существует рядом
+            self._preview_window = KrdVersionPreviewWindow(
+                db_connection=self.db,
+                krd_id=self.krd_id,
+                version_id=version_id,
+                user_info=self.user_info,
+                audit_logger=self.audit_logger
+            )
+            self._preview_window.show()
+            # Задержка для Ubuntu/Linux Focus Stealing Prevention
+            QTimer.singleShot(200, self._preview_window.raise_)
+            QTimer.singleShot(250, self._preview_window.activateWindow)
+            print("✅ Окно предпросмотра успешно показано")
+        except ImportError as e:
+            QMessageBox.critical(self, "Ошибка", f"Не найден файл окна предпросмотра!\n{e}")
+        except Exception as e:
+            QMessageBox.critical(self, "Ошибка", f"Не удалось открыть окно:\n{e}")
+            traceback.print_exc()
+    def _load_version_snapshot(self):
+        """Загружает снапшот версии и переводит окно в режим предпросмотра"""
+        if not self.preview_version_id: return
+        q = QSqlQuery(self.db)
+        q.prepare("SELECT snapshot_data FROM krd.krd_versions WHERE id = :id")
+        q.bindValue(":id", self.preview_version_id)
+        if q.exec() and q.next():
+            snapshot = json.loads(q.value(0))
+            self.preview_banner.show()
+            self.preview_banner.setText(f"👁️ РЕЖИМ ПРЕДПРОСМОТРА: Версия #{self.preview_version_id}. Данные доступны только для чтения. Вы можете открыть несколько окон параллельно.")
+            for tab in self._tabs_list:
+                if hasattr(tab, '_auto_save_timer') and tab._auto_save_timer:
+                    tab._auto_save_timer.stop()
+            apply_readonly_mode(self, True)
+            for btn in self.findChildren(QPushButton):
+                if "Закрыть" in btn.text() or "❌" in btn.text():
+                    btn.setEnabled(True)
+            self._apply_snapshot_to_all_tabs(snapshot)
+
+    def restore_version_from_db(self, version_id: int):
+        if self.version_mgr and self.version_mgr.rollback_to(version_id, self.krd_id):
+            QMessageBox.information(self, "Успех", f"✅ КРД восстановлена до версии #{version_id}")
+            self.load_statuses()
+            if hasattr(self, 'social_data_tab') and self.social_data_tab:
+                self.social_data_tab.load_data()
+        else:
+            QMessageBox.critical(self, "Ошибка", "Не удалось восстановить версию. Проверьте логи.")
+
+    def _apply_snapshot_to_all_tabs(self, snapshot: dict):
+        if 'social_data' in snapshot and self.social_data_tab:
+            sd = snapshot['social_data']
+            tab = self.social_data_tab
+            for attr_name, val in sd.items():
+                widget_name = f"{attr_name}_input"
+                if hasattr(tab, widget_name):
+                    widget = getattr(tab, widget_name)
+                    if hasattr(widget, 'setText'):
+                        widget.setText(str(val) if val is not None else "")
+                    elif hasattr(widget, 'setPlainText'):
+                        widget.setPlainText(str(val) if val is not None else "")
+        tab_mapping = {
+            'addresses': (self.addresses_tab, 'addresses_table'),
+            'service_places': (self.service_places_tab, 'places_table'),
+            'soch_episodes': (self.soch_episodes_tab, 'episodes_table'),
+            'incoming_orders': (self.incoming_orders_tab, 'orders_table')
+        }
+        for key, (tab, table_attr) in tab_mapping.items():
+            if key in snapshot and tab is not None:
+                table_view = getattr(tab, table_attr, None)
+                if table_view:
+                    self._setup_readonly_table(table_view, snapshot[key])
+
+    def _setup_readonly_table(self, table_view, data_list):
+        if not data_list: return
+        model = QStandardItemModel()
+        headers = list(data_list[0].keys())
+        model.setHorizontalHeaderLabels(headers)
+        for row_data in data_list:
+            items = [QStandardItem(str(row_data.get(h, ""))) for h in headers]
+            model.appendRow(items)
+        table_view.setModel(model)
+        table_view.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table_view.resizeColumnsToContents()
+
+========================================
+📄 FILE: ./krd_version_history_dialog.py
+========================================
+
+# krd_version_history_dialog.py
+from PyQt6.QtWidgets import (QDialog, QVBoxLayout, QHBoxLayout, QTableWidget, 
+                             QTableWidgetItem, QPushButton, QLabel, QMessageBox, QHeaderView)
+from PyQt6.QtCore import Qt, pyqtSignal, QDateTime
+from PyQt6.QtSql import QSqlQuery
+
+class KrdVersionHistoryDialog(QDialog):
+    """Диалог выбора версии КРД для предпросмотра или восстановления"""
+    preview_requested = pyqtSignal(int)  # version_id
+    restore_requested = pyqtSignal(int)  # version_id
+
+    def __init__(self, db, krd_id, parent=None):
+        super().__init__(parent)
+        self.db = db
+        self.krd_id = krd_id
+        self.setWindowTitle(f"📜 История версий КРД-{krd_id}")
+        self.resize(850, 500)
+        self.setModal(True)
+        self.init_ui()
+        self.load_versions()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel("📜 Сохраненные версии карточки:"))
+        
+        self.table = QTableWidget()
+        self.table.setColumnCount(5)
+        self.table.setHorizontalHeaderLabels(["№ Версии", "Дата создания", "Автор", "Описание", "ID"])
+        self.table.setSelectionBehavior(QTableWidget.SelectionBehavior.SelectRows)
+        self.table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
+        
+        # ✅ Настройка ширины колонок
+        header = self.table.horizontalHeader()
+        header.setSectionResizeMode(3, QHeaderView.ResizeMode.Stretch)  # Описание растягивается
+        header.setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        header.setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self.table.setColumnHidden(4, True)  # Скрываем ID
+        
+        layout.addWidget(self.table)
+        
+        btn_layout = QHBoxLayout()
+        
+        self.btn_preview = QPushButton("👁️ Предпросмотр (без сохранения)")
+        self.btn_preview.setProperty("role", "info")  # ✅ Стилизация под тему проекта
+        self.btn_preview.clicked.connect(self.on_preview)
+        self.btn_preview.setEnabled(False)
+        
+        self.btn_restore = QPushButton("⏪ Восстановить в БД")
+        self.btn_restore.setProperty("role", "danger")
+        self.btn_restore.clicked.connect(self.on_restore)
+        self.btn_restore.setEnabled(False)
+        
+        btn_close = QPushButton("Закрыть")
+        btn_close.clicked.connect(self.accept)
+        
+        btn_layout.addWidget(self.btn_preview)
+        btn_layout.addWidget(self.btn_restore)
+        btn_layout.addStretch()
+        btn_layout.addWidget(btn_close)
+        layout.addLayout(btn_layout)
+        
+        self.table.selectionModel().selectionChanged.connect(self.on_selection_changed)
+
+    def load_versions(self):
+        self.table.setRowCount(0)
+        query = QSqlQuery(self.db)
+        query.prepare("""
+            SELECT v.version_number, v.created_at, u.username, v.description, v.id
+            FROM krd.krd_versions v
+            LEFT JOIN krd.users u ON v.created_by = u.id
+            WHERE v.krd_id = :krd_id
+            ORDER BY v.version_number DESC
+        """)
+        query.bindValue(":krd_id", self.krd_id)
+        
+        if query.exec():
+            while query.next():
+                row = self.table.rowCount()
+                self.table.insertRow(row)
+                
+                # 0. Номер версии
+                self.table.setItem(row, 0, QTableWidgetItem(str(query.value(0) or "")))
+                
+                # 1. Дата создания (✅ Форматируем QDateTime в читаемый вид)
+                created_at = query.value(1)
+                if isinstance(created_at, QDateTime):
+                    date_str = created_at.toString("dd.MM.yyyy HH:mm:ss")
+                else:
+                    date_str = str(created_at) if created_at else ""
+                self.table.setItem(row, 1, QTableWidgetItem(date_str))
+                
+                # 2. Автор
+                author = query.value(2)
+                self.table.setItem(row, 2, QTableWidgetItem(str(author) if author else "Система"))
+                
+                # 3. Описание
+                desc = query.value(3)
+                self.table.setItem(row, 3, QTableWidgetItem(str(desc) if desc else ""))
+                
+                # 4. ID (сохраняем в UserRole для быстрого доступа)
+                self.table.item(row, 0).setData(Qt.ItemDataRole.UserRole, query.value(4))
+        else:
+            QMessageBox.warning(self, "Ошибка БД", f"Не удалось загрузить историю:\n{query.lastError().text()}")
+
+    def on_selection_changed(self):
+        has_sel = self.table.selectionModel().hasSelection()
+        self.btn_preview.setEnabled(has_sel)
+        self.btn_restore.setEnabled(has_sel)
+
+    def on_preview(self):
+        row = self.table.currentRow()
+        if row >= 0:
+            vid = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+            self.preview_requested.emit(vid)
+            self.accept()
+
+    def on_restore(self):
+        row = self.table.currentRow()
+        if row >= 0:
+            vid = self.table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+            ver_num = self.table.item(row, 0).text()
+            reply = QMessageBox.question(self, "⚠️ Подтверждение отката",
+                f"Текущие данные КРД будут полностью заменены данными версии #{ver_num}.\n"
+                "Все изменения, сделанные после этой версии, будут потеряны.\n\nПродолжить?",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                QMessageBox.StandardButton.No)
+            if reply == QMessageBox.StandardButton.Yes:
+                self.restore_requested.emit(vid)
+                self.accept()
+
+========================================
+📄 FILE: ./krd_version_manager.py
+========================================
+
+"""
+Менеджер версионирования КРД
+Отвечает за создание снапшотов, получение истории и транзакционный откат.
+"""
+from PyQt6.QtSql import QSqlQuery
+import json
+import traceback
+
+class KrdVersionManager:
+    def __init__(self, db_connection):
+        self.db = db_connection
+
+    def capture_snapshot(self, krd_id: int, user_id: int, description: str = "Автосохранение") -> bool:
+        """Создаёт JSONB-снапшот всей КРД и сохраняет в krd_versions"""
+        try:
+            q = QSqlQuery(self.db)
+            q.prepare("SELECT COALESCE(MAX(version_number), 0) + 1 FROM krd.krd_versions WHERE krd_id = :krd_id")
+            q.bindValue(":krd_id", krd_id)
+            if q.exec() and q.next():
+                new_ver = q.value(0)
+            else:
+                return False
+
+            q2 = QSqlQuery(self.db)
+            q2.prepare("""
+                SELECT jsonb_build_object(
+                    'krd', (SELECT row_to_json(k) FROM krd.krd k WHERE id = :krd_id),
+                    'social_data', (SELECT row_to_json(s) FROM krd.social_data s WHERE krd_id = :krd_id),
+                    'addresses', (SELECT jsonb_agg(row_to_json(a)) FROM krd.addresses a WHERE krd_id = :krd_id),
+                    'service_places', (SELECT jsonb_agg(row_to_json(sp)) FROM krd.service_places sp WHERE krd_id = :krd_id),
+                    'soch_episodes', (SELECT jsonb_agg(row_to_json(so)) FROM krd.soch_episodes so WHERE krd_id = :krd_id),
+                    'incoming_orders', (SELECT jsonb_agg(row_to_json(io)) FROM krd.incoming_orders io WHERE krd_id = :krd_id)
+                )
+            """)
+            q2.bindValue(":krd_id", krd_id)
+            if not (q2.exec() and q2.next()):
+                return False
+            snapshot_json = q2.value(0)
+
+            q3 = QSqlQuery(self.db)
+            q3.prepare("""
+                INSERT INTO krd.krd_versions (krd_id, version_number, created_by, description, snapshot_data)
+                VALUES (:krd_id, :version, :user_id, :desc, :snapshot)
+            """)
+            q3.bindValue(":krd_id", krd_id)
+            q3.bindValue(":version", new_ver)
+            q3.bindValue(":user_id", user_id)
+            q3.bindValue(":desc", description)
+            q3.bindValue(":snapshot", snapshot_json)
+            return q3.exec()
+        except Exception as e:
+            print(f"❌ [VERSION] Ошибка создания снапшота: {e}")
+            traceback.print_exc()
+            return False
+
+    def get_versions(self, krd_id: int) -> list[dict]:
+        """Возвращает список версий для КРД"""
+        versions = []
+        q = QSqlQuery(self.db)
+        q.prepare("""
+            SELECT v.id, v.version_number, v.created_at, u.username, v.description
+            FROM krd.krd_versions v
+            LEFT JOIN krd.users u ON v.created_by = u.id
+            WHERE v.krd_id = :krd_id
+            ORDER BY v.version_number DESC
+        """)
+        q.bindValue(":krd_id", krd_id)
+        if q.exec():
+            while q.next():
+                versions.append({
+                    "id": q.value(0),
+                    "version": q.value(1),
+                    "created_at": q.value(2),
+                    "author": q.value(3) or "Система",
+                    "description": q.value(4)
+                })
+        return versions
+
+    def rollback_to(self, version_id: int, krd_id: int) -> bool:
+        """Транзакционный откат КРД к указанной версии"""
+        if not self.db.transaction():
+            return False
+        try:
+            q = QSqlQuery(self.db)
+            q.prepare("SELECT snapshot_data FROM krd.krd_versions WHERE id = :id")
+            q.bindValue(":id", version_id)
+            if not (q.exec() and q.next()):
+                self.db.rollback()
+                return False
+
+            data = json.loads(q.value(0))
+
+            # 1:1 таблицы
+            if data.get('social_data'):
+                sd = data['social_data']
+                sd.pop('id', None)
+                sets = ", ".join([f"{k}=:{k}" for k in sd.keys()])
+                uq = QSqlQuery(self.db)
+                uq.prepare(f"UPDATE krd.social_data SET {sets} WHERE krd_id = :krd_id")
+                for k, v in sd.items(): uq.bindValue(f":{k}", v)
+                uq.bindValue(":krd_id", krd_id)
+                uq.exec()
+
+            # 1:N таблицы (полная замена)
+            for table, key in [('krd.addresses', 'addresses'), ('krd.service_places', 'service_places'),
+                               ('krd.soch_episodes', 'soch_episodes'), ('krd.incoming_orders', 'incoming_orders')]:
+                if data.get(key):
+                    dq = QSqlQuery(self.db)
+                    dq.prepare(f"DELETE FROM {table} WHERE krd_id = :krd_id")
+                    dq.bindValue(":krd_id", krd_id)
+                    dq.exec()
+                    for row_data in data[key]:
+                        iq = QSqlQuery(self.db)
+                        cols = ", ".join(row_data.keys())
+                        placeholders = ", ".join([f":{k}" for k in row_data.keys()])
+                        iq.prepare(f"INSERT INTO {table} ({cols}) VALUES ({placeholders})")
+                        for k, v in row_data.items(): iq.bindValue(f":{k}", v)
+                        iq.exec()
+
+            self.db.commit()
+            return True
+        except Exception as e:
+            self.db.rollback()
+            print(f"❌ [VERSION] Ошибка отката: {e}")
+            traceback.print_exc()
+            return False
+
+========================================
+📄 FILE: ./krd_version_preview_window.py
+========================================
+
+# krd_version_preview_window.py
+"""
+Легковесное окно для предпросмотра версии КРД.
+Полностью изолировано: без блокировок, без автосохранения, только чтение.
+"""
+import json
+import traceback
+from PyQt6.QtWidgets import (
+    QDialog, QVBoxLayout, QHBoxLayout, QTabWidget, QMessageBox,
+    QComboBox, QPushButton, QLabel, QWidget, QAbstractItemView
+)
+from PyQt6.QtGui import QStandardItemModel, QStandardItem
+from PyQt6.QtSql import QSqlQuery
+from PyQt6.QtCore import Qt,QTimer
+
+from social_data_tab import SocialDataTab
+from addresses_tab import AddressesTab
+from incoming_orders_tab import IncomingOrdersTab
+from service_places_tab import ServicePlacesTab
+from soch_episodes_tab import SochEpisodesTab
+from outgoing_requests_tab import OutgoingRequestsTab
+from ui_helpers import apply_readonly_mode
+
+class KrdVersionPreviewWindow(QDialog):
+    def __init__(self, db_connection, krd_id, version_id, user_info, audit_logger=None):
+        super().__init__()
+        print(f"🟢 [PREVIEW] Инициализация окна для версии #{version_id}")
+        
+        self.db = db_connection
+        self.krd_id = krd_id
+        self.version_id = version_id
+        self.user_info = user_info
+        self.audit_logger = audit_logger
+
+        self.setWindowTitle(f"Карточка розыска №{krd_id} — [Просмотр версии #{version_id}]")
+        self.setWindowFlags(
+            Qt.WindowType.Window | 
+            Qt.WindowType.WindowStaysOnTopHint | 
+            Qt.WindowType.WindowCloseButtonHint |
+            Qt.WindowType.WindowMinimizeButtonHint | 
+            Qt.WindowType.WindowMaximizeButtonHint
+        )
+        self.setWindowModality(Qt.WindowModality.NonModal)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        self.resize(1100, 750)
+        
+        self._init_ui()
+        # Загружаем данные с небольшой задержкой
+        QTimer.singleShot(50, self.load_version_data)
+
+    def _init_ui(self):
+        main_layout = QVBoxLayout(self)
+        main_layout.setContentsMargins(0, 0, 0, 0)
+        main_layout.setSpacing(0)
+        
+        header_widget = QWidget()
+        header_widget.setProperty("role", "header")
+        header_layout = QHBoxLayout(header_widget)
+        header_layout.setContentsMargins(15, 10, 15, 10)
+        title_label = QLabel(f"📋 <b>Карточка розыска №{self.krd_id}</b>")
+        title_label.setStyleSheet("font-size: 16px; margin-right: 20px;")
+        header_layout.addWidget(title_label)
+        header_layout.addWidget(QLabel("📌 Статус:"))
+        self.status_combo = QComboBox()
+        self.status_combo.setMinimumWidth(200)
+        self.status_combo.setEnabled(False)
+        header_layout.addWidget(self.status_combo)
+        header_layout.addStretch()
+        main_layout.addWidget(header_widget)
+        self.load_statuses()
+
+        self.banner = QLabel("⏳ Загрузка данных...")
+        self.banner.setStyleSheet("background-color: #e3f2fd; color: #0d47a1; padding: 10px; font-weight: bold; text-align: center;")
+        self.banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        main_layout.addWidget(self.banner)
+
+        self.tabs = QTabWidget()
+        self.social_data_tab = SocialDataTab(self.krd_id, self.db, self.audit_logger, self.user_info)
+        self.addresses_tab = AddressesTab(self.krd_id, self.db, self.audit_logger, self.user_info)
+        self.incoming_orders_tab = IncomingOrdersTab(self.krd_id, self.db, self.audit_logger, self.user_info)
+        self.service_places_tab = ServicePlacesTab(self.krd_id, self.db, self.audit_logger, self.user_info)
+        self.soch_episodes_tab = SochEpisodesTab(self.krd_id, self.db, self.audit_logger, self.user_info)
+        
+        self.tabs.addTab(self.social_data_tab, "👤 Социально-демографические данные")
+        self.tabs.addTab(self.addresses_tab, "🏠 Адреса проживания")
+        self.tabs.addTab(self.incoming_orders_tab, "📬 Входящие поручения")
+        self.tabs.addTab(self.service_places_tab, "🎖️ Места службы")
+        self.tabs.addTab(self.soch_episodes_tab, "⚠️ Сведения о СОЧ")
+        
+        main_layout.addWidget(self.tabs)
+
+    def load_statuses(self):
+        q = QSqlQuery(self.db)
+        q.exec("SELECT id, name FROM krd.statuses ORDER BY id")
+        q2 = QSqlQuery(self.db)
+        q2.prepare("SELECT status_id FROM krd.krd WHERE id = :id")
+        q2.bindValue(":id", self.krd_id)
+        current = q2.value(0) if q2.exec() and q2.next() else 1
+        while q.next():
+            self.status_combo.addItem(q.value(1), q.value(0))
+        idx = self.status_combo.findData(current)
+        if idx >= 0: self.status_combo.setCurrentIndex(idx)
+
+    def load_version_data(self):
+        print(f"🟢 [PREVIEW] Загрузка данных для версии #{self.version_id}")
+        try:
+            q = QSqlQuery(self.db)
+            q.prepare("SELECT snapshot_data FROM krd.krd_versions WHERE id = :id")
+            q.bindValue(":id", self.version_id)
+            if q.exec() and q.next():
+                snapshot = json.loads(q.value(0))
+                self.banner.setText("👁️ РЕЖИМ ПРЕДПРОСМОТРА: Историческая версия данных. Доступно только для чтения.")
+                self.banner.setStyleSheet("background-color: #fff3cd; color: #856404; padding: 10px; font-weight: bold; text-align: center;")
+                apply_readonly_mode(self, True)
+                self.apply_snapshot(snapshot)
+            else:
+                self.banner.setText("❌ Версия не найдена в БД.")
+        except Exception as e:
+            self.banner.setText(f"❌ Ошибка: {e}")
+            traceback.print_exc()
+
+    def apply_snapshot(self, snapshot: dict):
+        if 'social_data' in snapshot:
+            for key, val in snapshot['social_data'].items():
+                w_name = f"{key}_input"
+                if hasattr(self.social_data_tab, w_name) and val is not None:
+                    w = getattr(self.social_data_tab, w_name)
+                    if hasattr(w, 'setText') and not hasattr(w, 'setDate'): w.setText(str(val))
+                    elif hasattr(w, 'setPlainText'): w.setPlainText(str(val))
+
+        for tab_attr, table_attr in [('addresses_tab', 'addresses_table'), ('service_places_tab', 'places_table'), ('soch_episodes_tab', 'episodes_table'), ('incoming_orders_tab', 'orders_table')]:
+            key = tab_attr.replace('_tab', '')
+            if key in snapshot:
+                tv = getattr(self, tab_attr, None)
+                if tv: tv = getattr(tv, table_attr)
+                if tv: self._fill_table(tv, snapshot[key])
+
+    def _fill_table(self, table_view, data_list):
+        if not data_list: return
+        m = QStandardItemModel()
+        h = list(data_list[0].keys())
+        m.setHorizontalHeaderLabels(h)
+        for r in data_list: m.appendRow([QStandardItem(str(r.get(hh, ""))) for hh in h])
+        table_view.setModel(m)
+        table_view.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        table_view.resizeColumnsToContents()
 
 ========================================
 📄 FILE: ./login_window.py
@@ -7218,8 +7620,14 @@ from composite_field_widget import CompositeFieldWidget
 from field_mapping_manager import FieldMappingManager
 from searchable_combo import SearchableComboBox
 
-# ✅ ЕДИНЫЙ ИСТОЧНИК ДАННЫХ: Импорт строго соответствует schema_only.sql
-from db_mappings import TABLE_NAMES_RU, COLUMN_DESCRIPTIONS, DB_COLUMNS_MAP
+# ✅ ЕДИНЫЙ ИСТОЧНИК ДАННЫХ: Импорт включает get_field_description для корректного поиска
+try:
+    from db_mappings import TABLE_NAMES_RU, COLUMN_DESCRIPTIONS, DB_COLUMNS_MAP, get_field_description
+except ImportError:
+    TABLE_NAMES_RU = {}
+    COLUMN_DESCRIPTIONS = {}
+    DB_COLUMNS_MAP = {}
+    def get_field_description(t, c): return c  # Фоллбэк если файл не найден
 
 class MappingEditorDialog(QDialog):
     """Отдельное окно для редактирования сопоставлений"""
@@ -7240,8 +7648,8 @@ class MappingEditorDialog(QDialog):
         self.setWindowTitle("✏️ Редактирование сопоставлений полей")
         self.setMinimumSize(1100, 750)
         self.setModal(False)
-        
         self.init_ui()
+        
         if template_id:
             self.load_field_mappings(template_id)
 
@@ -7275,53 +7683,35 @@ class MappingEditorDialog(QDialog):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
         self.mapping_table.setColumnWidth(2, 100)
-        
         layout.addWidget(self.mapping_table)
 
         # Кнопки управления
         btn_group = QGroupBox("Управление сопоставлениями")
         btn_layout = QHBoxLayout(btn_group)
-        
+
         add_simple_btn = QPushButton("➕ Добавить простое сопоставление")
-        add_simple_btn.setStyleSheet("""
-            QPushButton { background-color: #2196F3; color: white; font-weight: bold; padding: 8px 15px; border-radius: 5px; }
-            QPushButton:hover { background-color: #1976D2; }
-        """)
+        add_simple_btn.setStyleSheet("QPushButton { background-color: #2196F3; color: white; font-weight: bold; padding: 8px 15px; border-radius: 5px; } QPushButton:hover { background-color: #1976D2; }")
         add_simple_btn.clicked.connect(self.add_field_mapping)
         btn_layout.addWidget(add_simple_btn)
 
         add_composite_btn = QPushButton("🔗 Добавить составное поле")
-        add_composite_btn.setStyleSheet("""
-            QPushButton { background-color: #9C27B0; color: white; font-weight: bold; padding: 8px 15px; border-radius: 5px; }
-            QPushButton:hover { background-color: #7B1FA2; }
-        """)
+        add_composite_btn.setStyleSheet("QPushButton { background-color: #9C27B0; color: white; font-weight: bold; padding: 8px 15px; border-radius: 5px; } QPushButton:hover { background-color: #7B1FA2; }")
         add_composite_btn.clicked.connect(self.add_composite_field_mapping)
         btn_layout.addWidget(add_composite_btn)
 
         delete_btn = QPushButton("🗑️ Удалить выбранное")
-        delete_btn.setStyleSheet("""
-            QPushButton { background-color: #f44336; color: white; font-weight: bold; padding: 8px 15px; border-radius: 5px; }
-            QPushButton:hover { background-color: #d32f2f; }
-        """)
+        delete_btn.setStyleSheet("QPushButton { background-color: #f44336; color: white; font-weight: bold; padding: 8px 15px; border-radius: 5px; } QPushButton:hover { background-color: #d32f2f; }")
         delete_btn.clicked.connect(self.remove_field_mapping)
         btn_layout.addWidget(delete_btn)
-        
         layout.addWidget(btn_group)
 
         # Кнопки сохранения и закрытия
         button_box = QDialogButtonBox()
         save_btn = QPushButton("💾 Сохранить сопоставления")
-        save_btn.setStyleSheet("""
-            QPushButton { background-color: #4CAF50; color: white; font-weight: bold; padding: 12px 30px; border-radius: 5px; font-size: 13px; }
-            QPushButton:hover { background-color: #45a049; }
-        """)
+        save_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-weight: bold; padding: 12px 30px; border-radius: 5px; font-size: 13px; } QPushButton:hover { background-color: #45a049; }")
         save_btn.clicked.connect(self.save_and_close)
-        
         cancel_btn = QPushButton("❌ Закрыть без сохранения")
-        cancel_btn.setStyleSheet("""
-            QPushButton { background-color: #757575; color: white; font-weight: bold; padding: 12px 30px; border-radius: 5px; font-size: 13px; }
-            QPushButton:hover { background-color: #616161; }
-        """)
+        cancel_btn.setStyleSheet("QPushButton { background-color: #757575; color: white; font-weight: bold; padding: 12px 30px; border-radius: 5px; font-size: 13px; } QPushButton:hover { background-color: #616161; }")
         cancel_btn.clicked.connect(self.reject)
         
         button_box.addButton(save_btn, QDialogButtonBox.ButtonRole.AcceptRole)
@@ -7329,7 +7719,7 @@ class MappingEditorDialog(QDialog):
         layout.addWidget(button_box)
 
         self.setLayout(layout)
-        
+
         # Загрузка данных
         self.load_template_variables(self.template_id)
         self.load_db_columns()
@@ -7340,7 +7730,7 @@ class MappingEditorDialog(QDialog):
             return QMessageBox.warning(self, "Ошибка", "Шаблон не выбран")
         if not self.template_variables:
             return QMessageBox.warning(self, "Ошибка", "Переменные шаблона не загружены")
-            
+
         row = self.mapping_table.rowCount()
         self.mapping_table.insertRow(row)
         
@@ -7364,7 +7754,7 @@ class MappingEditorDialog(QDialog):
             return QMessageBox.warning(self, "Ошибка", "Выберите шаблон")
         if not self.template_variables:
             return QMessageBox.warning(self, "Ошибка", "Переменные шаблона не загружены")
-            
+        
         row = self.mapping_table.rowCount()
         self.composite_widget.add_composite_field_mapping(row)
 
@@ -7410,7 +7800,7 @@ class MappingEditorDialog(QDialog):
         try:
             combo = SearchableComboBox()
             if combo is None: return None
-
+            
             combo.setMaxVisibleItems(50)
             combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             combo.view().setMinimumHeight(400)
@@ -7427,16 +7817,18 @@ class MappingEditorDialog(QDialog):
             for table_name, columns in self.db_columns.items():
                 table_name_ru = TABLE_NAMES_RU.get(table_name, table_name)
                 for col in columns:
-                    desc = COLUMN_DESCRIPTIONS.get(col, col)
+                    # ✅ ИСПОЛЬЗУЕМ get_field_description для поиска ключа вида "table_column"
+                    desc = get_field_description(table_name, col)
                     display_desc = f"[{table_name_ru}] {desc}"
                     all_columns.append((col, display_desc, table_name))
-            
+
             all_columns.sort(key=lambda x: x[1])
-            
+
             for col_name, col_description, table_name in all_columns:
                 combo.addItem(col_description, f"{table_name}|{col_name}")
-            
+
             if selected_column:
+                # Логика выбора сохраненной колонки
                 idx = combo.findData(selected_column)
                 if idx < 0 and selected_column:
                     for i in range(combo.count()):
@@ -7444,7 +7836,8 @@ class MappingEditorDialog(QDialog):
                         if item_data and item_data.endswith(f"|{selected_column}"):
                             idx = i
                             break
-                if idx >= 0: combo.setCurrentIndex(idx)
+                if idx >= 0: 
+                    combo.setCurrentIndex(idx)
             
             return combo
         except Exception as e:
@@ -7456,53 +7849,50 @@ class MappingEditorDialog(QDialog):
     def load_template_variables(self, template_id):
         """Загрузка переменных из шаблона DOCX"""
         if not template_id: return
-            
+        
         query = QSqlQuery(self.db)
         query.prepare("SELECT template_data FROM krd.document_templates WHERE id = ?")
         query.addBindValue(template_id)
-        
         if not query.exec() or not query.next():
             self.template_variables = []
             return
-            
+
         data = query.value(0)
         template_bytes = bytes(data) if isinstance(data, QByteArray) else (bytes(data) if data else b'')
         if not template_bytes:
             self.template_variables = []
             return
-            
+
         with tempfile.NamedTemporaryFile(delete=False, suffix='.docx') as tmp:
             tmp.write(template_bytes)
             tmp_path = tmp.name
-            
-        try:
-            doc = Document(tmp_path)
-            vars_set = set()
-            for para in doc.paragraphs:
-                vars_set.update(re.findall(r'\{\{([^{}]+)\}\}', para.text))
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        for para in cell.paragraphs:
-                            vars_set.update(re.findall(r'\{\{([^{}]+)\}\}', para.text))
-            self.template_variables = sorted(vars_set)
-        except Exception as e:
-            print(f"❌ Ошибка загрузки переменных: {e}")
-            self.template_variables = ["surname", "name", "patronymic"]
-        finally:
-            try: os.unlink(tmp_path)
-            except: pass
+            try:
+                doc = Document(tmp_path)
+                vars_set = set()
+                for para in doc.paragraphs:
+                    vars_set.update(re.findall(r'\{\{([^{}]+)\}\}', para.text))
+                for table in doc.tables:
+                    for row in table.rows:
+                        for cell in row.cells:
+                            for para in cell.paragraphs:
+                                vars_set.update(re.findall(r'\{\{([^{}]+)\}\}', para.text))
+                self.template_variables = sorted(vars_set)
+            except Exception as e:
+                print(f"❌ Ошибка загрузки переменных: {e}")
+                self.template_variables = ["surname", "name", "patronymic"]
+            finally:
+                try: os.unlink(tmp_path)
+                except: pass
 
     def load_db_columns(self):
         """✅ ЗАМЕНА: Используем единый словарь из db_mappings.py"""
-        # Удаляем жестко прописанные дубликаты, подгружаем актуальную схему
         self.db_columns = DB_COLUMNS_MAP
 
     def save_and_close(self):
         """Сохранение и закрытие"""
         if not self.current_template_id:
             return QMessageBox.critical(self, "Ошибка", "Шаблон не выбран")
-            
+        
         if self.mapping_manager.save_field_mappings(self.current_template_id):
             QMessageBox.information(self, "Успех", "✅ Сопоставления успешно сохранены!")
             self.accept()
@@ -12244,7 +12634,6 @@ class SocialDataTab(QWidget):
 
     def init_ui(self):
         """Инициализация интерфейса"""
-        # ✅ СОХРАНЯЕМ scroll_area В АТРИБУТ КЛАССА, чтобы apply_readonly_mode мог его найти
         self.scroll_area = QScrollArea()
         self.scroll_area.setWidgetResizable(True)
         self.scroll_area.setFrameShape(QFrame.Shape.NoFrame)
@@ -12279,12 +12668,10 @@ class SocialDataTab(QWidget):
         self.personal_number_input = QLineEdit()
         g1.addWidget(self.personal_number_input, 1, 3)
         
-        # Категория (со справочником)
         g1.addWidget(QLabel("Категория военнослужащего:"), 2, 0)
         self.category_combo = QComboBox()
         g1.addWidget(self._create_ref_combo_widget(self.category_combo, 'categories', self.load_categories), 2, 1)
         
-        # Звание (со справочником)
         g1.addWidget(QLabel("Воинское звание:"), 2, 2)
         self.rank_combo = QComboBox()
         g1.addWidget(self._create_ref_combo_widget(self.rank_combo, 'ranks', self.load_ranks), 2, 3)
@@ -12304,19 +12691,43 @@ class SocialDataTab(QWidget):
         
         group2.setLayout(g2); layout.addWidget(group2)
 
-        # === Группа 3: Призыв ===
-        group3 = QGroupBox("Призыв")
-        group3.setFont(QFont("Arial", 10, QFont.Weight.Bold))
-        g3 = QGridLayout(); g3.setSpacing(8)
+        # === Группа 3: Призыв (ИЗМЕНЕНО) ===
+        group3_draft = QGroupBox("Призыв")
+        group3_draft.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        g3d = QGridLayout(); g3d.setSpacing(8)
         
-        g3.addWidget(QLabel("Каким комиссариатом призван:"), 0, 0); self.drafted_by_commissariat_input = QLineEdit(); g3.addWidget(self.drafted_by_commissariat_input, 0, 1, 1, 3)
-        g3.addWidget(QLabel("Дата призыва:"), 1, 0); self.draft_date_input = QDateEdit(); self.draft_date_input.setCalendarPopup(True); self.draft_date_input.setDate(QDate.currentDate()); g3.addWidget(self.draft_date_input, 1, 1)
-        g3.addWidget(QLabel("Каким ПОВСК отобран:"), 1, 2); self.povsk_input = QLineEdit(); g3.addWidget(self.povsk_input, 1, 3)
-        g3.addWidget(QLabel("Дата отбора:"), 2, 0); self.selection_date_input = QDateEdit(); self.selection_date_input.setCalendarPopup(True); self.selection_date_input.setDate(QDate.currentDate()); g3.addWidget(self.selection_date_input, 2, 1)
+        g3d.addWidget(QLabel("Каким комиссариатом призван:"), 0, 0)
+        self.drafted_by_commissariat_input = QLineEdit()
+        g3d.addWidget(self.drafted_by_commissariat_input, 0, 1, 1, 2)
         
-        group3.setLayout(g3); layout.addWidget(group3)
+        g3d.addWidget(QLabel("Дата призыва:"), 1, 0)
+        self.draft_date_input = QDateEdit()
+        self.draft_date_input.setCalendarPopup(True)
+        self.draft_date_input.setDate(QDate.currentDate())
+        g3d.addWidget(self.draft_date_input, 1, 1, 1, 2)
+        
+        group3_draft.setLayout(g3d)
+        layout.addWidget(group3_draft)
 
-        # === Группа 4: Образование и судимость ===
+        # === Группа 4: Отбор (ИЗМЕНЕНО) ===
+        group3_selection = QGroupBox("Отбор")
+        group3_selection.setFont(QFont("Arial", 10, QFont.Weight.Bold))
+        g3s = QGridLayout(); g3s.setSpacing(8)
+        
+        g3s.addWidget(QLabel("Каким ПОВСК отобран:"), 0, 0)
+        self.povsk_input = QLineEdit()
+        g3s.addWidget(self.povsk_input, 0, 1, 1, 2)
+        
+        g3s.addWidget(QLabel("Дата отбора:"), 1, 0)
+        self.selection_date_input = QDateEdit()
+        self.selection_date_input.setCalendarPopup(True)
+        self.selection_date_input.setDate(QDate.currentDate())
+        g3s.addWidget(self.selection_date_input, 1, 1, 1, 2)
+        
+        group3_selection.setLayout(g3s)
+        layout.addWidget(group3_selection)
+
+        # === Группа 5: Образование и судимость ===
         group4 = QGroupBox("Образование и судимость")
         group4.setFont(QFont("Arial", 10, QFont.Weight.Bold))
         g4 = QGridLayout(); g4.setSpacing(8)
@@ -12328,7 +12739,7 @@ class SocialDataTab(QWidget):
         
         group4.setLayout(g4); layout.addWidget(group4)
 
-        # === Группа 5: Паспортные данные ===
+        # === Группа 6: Паспортные данные ===
         group5 = QGroupBox("Паспортные данные")
         group5.setFont(QFont("Arial", 10, QFont.Weight.Bold))
         g5 = QGridLayout(); g5.setSpacing(8)
@@ -12340,7 +12751,7 @@ class SocialDataTab(QWidget):
         
         group5.setLayout(g5); layout.addWidget(group5)
 
-        # === Группа 6: Военный билет ===
+        # === Группа 7: Военный билет ===
         group6 = QGroupBox("Военный билет (удостоверение личности)")
         group6.setFont(QFont("Arial", 10, QFont.Weight.Bold))
         g6 = QGridLayout(); g6.setSpacing(8)
@@ -12352,7 +12763,7 @@ class SocialDataTab(QWidget):
         
         group6.setLayout(g6); layout.addWidget(group6)
 
-        # === Группа 7: Внешность и фотографии ===
+        # === Группа 8: Внешность и фотографии ===
         group7 = QGroupBox("Особенности внешности и фотографии")
         group7.setFont(QFont("Arial", 10, QFont.Weight.Bold))
         g7 = QVBoxLayout(); g7.setSpacing(10)
@@ -12382,10 +12793,9 @@ class SocialDataTab(QWidget):
         layout.addStretch()
         self.scroll_area.setWidget(container)
 
-        # ✅ УСТАНОВКА ГЛАВНОГО LAYOUT'А
         main_layout = QVBoxLayout(self)
         main_layout.addWidget(self.scroll_area)
-        self.setLayout(main_layout)
+        self.setLayout(main_layout)    
     def _create_ref_combo_widget(self, combo, table_name, reload_func):
         """Вспомогательный метод: ComboBox + кнопка ⚙️ с автообновлением"""
         w = QWidget()
@@ -13891,7 +14301,7 @@ from PyQt6.QtWidgets import (
     QComboBox, QTableView, QPushButton, QLabel, QDateEdit,
     QMessageBox, QHeaderView, QAbstractItemView, QSplitter, QWidget
 )
-from PyQt6.QtCore import Qt, QDate
+from PyQt6.QtCore import Qt, QDate,QDateTime
 from PyQt6.QtSql import QSqlQueryModel, QSqlQuery
 from PyQt6.QtGui import QFont
 
@@ -14183,23 +14593,63 @@ class UserAuditWindow(QDialog):
             )
     
     def export_to_csv(self, file_path):
-        """Экспорт данных в CSV файл"""
+        """Экспорт данных в CSV файл с пояснительной шапкой и корректным форматированием"""
         import csv
-        
+        from datetime import datetime
+
         with open(file_path, 'w', newline='', encoding='utf-8-sig') as csvfile:
             writer = csv.writer(csvfile, delimiter=';', quotechar='"', quoting=csv.QUOTE_MINIMAL)
-            
-            # Записываем заголовки
+
+            # === 1. ЗАГОЛОВОК ОТЧЕТА ===
+            writer.writerow([f"ОТЧЕТ ПО АУДИТУ ДЕЙСТВИЙ ПОЛЬЗОВАТЕЛЕЙ"])
+            writer.writerow([f"Дата формирования: {datetime.now().strftime('%d.%m.%Y %H:%M:%S')}"])
+            writer.writerow([]) # Пустая строка-разделитель
+
+            # === 2. ПОЯСНЕНИЕ К ТАБЛИЦЕ И ТИПАМ ОПЕРАЦИЙ ===
+            writer.writerow(["📖 ПОЯСНЕНИЕ К СТОЛБЦАМ И ТИПАМ ДАННЫХ:"])
+            writer.writerow([
+                "• Дата и время | Формат: ДД.ММ.ГГГГ ЧЧ:ММ:СС. Момент фиксации действия в системе."
+            ])
+            writer.writerow([
+                "• Тип действия   | Код операции. Примеры: LOGIN/LOGOUT (вход/выход), "
+                "CREATE/UPDATE/DELETE/VIEW (CRUD операции), EXPORT (выгрузка данных), "
+                "REFERENCE_CREATE/UPDATE/DELETE (изменение справочников), "
+                "DOCUMENT_GENERATE/SAVE (работа с шаблонами), STATUS_CHANGE (смена статуса КРД)."
+            ])
+            writer.writerow([
+                "• Таблица        | Имя таблицы БД или модуля, к которому относится действие "
+                "(например: krd, users, social_data, ranks, statuses, outgoing_requests)."
+            ])
+            writer.writerow([
+                "• ID записи      | Внутренний первичный ключ (ID) конкретной измененной записи в таблице."
+            ])
+            writer.writerow([
+                "• ID КРД         | Идентификатор карточки розыска, к которой привязано действие. "
+                "Значение 0 или пусто означает системное/глобальное действие."
+            ])
+            writer.writerow([
+                "• Описание       | Человеко-читаемый лог с деталями операции (ФИО, номера документов, старые/новые значения)."
+            ])
+            writer.writerow([]) # Пустая строка перед данными
+
+            # === 3. ЗАГОЛОВКИ СТОЛБЦОВ ===
             headers = []
             for col in range(self.audit_model.columnCount()):
                 headers.append(self.audit_model.headerData(col, Qt.Orientation.Horizontal))
             writer.writerow(headers)
-            
-            # Записываем данные
+
+            # === 4. ДАННЫЕ С КОРРЕКТНЫМ ПРЕОБРАЗОВАНИЕМ ===
             for row in range(self.audit_model.rowCount()):
                 row_data = []
                 for col in range(self.audit_model.columnCount()):
                     value = self.audit_model.data(self.audit_model.index(row, col))
+
+                    # ✅ ИСПРАВЛЕНИЕ: Явное форматирование объектов даты и времени
+                    if isinstance(value, QDateTime):
+                        value = value.toString("dd.MM.yyyy HH:mm:ss")
+                    elif isinstance(value, QDate):
+                        value = value.toString("dd.MM.yyyy")
+                    
                     row_data.append(str(value) if value is not None else "")
                 writer.writerow(row_data)
 

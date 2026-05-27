@@ -22,8 +22,14 @@ from composite_field_widget import CompositeFieldWidget
 from field_mapping_manager import FieldMappingManager
 from searchable_combo import SearchableComboBox
 
-# ✅ ЕДИНЫЙ ИСТОЧНИК ДАННЫХ: Импорт строго соответствует schema_only.sql
-from db_mappings import TABLE_NAMES_RU, COLUMN_DESCRIPTIONS, DB_COLUMNS_MAP
+# ✅ ЕДИНЫЙ ИСТОЧНИК ДАННЫХ: Импорт включает get_field_description для корректного поиска
+try:
+    from db_mappings import TABLE_NAMES_RU, COLUMN_DESCRIPTIONS, DB_COLUMNS_MAP, get_field_description
+except ImportError:
+    TABLE_NAMES_RU = {}
+    COLUMN_DESCRIPTIONS = {}
+    DB_COLUMNS_MAP = {}
+    def get_field_description(t, c): return c  # Фоллбэк если файл не найден
 
 class MappingEditorDialog(QDialog):
     """Отдельное окно для редактирования сопоставлений"""
@@ -44,8 +50,8 @@ class MappingEditorDialog(QDialog):
         self.setWindowTitle("✏️ Редактирование сопоставлений полей")
         self.setMinimumSize(1100, 750)
         self.setModal(False)
-        
         self.init_ui()
+        
         if template_id:
             self.load_field_mappings(template_id)
 
@@ -79,53 +85,35 @@ class MappingEditorDialog(QDialog):
         header.setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
         header.setSectionResizeMode(2, QHeaderView.ResizeMode.Fixed)
         self.mapping_table.setColumnWidth(2, 100)
-        
         layout.addWidget(self.mapping_table)
 
         # Кнопки управления
         btn_group = QGroupBox("Управление сопоставлениями")
         btn_layout = QHBoxLayout(btn_group)
-        
+
         add_simple_btn = QPushButton("➕ Добавить простое сопоставление")
-        add_simple_btn.setStyleSheet("""
-            QPushButton { background-color: #2196F3; color: white; font-weight: bold; padding: 8px 15px; border-radius: 5px; }
-            QPushButton:hover { background-color: #1976D2; }
-        """)
+        add_simple_btn.setStyleSheet("QPushButton { background-color: #2196F3; color: white; font-weight: bold; padding: 8px 15px; border-radius: 5px; } QPushButton:hover { background-color: #1976D2; }")
         add_simple_btn.clicked.connect(self.add_field_mapping)
         btn_layout.addWidget(add_simple_btn)
 
         add_composite_btn = QPushButton("🔗 Добавить составное поле")
-        add_composite_btn.setStyleSheet("""
-            QPushButton { background-color: #9C27B0; color: white; font-weight: bold; padding: 8px 15px; border-radius: 5px; }
-            QPushButton:hover { background-color: #7B1FA2; }
-        """)
+        add_composite_btn.setStyleSheet("QPushButton { background-color: #9C27B0; color: white; font-weight: bold; padding: 8px 15px; border-radius: 5px; } QPushButton:hover { background-color: #7B1FA2; }")
         add_composite_btn.clicked.connect(self.add_composite_field_mapping)
         btn_layout.addWidget(add_composite_btn)
 
         delete_btn = QPushButton("🗑️ Удалить выбранное")
-        delete_btn.setStyleSheet("""
-            QPushButton { background-color: #f44336; color: white; font-weight: bold; padding: 8px 15px; border-radius: 5px; }
-            QPushButton:hover { background-color: #d32f2f; }
-        """)
+        delete_btn.setStyleSheet("QPushButton { background-color: #f44336; color: white; font-weight: bold; padding: 8px 15px; border-radius: 5px; } QPushButton:hover { background-color: #d32f2f; }")
         delete_btn.clicked.connect(self.remove_field_mapping)
         btn_layout.addWidget(delete_btn)
-        
         layout.addWidget(btn_group)
 
         # Кнопки сохранения и закрытия
         button_box = QDialogButtonBox()
         save_btn = QPushButton("💾 Сохранить сопоставления")
-        save_btn.setStyleSheet("""
-            QPushButton { background-color: #4CAF50; color: white; font-weight: bold; padding: 12px 30px; border-radius: 5px; font-size: 13px; }
-            QPushButton:hover { background-color: #45a049; }
-        """)
+        save_btn.setStyleSheet("QPushButton { background-color: #4CAF50; color: white; font-weight: bold; padding: 12px 30px; border-radius: 5px; font-size: 13px; } QPushButton:hover { background-color: #45a049; }")
         save_btn.clicked.connect(self.save_and_close)
-        
         cancel_btn = QPushButton("❌ Закрыть без сохранения")
-        cancel_btn.setStyleSheet("""
-            QPushButton { background-color: #757575; color: white; font-weight: bold; padding: 12px 30px; border-radius: 5px; font-size: 13px; }
-            QPushButton:hover { background-color: #616161; }
-        """)
+        cancel_btn.setStyleSheet("QPushButton { background-color: #757575; color: white; font-weight: bold; padding: 12px 30px; border-radius: 5px; font-size: 13px; } QPushButton:hover { background-color: #616161; }")
         cancel_btn.clicked.connect(self.reject)
         
         button_box.addButton(save_btn, QDialogButtonBox.ButtonRole.AcceptRole)
@@ -133,7 +121,7 @@ class MappingEditorDialog(QDialog):
         layout.addWidget(button_box)
 
         self.setLayout(layout)
-        
+
         # Загрузка данных
         self.load_template_variables(self.template_id)
         self.load_db_columns()
@@ -144,7 +132,7 @@ class MappingEditorDialog(QDialog):
             return QMessageBox.warning(self, "Ошибка", "Шаблон не выбран")
         if not self.template_variables:
             return QMessageBox.warning(self, "Ошибка", "Переменные шаблона не загружены")
-            
+
         row = self.mapping_table.rowCount()
         self.mapping_table.insertRow(row)
         
@@ -168,7 +156,7 @@ class MappingEditorDialog(QDialog):
             return QMessageBox.warning(self, "Ошибка", "Выберите шаблон")
         if not self.template_variables:
             return QMessageBox.warning(self, "Ошибка", "Переменные шаблона не загружены")
-            
+        
         row = self.mapping_table.rowCount()
         self.composite_widget.add_composite_field_mapping(row)
 
@@ -214,7 +202,7 @@ class MappingEditorDialog(QDialog):
         try:
             combo = SearchableComboBox()
             if combo is None: return None
-
+            
             combo.setMaxVisibleItems(50)
             combo.view().setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             combo.view().setMinimumHeight(400)
@@ -231,16 +219,18 @@ class MappingEditorDialog(QDialog):
             for table_name, columns in self.db_columns.items():
                 table_name_ru = TABLE_NAMES_RU.get(table_name, table_name)
                 for col in columns:
-                    desc = COLUMN_DESCRIPTIONS.get(col, col)
+                    # ✅ ИСПОЛЬЗУЕМ get_field_description для поиска ключа вида "table_column"
+                    desc = get_field_description(table_name, col)
                     display_desc = f"[{table_name_ru}] {desc}"
                     all_columns.append((col, display_desc, table_name))
-            
+
             all_columns.sort(key=lambda x: x[1])
-            
+
             for col_name, col_description, table_name in all_columns:
                 combo.addItem(col_description, f"{table_name}|{col_name}")
-            
+
             if selected_column:
+                # Логика выбора сохраненной колонки
                 idx = combo.findData(selected_column)
                 if idx < 0 and selected_column:
                     for i in range(combo.count()):
@@ -248,7 +238,8 @@ class MappingEditorDialog(QDialog):
                         if item_data and item_data.endswith(f"|{selected_column}"):
                             idx = i
                             break
-                if idx >= 0: combo.setCurrentIndex(idx)
+                if idx >= 0: 
+                    combo.setCurrentIndex(idx)
             
             return combo
         except Exception as e:
@@ -260,53 +251,50 @@ class MappingEditorDialog(QDialog):
     def load_template_variables(self, template_id):
         """Загрузка переменных из шаблона DOCX"""
         if not template_id: return
-            
+        
         query = QSqlQuery(self.db)
         query.prepare("SELECT template_data FROM krd.document_templates WHERE id = ?")
         query.addBindValue(template_id)
-        
         if not query.exec() or not query.next():
             self.template_variables = []
             return
-            
+
         data = query.value(0)
         template_bytes = bytes(data) if isinstance(data, QByteArray) else (bytes(data) if data else b'')
         if not template_bytes:
             self.template_variables = []
             return
-            
+
         with tempfile.NamedTemporaryFile(delete=False, suffix='.docx') as tmp:
             tmp.write(template_bytes)
             tmp_path = tmp.name
-            
-        try:
-            doc = Document(tmp_path)
-            vars_set = set()
-            for para in doc.paragraphs:
-                vars_set.update(re.findall(r'\{\{([^{}]+)\}\}', para.text))
-            for table in doc.tables:
-                for row in table.rows:
-                    for cell in row.cells:
-                        for para in cell.paragraphs:
-                            vars_set.update(re.findall(r'\{\{([^{}]+)\}\}', para.text))
-            self.template_variables = sorted(vars_set)
-        except Exception as e:
-            print(f"❌ Ошибка загрузки переменных: {e}")
-            self.template_variables = ["surname", "name", "patronymic"]
-        finally:
-            try: os.unlink(tmp_path)
-            except: pass
+            try:
+                doc = Document(tmp_path)
+                vars_set = set()
+                for para in doc.paragraphs:
+                    vars_set.update(re.findall(r'\{\{([^{}]+)\}\}', para.text))
+                for table in doc.tables:
+                    for row in table.rows:
+                        for cell in row.cells:
+                            for para in cell.paragraphs:
+                                vars_set.update(re.findall(r'\{\{([^{}]+)\}\}', para.text))
+                self.template_variables = sorted(vars_set)
+            except Exception as e:
+                print(f"❌ Ошибка загрузки переменных: {e}")
+                self.template_variables = ["surname", "name", "patronymic"]
+            finally:
+                try: os.unlink(tmp_path)
+                except: pass
 
     def load_db_columns(self):
         """✅ ЗАМЕНА: Используем единый словарь из db_mappings.py"""
-        # Удаляем жестко прописанные дубликаты, подгружаем актуальную схему
         self.db_columns = DB_COLUMNS_MAP
 
     def save_and_close(self):
         """Сохранение и закрытие"""
         if not self.current_template_id:
             return QMessageBox.critical(self, "Ошибка", "Шаблон не выбран")
-            
+        
         if self.mapping_manager.save_field_mappings(self.current_template_id):
             QMessageBox.information(self, "Успех", "✅ Сопоставления успешно сохранены!")
             self.accept()
