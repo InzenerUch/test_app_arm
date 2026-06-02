@@ -7,22 +7,18 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt, QByteArray
 from PyQt6.QtSql import QSqlQuery
-
 class RequestDetailsDialog(QDialog):
     def __init__(self, db, request_id, audit_logger=None, parent=None):
         super().__init__(parent)
         self.db = db
         self.request_id = request_id
         self.audit_logger = audit_logger
-        self.setWindowTitle(f"Запрос #{request_id} — Детали")
+        self.setWindowTitle(f"Запрос
         self.resize(650, 480)
         self.init_ui()
         self.load_request_data()
-
     def init_ui(self):
         layout = QVBoxLayout(self)
-        
-        # === Информация о запросе ===
         g_info = QGroupBox("Информация о запросе")
         f_info = QFormLayout()
         self.lbl_type = QLabel(); self.lbl_recipient = QLabel()
@@ -36,8 +32,6 @@ class RequestDetailsDialog(QDialog):
         f_info.addRow("Статус:", self.lbl_status)
         g_info.setLayout(f_info)
         layout.addWidget(g_info)
-
-        # === Работа с файлами ===
         g_files = QGroupBox("Работа с файлами")
         f_files = QHBoxLayout()
         self.btn_dl_req = QPushButton("📥 Выгрузить запрос (.docx)")
@@ -50,8 +44,6 @@ class RequestDetailsDialog(QDialog):
         f_files.addWidget(self.btn_dl_resp)
         g_files.setLayout(f_files)
         layout.addWidget(g_files)
-
-        # === Загрузка ответа и ДАТА/НОМЕР ===
         g_resp = QGroupBox("Регистрация ответа")
         f_resp = QFormLayout()
         self.input_date = QDateEdit()
@@ -59,26 +51,19 @@ class RequestDetailsDialog(QDialog):
         self.input_num = QLineEdit()
         f_resp.addRow("📅 Дата получения:", self.input_date)
         f_resp.addRow("🔢 Входящий №:", self.input_num)
-        
-        # Кнопка загрузки файла
         self.btn_up_resp = QPushButton("📤 Загрузить файл ответа")
         self.btn_up_resp.clicked.connect(self.upload_response)
         f_resp.addRow(self.btn_up_resp)
-        
-        # ✅ НОВАЯ КНОПКА: Сохранить только номер и дату
         self.btn_save_resp = QPushButton("💾 Сохранить номер/дату")
         self.btn_save_resp.setProperty("role", "info")
         self.btn_save_resp.setToolTip("Сохранить введённые данные в базу данных без загрузки файла")
         self.btn_save_resp.clicked.connect(self.save_response_data)
         f_resp.addRow(self.btn_save_resp)
-        
         g_resp.setLayout(f_resp)
         layout.addWidget(g_resp)
-
         btn_close = QPushButton("Закрыть")
         btn_close.clicked.connect(self.accept)
         layout.addWidget(btn_close)
-
     def load_request_data(self):
         q = QSqlQuery(self.db)
         q.prepare("""
@@ -88,71 +73,13 @@ class RequestDetailsDialog(QDialog):
             LEFT JOIN krd.request_types rt ON o.request_type_id = rt.id
             LEFT JOIN krd.recipients r ON o.recipient_id = r.id
             WHERE o.id = :id
-        """)
-        q.bindValue(":id", self.request_id)
-        if q.exec() and q.next():
-            self.lbl_type.setText(q.value(0) or "Не указан")
-            self.lbl_recipient.setText(q.value(1) or "Не указан")
-            self.lbl_date.setText(q.value(2).toString("dd.MM.yyyy") if hasattr(q.value(2), 'toString') else str(q.value(2) or ""))
-            self.lbl_number.setText(q.value(3) or "Без номера")
-            self.lbl_status.setText(q.value(4) or "Ожидание")
-            
-            # Заполняем поля ответа текущими значениями из БД
-            if q.value(5): self.input_date.setDate(q.value(5))
-            if q.value(6): self.input_num.setText(q.value(6) or "")
-            
-            # Активируем кнопку выгрузки если файл есть
-            response_data = q.value(7)
-            if response_data is not None and (isinstance(response_data, bytes) or hasattr(response_data, 'data')):
-                self.btn_dl_resp.setEnabled(True)
-                self.btn_dl_resp.setToolTip("Нажмите, чтобы сохранить ответ на диск")
-            else:
-                self.btn_dl_resp.setEnabled(False)
-                self.btn_dl_resp.setToolTip("Ответ еще не загружен")
-
-    def save_response_data(self):
-        """✅ Явное сохранение только номера и даты в БД"""
+✅ Явное сохранение только номера и даты в БД"""
         q = QSqlQuery(self.db)
         q.prepare("""
             UPDATE krd.outgoing_requests
             SET response_date = :date, response_number = :num, response_status = 'Получен'
             WHERE id = :id
-        """)
-        q.bindValue(":date", self.input_date.date())
-        q.bindValue(":num", self.input_num.text().strip())
-        q.bindValue(":id", self.request_id)
-        
-        if q.exec() and q.numRowsAffected() > 0:
-            QMessageBox.information(self, "Успех", "✅ Номер и дата ответа сохранены в базе данных!")
-            self.load_request_data() # Обновляем UI
-            if self.parent() and hasattr(self.parent(), 'load_requests'):
-                self.parent().load_requests() # Обновляем таблицу родителя
-        else:
-            QMessageBox.critical(self, "Ошибка БД", q.lastError().text())
-
-    def _download_file(self, column, default_name):
-        q = QSqlQuery(self.db)
-        q.prepare(f"SELECT {column} FROM krd.outgoing_requests WHERE id = :id")
-        q.bindValue(":id", self.request_id)
-        if not q.exec() or not q.next() or q.value(0) is None:
-            return QMessageBox.information(self, "Информация", "Файл отсутствует в базе данных.")
-        raw_data = q.value(0)
-        try:
-            file_bytes = bytes(raw_data.data()) if hasattr(raw_data, 'data') else bytes(raw_data)
-        except Exception as e:
-            return QMessageBox.critical(self, "Ошибка", f"Не удалось прочитать данные файла: {e}")
-        path, _ = QFileDialog.getSaveFileName(self, "Сохранить файл", default_name, "Все файлы (*)")
-        if path:
-            try:
-                with open(path, 'wb') as f:
-                    f.write(file_bytes)
-                self._open_file_with_os(path)
-                QMessageBox.information(self, "Успех", f"✅ Файл сохранён и открыт:\n{path}")
-            except Exception as e:
-                QMessageBox.critical(self, "Ошибка сохранения", f"Не удалось записать файл:\n{e}")
-
-    def _open_file_with_os(self, filepath):
-        """Открывает файл в стандартном приложении ОС"""
+Открывает файл в стандартном приложении ОС"""
         try:
             if platform.system() == "Windows":
                 os.startfile(filepath)
@@ -162,7 +89,6 @@ class RequestDetailsDialog(QDialog):
                 subprocess.call(["xdg-open", filepath])
         except Exception as e:
             print(f"⚠️ Не удалось открыть файл через ОС: {e}")
-
     def upload_response(self):
         file_path, _ = QFileDialog.getOpenFileName(self, "Выберите файл ответа", "", "Документы (*.docx *.pdf *.jpg *.png);;Все файлы (*)")
         if not file_path: return
@@ -178,7 +104,6 @@ class RequestDetailsDialog(QDialog):
             q.bindValue(":date", self.input_date.date())
             q.bindValue(":num", self.input_num.text().strip())
             q.bindValue(":id", self.request_id)
-            
             if q.exec():
                 QMessageBox.information(self, "Успех", "Файл ответа и данные успешно загружены!")
                 self.load_request_data()

@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict FTfoTfqEa10Tco86GdPwNceAYpqu8C0EK7f4S9MSmKdTbrVsaSfh4lpfXbZgBMS
+\restrict HaAZfHjEMXB0ygalNVvL2F0er6SmispTcgANxMsxOhbee4F7FJ61FdEiKIcifUP
 
 -- Dumped from database version 16.14 (Ubuntu 16.14-0ubuntu0.24.04.1)
 -- Dumped by pg_dump version 16.14 (Ubuntu 16.14-0ubuntu0.24.04.1)
@@ -106,8 +106,6 @@ CREATE TABLE krd.audit_log (
     table_name character varying(100) NOT NULL,
     record_id integer,
     krd_id integer,
-    old_values jsonb,
-    new_values jsonb,
     created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
     description text
 );
@@ -167,20 +165,6 @@ COMMENT ON COLUMN krd.audit_log.record_id IS 'ID измененной запис
 --
 
 COMMENT ON COLUMN krd.audit_log.krd_id IS 'ID КРД (для удобства фильтрации по карточкам)';
-
-
---
--- Name: COLUMN audit_log.old_values; Type: COMMENT; Schema: krd; Owner: -
---
-
-COMMENT ON COLUMN krd.audit_log.old_values IS 'Старые значения в формате JSON';
-
-
---
--- Name: COLUMN audit_log.new_values; Type: COMMENT; Schema: krd; Owner: -
---
-
-COMMENT ON COLUMN krd.audit_log.new_values IS 'Новые значения в формате JSON';
 
 
 --
@@ -398,45 +382,6 @@ CREATE SEQUENCE krd.garrisons_id_seq
 --
 
 ALTER SEQUENCE krd.garrisons_id_seq OWNED BY krd.garrisons.id;
-
-
---
--- Name: generated_documents; Type: TABLE; Schema: krd; Owner: -
---
-
-CREATE TABLE krd.generated_documents (
-    id integer NOT NULL,
-    krd_id integer NOT NULL,
-    template_id integer,
-    document_type character varying(50),
-    document_data bytea,
-    file_name character varying(255),
-    file_size integer,
-    generated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    generated_by integer,
-    is_deleted boolean DEFAULT false,
-    metadata jsonb
-);
-
-
---
--- Name: generated_documents_id_seq; Type: SEQUENCE; Schema: krd; Owner: -
---
-
-CREATE SEQUENCE krd.generated_documents_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: generated_documents_id_seq; Type: SEQUENCE OWNED BY; Schema: krd; Owner: -
---
-
-ALTER SEQUENCE krd.generated_documents_id_seq OWNED BY krd.generated_documents.id;
 
 
 --
@@ -1526,39 +1471,6 @@ ALTER SEQUENCE krd.user_roles_id_seq OWNED BY krd.user_roles.id;
 
 
 --
--- Name: user_sessions; Type: TABLE; Schema: krd; Owner: -
---
-
-CREATE TABLE krd.user_sessions (
-    id integer NOT NULL,
-    user_id integer NOT NULL,
-    login_time timestamp without time zone DEFAULT now() NOT NULL,
-    logout_time timestamp without time zone,
-    is_active boolean DEFAULT true
-);
-
-
---
--- Name: user_sessions_id_seq; Type: SEQUENCE; Schema: krd; Owner: -
---
-
-CREATE SEQUENCE krd.user_sessions_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: user_sessions_id_seq; Type: SEQUENCE OWNED BY; Schema: krd; Owner: -
---
-
-ALTER SEQUENCE krd.user_sessions_id_seq OWNED BY krd.user_sessions.id;
-
-
---
 -- Name: user_settings; Type: TABLE; Schema: krd; Owner: -
 --
 
@@ -1607,69 +1519,6 @@ ALTER SEQUENCE krd.user_settings_id_seq OWNED BY krd.user_settings.id;
 
 
 --
--- Name: user_themes; Type: TABLE; Schema: krd; Owner: -
---
-
-CREATE TABLE krd.user_themes (
-    id integer NOT NULL,
-    user_id integer,
-    theme_name character varying(100) NOT NULL,
-    description text,
-    config_json jsonb NOT NULL,
-    is_active boolean DEFAULT false,
-    is_default boolean DEFAULT false,
-    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP,
-    created_by integer
-);
-
-
---
--- Name: TABLE user_themes; Type: COMMENT; Schema: krd; Owner: -
---
-
-COMMENT ON TABLE krd.user_themes IS 'Пользовательские темы оформления и конфигурации интерфейса';
-
-
---
--- Name: COLUMN user_themes.config_json; Type: COMMENT; Schema: krd; Owner: -
---
-
-COMMENT ON COLUMN krd.user_themes.config_json IS 'JSON конфигурация: {
-    "social_data": {
-        "visible_fields": ["surname", "name", "patronymic", ...],
-        "field_order": ["surname", "name", ...],
-        "required_fields": ["surname", "name", "patronymic"]
-    },
-    "addresses": {...},
-    "ui_settings": {
-        "theme": "light/dark",
-        "compact_mode": true/false
-    }
-}';
-
-
---
--- Name: user_themes_id_seq; Type: SEQUENCE; Schema: krd; Owner: -
---
-
-CREATE SEQUENCE krd.user_themes_id_seq
-    AS integer
-    START WITH 1
-    INCREMENT BY 1
-    NO MINVALUE
-    NO MAXVALUE
-    CACHE 1;
-
-
---
--- Name: user_themes_id_seq; Type: SEQUENCE OWNED BY; Schema: krd; Owner: -
---
-
-ALTER SEQUENCE krd.user_themes_id_seq OWNED BY krd.user_themes.id;
-
-
---
 -- Name: users; Type: TABLE; Schema: krd; Owner: -
 --
 
@@ -1684,8 +1533,7 @@ CREATE TABLE krd.users (
     created_at timestamp without time zone DEFAULT now(),
     last_login timestamp without time zone,
     is_deleted boolean DEFAULT false,
-    deleted_at timestamp without time zone,
-    updated_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+    deleted_at timestamp without time zone
 );
 
 
@@ -1749,13 +1597,6 @@ ALTER TABLE ONLY krd.field_mappings ALTER COLUMN id SET DEFAULT nextval('krd.fie
 --
 
 ALTER TABLE ONLY krd.garrisons ALTER COLUMN id SET DEFAULT nextval('krd.garrisons_id_seq'::regclass);
-
-
---
--- Name: generated_documents id; Type: DEFAULT; Schema: krd; Owner: -
---
-
-ALTER TABLE ONLY krd.generated_documents ALTER COLUMN id SET DEFAULT nextval('krd.generated_documents_id_seq'::regclass);
 
 
 --
@@ -1871,24 +1712,10 @@ ALTER TABLE ONLY krd.user_roles ALTER COLUMN id SET DEFAULT nextval('krd.user_ro
 
 
 --
--- Name: user_sessions id; Type: DEFAULT; Schema: krd; Owner: -
---
-
-ALTER TABLE ONLY krd.user_sessions ALTER COLUMN id SET DEFAULT nextval('krd.user_sessions_id_seq'::regclass);
-
-
---
 -- Name: user_settings id; Type: DEFAULT; Schema: krd; Owner: -
 --
 
 ALTER TABLE ONLY krd.user_settings ALTER COLUMN id SET DEFAULT nextval('krd.user_settings_id_seq'::regclass);
-
-
---
--- Name: user_themes id; Type: DEFAULT; Schema: krd; Owner: -
---
-
-ALTER TABLE ONLY krd.user_themes ALTER COLUMN id SET DEFAULT nextval('krd.user_themes_id_seq'::regclass);
 
 
 --
@@ -1944,14 +1771,6 @@ ALTER TABLE ONLY krd.field_mappings
 
 ALTER TABLE ONLY krd.garrisons
     ADD CONSTRAINT garrisons_pkey PRIMARY KEY (id);
-
-
---
--- Name: generated_documents generated_documents_pkey; Type: CONSTRAINT; Schema: krd; Owner: -
---
-
-ALTER TABLE ONLY krd.generated_documents
-    ADD CONSTRAINT generated_documents_pkey PRIMARY KEY (id);
 
 
 --
@@ -2107,14 +1926,6 @@ ALTER TABLE ONLY krd.user_roles
 
 
 --
--- Name: user_sessions user_sessions_pkey; Type: CONSTRAINT; Schema: krd; Owner: -
---
-
-ALTER TABLE ONLY krd.user_sessions
-    ADD CONSTRAINT user_sessions_pkey PRIMARY KEY (id);
-
-
---
 -- Name: user_settings user_settings_pkey; Type: CONSTRAINT; Schema: krd; Owner: -
 --
 
@@ -2128,14 +1939,6 @@ ALTER TABLE ONLY krd.user_settings
 
 ALTER TABLE ONLY krd.user_settings
     ADD CONSTRAINT user_settings_user_id_key UNIQUE (user_id);
-
-
---
--- Name: user_themes user_themes_pkey; Type: CONSTRAINT; Schema: krd; Owner: -
---
-
-ALTER TABLE ONLY krd.user_themes
-    ADD CONSTRAINT user_themes_pkey PRIMARY KEY (id);
 
 
 --
@@ -2208,20 +2011,6 @@ CREATE INDEX idx_document_templates_is_deleted ON krd.document_templates USING b
 --
 
 CREATE INDEX idx_field_mappings_composite ON krd.field_mappings USING btree (is_composite) WHERE (is_composite = true);
-
-
---
--- Name: idx_generated_documents_krd; Type: INDEX; Schema: krd; Owner: -
---
-
-CREATE INDEX idx_generated_documents_krd ON krd.generated_documents USING btree (krd_id);
-
-
---
--- Name: idx_generated_documents_type; Type: INDEX; Schema: krd; Owner: -
---
-
-CREATE INDEX idx_generated_documents_type ON krd.generated_documents USING btree (document_type);
 
 
 --
@@ -2358,20 +2147,6 @@ CREATE INDEX idx_user_settings_user_id ON krd.user_settings USING btree (user_id
 
 
 --
--- Name: idx_user_themes_active; Type: INDEX; Schema: krd; Owner: -
---
-
-CREATE INDEX idx_user_themes_active ON krd.user_themes USING btree (is_active) WHERE (is_active = true);
-
-
---
--- Name: idx_user_themes_user_id; Type: INDEX; Schema: krd; Owner: -
---
-
-CREATE INDEX idx_user_themes_user_id ON krd.user_themes USING btree (user_id);
-
-
---
 -- Name: idx_users_role_id; Type: INDEX; Schema: krd; Owner: -
 --
 
@@ -2407,14 +2182,6 @@ ALTER TABLE ONLY krd.krd
 
 ALTER TABLE ONLY krd.report_templates
     ADD CONSTRAINT fk_report_templates_deleted_by FOREIGN KEY (deleted_by) REFERENCES krd.users(id);
-
-
---
--- Name: generated_documents generated_documents_template_id_fkey; Type: FK CONSTRAINT; Schema: krd; Owner: -
---
-
-ALTER TABLE ONLY krd.generated_documents
-    ADD CONSTRAINT generated_documents_template_id_fkey FOREIGN KEY (template_id) REFERENCES krd.report_templates(id);
 
 
 --
@@ -2586,35 +2353,11 @@ ALTER TABLE ONLY krd.social_data
 
 
 --
--- Name: user_sessions user_sessions_user_id_fkey; Type: FK CONSTRAINT; Schema: krd; Owner: -
---
-
-ALTER TABLE ONLY krd.user_sessions
-    ADD CONSTRAINT user_sessions_user_id_fkey FOREIGN KEY (user_id) REFERENCES krd.users(id) ON DELETE CASCADE;
-
-
---
 -- Name: user_settings user_settings_user_id_fkey; Type: FK CONSTRAINT; Schema: krd; Owner: -
 --
 
 ALTER TABLE ONLY krd.user_settings
     ADD CONSTRAINT user_settings_user_id_fkey FOREIGN KEY (user_id) REFERENCES krd.users(id) ON DELETE CASCADE;
-
-
---
--- Name: user_themes user_themes_created_by_fkey; Type: FK CONSTRAINT; Schema: krd; Owner: -
---
-
-ALTER TABLE ONLY krd.user_themes
-    ADD CONSTRAINT user_themes_created_by_fkey FOREIGN KEY (created_by) REFERENCES krd.users(id);
-
-
---
--- Name: user_themes user_themes_user_id_fkey; Type: FK CONSTRAINT; Schema: krd; Owner: -
---
-
-ALTER TABLE ONLY krd.user_themes
-    ADD CONSTRAINT user_themes_user_id_fkey FOREIGN KEY (user_id) REFERENCES krd.users(id) ON DELETE CASCADE;
 
 
 --
@@ -2629,5 +2372,5 @@ ALTER TABLE ONLY krd.users
 -- PostgreSQL database dump complete
 --
 
-\unrestrict FTfoTfqEa10Tco86GdPwNceAYpqu8C0EK7f4S9MSmKdTbrVsaSfh4lpfXbZgBMS
+\unrestrict HaAZfHjEMXB0ygalNVvL2F0er6SmispTcgANxMsxOhbee4F7FJ61FdEiKIcifUP
 
