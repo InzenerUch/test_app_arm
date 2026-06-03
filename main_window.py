@@ -1,16 +1,18 @@
 """
 Модуль для главного окна приложения
-Содержит класс MainWindow для отображения данных КРД и информации о пользователе
-С функцией выгрузки данных в Excel, поиском в реальном времени и сортировкой по столбцам
+Содержит класс MainWindow для отображения данных КРД и информации о пользователе.
+С функцией выгрузки данных в Excel, поиском в реальном времени и сортировкой по столбцам.
+
 ✅ ИСПРАВЛЕНО: Убран столбец "Номер КРД", ID переименован в "№ КРД"
 ✅ ИСПРАВЛЕНО: Убран столбец "ID последнего места службы"
 ✅ ДОБАВЛЕНО: Столбец "Занято пользователем" (определяется через pg_locks)
-✅ ДОБАВЛЕНО: Автообновление статуса занятости каждую секунду (QTimer)
-✅ ДОБАВЛЕНО: Подпись "Не занято" для свободных записей
+✅ ДОБАВЛЕНО: Автообновление статуса занятости (QTimer)
+✅ ДОБАВЛЕНО: Подпись "🟢 Не занято" для свободных записей
 ✅ ДОБАВЛЕНО: Подробная диагностика проверки блокировок в консоль
 ✅ ДОБАВЛЕНО: Отдельное меню "Отчеты" с пунктом "Отчеты по всем КРД"
 ✅ ДОБАВЛЕНО: Меню "Администрирование" (Пользователи, Удаленные, Аудит)
 ✅ УДАЛЕНО: Кнопки администрирования с Toolbar
+✅ ИСПРАВЛЕНО: Баг с неотображаемым QFileDialog при экспорте (QTimer.singleShot)
 """
 
 import sys
@@ -19,14 +21,13 @@ from ui_helpers import is_reader, apply_readonly_mode
 
 from PyQt6.QtWidgets import (
     QApplication, QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, 
-    QTableWidget, QTableWidgetItem, QHeaderView, QLabel, QGroupBox,
-    QGridLayout, QMenuBar, QStatusBar, QToolBar, QTableView, QPushButton, QDialog,
+    QHeaderView, QLabel, QGroupBox, QGridLayout, QMenuBar, 
+    QStatusBar, QToolBar, QTableView, QPushButton, QDialog,
     QMessageBox, QMenu, QFileDialog, QAbstractItemView, QProgressDialog, QLineEdit
 )
-# ✅ ДОБАВЛЕНО: Импорт QTime для получения текущего времени
-from PyQt6.QtCore import Qt, QPoint, QDate, QTime, QTimer
-from PyQt6.QtSql import QSqlDatabase, QSqlQueryModel, QSqlQuery, QSqlTableModel
-from PyQt6.QtGui import QAction, QFont, QContextMenuEvent, QIcon
+from PyQt6.QtCore import Qt, QPoint, QDate, QTimer
+from PyQt6.QtSql import QSqlDatabase, QSqlQueryModel, QSqlQuery
+from PyQt6.QtGui import QAction, QFont
 
 # === ИМПОРТЫ ДЛЯ ЭКСПОРТА В EXCEL ===
 from openpyxl import Workbook
@@ -43,10 +44,7 @@ from theme_manager import ThemeManager
 
 
 class MainWindow(QMainWindow):
-    """
-    Главное окно приложения
-    Отображает данные КРД и информацию о вошедшем пользователе
-    """
+    """Главное окно приложения"""
     
     def __init__(self, user_info, db_connection):
         super().__init__()
@@ -56,7 +54,6 @@ class MainWindow(QMainWindow):
         self.audit_logger = AuditLogger(self.db, self.user_info)
         
         if not hasattr(self, 'theme_manager'):
-            from theme_manager import ThemeManager
             self.theme_manager = ThemeManager(db_connection, user_info.get('id'))
         
         self.setWindowTitle("АРМ Сотрудника дознания - Главное окно")
@@ -65,7 +62,6 @@ class MainWindow(QMainWindow):
         self.search_query = ""
         
         # === ДЛЯ СОРТИРОВКИ ===
-        # Индексы обновлены под новую структуру таблицы
         self.sort_column = 0
         self.sort_order = Qt.SortOrder.DescendingOrder
         self.sort_column_names = {
@@ -73,18 +69,20 @@ class MainWindow(QMainWindow):
             1: "s.surname",     # Фамилия
             2: "s.name",        # Имя
             3: "s.patronymic",  # Отчество
-            4: "s.birth_date",
+            4: "s.birth_date",  # Дата рождения
             5: "st.name",       # Статус
-            6: "lk.usename"     # Занято пользователем (сортировка по логину)
+            6: "lk.usename"     # Занято пользователем (NULLS LAST обрабатывается PG по умолчанию)
         }
         
+        # Таймер для поиска с задержкой (debounce)
         self.search_timer = QTimer()
         self.search_timer.setSingleShot(True)
         self.search_timer.timeout.connect(self._perform_search)
+        
         self.user_id = user_info.get('id')
         self.current_krd_window = None
 
-        # ✅ ТАЙМЕР ДЛЯ ОБНОВЛЕНИЯ СТАТУСА ЗАНЯТОСТИ (КАЖДУЮ СЕКУНДУ)
+        # Таймер для обновления статуса занятости (раз в 3 секунды, чтобы не перегружать БД)
         self.lock_timer = QTimer()
         self.lock_timer.timeout.connect(self.update_lock_status)
         
@@ -92,11 +90,11 @@ class MainWindow(QMainWindow):
         self.load_krd_data()
         self.audit_logger.log_user_login()
         
-         # 🔥 НОВОЕ: Очистка зависших блокировок при старте
+        # Очистка зависших блокировок при старте
         self.cleanup_stale_locks_on_startup()
         
-        # Запускаем мониторинг блокировок
-        self.lock_timer.start(1000) # 1000 мс = 1 секунда
+        # Запускаем мониторинг блокировок (3000 мс = 3 секунды, оптимальный баланс)
+        self.lock_timer.start(3000)
     
     def init_ui(self):
         self.create_menu_bar()
@@ -113,8 +111,7 @@ class MainWindow(QMainWindow):
     
     def create_menu_bar(self):
         menu_bar = self.menuBar()
-        # Определяем роль текущего пользователя
-        is_reader = self.user_info.get('role', '').lower() == 'reader'
+        is_reader_role = self.user_info.get('role', '').lower() == 'reader'
         is_admin = self.user_info.get('role') == 'admin'
 
         # === МЕНЮ "ФАЙЛ" ===
@@ -124,9 +121,9 @@ class MainWindow(QMainWindow):
         exit_action.triggered.connect(self.close)
         file_menu.addAction(exit_action)
         
-        # === МЕНЮ "ОТЧЕТЫ" (Блокируется для читателя) ===
+        # === МЕНЮ "ОТЧЕТЫ" ===
         reports_menu = menu_bar.addMenu("📊 Отчеты")
-        if is_reader:
+        if is_reader_role:
             reports_menu.setEnabled(False)
             reports_menu.setToolTip("🔒 Выгрузка отчетов доступна только операторам и администраторам")
         else:
@@ -136,15 +133,15 @@ class MainWindow(QMainWindow):
             generate_all_reports_action.triggered.connect(self.on_generate_all_reports)
             reports_menu.addAction(generate_all_reports_action)
             
-        # === МЕНЮ "СПРАВОЧНИКИ" (Блокируется для читателя) ===
+        # === МЕНЮ "СПРАВОЧНИКИ" ===
         ref_menu = menu_bar.addMenu("📚 Справочники")
-        if is_reader:
+        if is_reader_role:
             ref_menu.setEnabled(False)
-            ref_menu.setToolTip("🔒 Редактирование справочников доступно только операторам и администраторам")
+            ref_menu.setToolTip("🔒 Редактирование справочников доступно только операторам и!")
         else:
             all_refs_action = QAction("📋 Все справочники", self)
             all_refs_action.setShortcut("Ctrl+R")
-            all_refs_action.triggered.connect(self.open_reference_editor)
+            all_refs_action.triggered.connect(lambda: self.open_reference_editor(None))
             ref_menu.addAction(all_refs_action)
             ref_menu.addSeparator()
             
@@ -163,54 +160,50 @@ class MainWindow(QMainWindow):
             admin_menu.addAction("📋 Аудит действий пользователей", self.open_user_audit_window)
             admin_menu.addAction("⚙️ Управление шаблонами отчетов", self.on_manage_templates)
         else:
-            # Скрываем меню полностью для обычных пользователей и читателей
             admin_menu.setVisible(False) 
         
         # === МЕНЮ "НАСТРОЙКИ" ===
-        settings_menu = self.menuBar().addMenu("⚙️ Настройки")
+        settings_menu = menu_bar.addMenu("⚙️ Настройки")
         settings_menu.addAction("🎨 Тема оформления", self.open_theme_settings)
         
         # === МЕНЮ "СПРАВКА" ===
         help_menu = menu_bar.addMenu("Справка")
         help_menu.addAction("О программе", self.show_about_dialog)
+
     def create_toolbar(self):
         toolbar = self.addToolBar("Основная панель")
         toolbar.addAction("🔄 Обновить", self.load_krd_data)
         
-        is_r = is_reader(self.user_info) # 🔒 Проверяем роль
+        is_r = is_reader(self.user_info)
 
         # 1. Кнопка добавления
         add_action = toolbar.addAction("➕ Добавить КРД", self.open_krd_add_window)
-        if is_r: add_action.setVisible(False) # Скрываем для читателя
+        if is_r: add_action.setVisible(False)
 
         # 2. Кнопка удаления
         self.delete_krd_action = QAction("🗑️ Удалить КРД", self)
         self.delete_krd_action.triggered.connect(self.delete_selected_krd)
         self.delete_krd_action.setEnabled(False)
-        if is_r: self.delete_krd_action.setVisible(False) # Скрываем для читателя
+        if is_r: self.delete_krd_action.setVisible(False)
         toolbar.addAction(self.delete_krd_action)
         
-        # 🔥 НОВОЕ: Кнопка очистки блокировок (только для админов)
+        # 3. Кнопка очистки блокировок (только для админов)
         if self.user_info.get('role') == 'admin':
             toolbar.addSeparator()
             cleanup_btn = QAction("🔓 Очистить блокировки", self)
             cleanup_btn.setToolTip("Снять все зависшие advisory locks")
             cleanup_btn.triggered.connect(self.show_cleanup_dialog)
             toolbar.addAction(cleanup_btn)
+
     def show_cleanup_dialog(self):
         """Диалог очистки зависших блокировок"""
         try:
             query = QSqlQuery(self.db)
             query.prepare("""
-                SELECT 
-                    pl.objid as krd_id,
-                    lk.usename,
-                    lk.state,
-                    lk.application_name
+                SELECT pl.objid as krd_id, lk.usename, lk.state, lk.application_name
                 FROM pg_locks pl
                 LEFT JOIN pg_stat_activity lk ON lk.pid = pl.pid
-                WHERE pl.locktype = 'advisory' 
-                AND pl.granted = true
+                WHERE pl.locktype = 'advisory' AND pl.granted = true
             """)
             
             if query.exec():
@@ -224,20 +217,16 @@ class MainWindow(QMainWindow):
                     })
                 
                 if not locks:
-                    QMessageBox.information(self, "Блокировки", 
-                        "✅ Зависших блокировок не найдено. Все записи свободны!")
+                    QMessageBox.information(self, "Блокировки", "✅ Зависших блокировок не найдено. Все записи свободны!")
                     return
                 
-                # Формируем сообщение
                 msg = f"Найдено активных блокировок: {len(locks)}\n\n"
                 for lock in locks:
                     msg += f"🔒 КРД-{lock['krd_id']} | User: {lock['username']} | App: {lock['app_name']}\n"
-                
                 msg += "\n⚠️ Снять все блокировки?"
                 
                 reply = QMessageBox.question(
-                    self, "Очистка блокировок",
-                    msg,
+                    self, "Очистка блокировок", msg,
                     QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
                     QMessageBox.StandardButton.No
                 )
@@ -245,16 +234,12 @@ class MainWindow(QMainWindow):
                 if reply == QMessageBox.StandardButton.Yes:
                     cleanup = QSqlQuery(self.db)
                     if cleanup.exec("SELECT pg_advisory_unlock_all()"):
-                        QMessageBox.information(self, "Успех", 
-                            f"✅ Снято {len(locks)} блокировок!")
-                        self.load_krd_data()  # Обновить таблицу
+                        QMessageBox.information(self, "Успех", f"✅ Снято {len(locks)} блокировок!")
+                        self.load_krd_data()
                     else:
-                        QMessageBox.critical(self, "Ошибка",
-                            f"Не удалось снять блокировки:\n{cleanup.lastError().text()}")
+                        QMessageBox.critical(self, "Ошибка", f"Не удалось снять блокировки:\n{cleanup.lastError().text()}")
             else:
-                QMessageBox.critical(self, "Ошибка",
-                    f"Ошибка проверки блокировок:\n{query.lastError().text()}")
-                    
+                QMessageBox.critical(self, "Ошибка", f"Ошибка проверки блокировок:\n{query.lastError().text()}")
         except Exception as e:
             QMessageBox.critical(self, "Ошибка", f"Ошибка: {str(e)}")
     
@@ -303,13 +288,11 @@ class MainWindow(QMainWindow):
         layout.addLayout(search_layout)
         
         self.table_model_krd = QSqlQueryModel()
-        self.load_krd_data()
-        
         self.krd_table_view = QTableView()
         self.krd_table_view.setModel(self.table_model_krd)
         self.krd_table_view.setAlternatingRowColors(True)
-        self.krd_table_view.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
-        self.krd_table_view.setSelectionMode(QTableView.SelectionMode.SingleSelection)
+        self.krd_table_view.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self.krd_table_view.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
         
         header = self.krd_table_view.horizontalHeader()
         header.setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
@@ -341,7 +324,7 @@ class MainWindow(QMainWindow):
     def on_search_text_changed(self, text):
         self.search_query = text.strip()
         self.search_timer.stop()
-        self.search_timer.start(300)
+        self.search_timer.start(300) # Debounce 300ms
     
     def _perform_search(self):
         self.load_krd_data()
@@ -353,19 +336,15 @@ class MainWindow(QMainWindow):
         self.search_input.setFocus()
     
     def _get_base_query(self):
-        """Формирует базовый SQL-запрос с учетом новой структуры колонок"""
+        """Формирует базовый SQL-запрос с учетом структуры колонок и блокировок"""
         return """
         SELECT
             k.id AS "№ КРД",
             COALESCE(s.surname, '') AS "Фамилия",
             COALESCE(s.name, '') AS "Имя",
             COALESCE(s.patronymic, '') AS "Отчество",
-            
-            -- ✅ ДОБАВЛЕНО: Дата рождения
             s.birth_date AS "Дата рождения", 
-            
             COALESCE(st.name, 'Неизвестен') AS "Статус",
-            -- ✅ ИЗМЕНЕНО: Теперь показываем application_name (логин программы)
             CASE
                 WHEN lk.application_name IS NOT NULL THEN lk.application_name
                 ELSE '🟢 Не занято'
@@ -420,33 +399,10 @@ class MainWindow(QMainWindow):
             self.found_count_label.setText("⚠️ Ошибка загрузки данных")
 
     def update_lock_status(self):
-        """Слот для обновления только статуса занятости (вызывается таймером)"""
-        # ✅ ИСПРАВЛЕНО: Используем QTime вместо QDate
-        
-        # 1. Проверяем глобальные advisory блокировки в базе
-        global_locks_query = QSqlQuery(self.db)
-        global_locks_query.prepare("""
-            SELECT pl.objid, lk.usename, lk.pid 
-            FROM pg_locks pl
-            LEFT JOIN pg_stat_activity lk ON lk.pid = pl.pid
-            WHERE pl.locktype = 'advisory' AND pl.granted = true
-        """)
-        
-        if global_locks_query.exec():
-            active_locks = []
-            while global_locks_query.next():
-                objid = global_locks_query.value(0)
-                username = global_locks_query.value(1)
-                active_locks.append(f"ID={objid} (User: {username})")
-            
-            
-
-        # 2. Обновляем таблицу (стандартная процедура)
-        current_count = self.table_model_krd.rowCount()
-        # print(f"📊 [DIAGNOSTIC] Текущее записей в таблице: {current_count}") # Можно раскомментировать для отладки
-        
+        """Обновляет таблицу для отображения актуального статуса блокировок"""
+        # Примечание: Полный перезапрос может быть тяжелым для больших БД. 
+        # 3 секунды (настройка в __init__) являются компромиссом между актуальностью и нагрузкой.
         self.load_krd_data()
-
     
     def on_selection_changed(self, selected, deselected):
         self.delete_krd_action.setEnabled(self.krd_table_view.selectionModel().hasSelection())
@@ -462,10 +418,8 @@ class MainWindow(QMainWindow):
         menu.addAction("Открыть", lambda: self.on_krd_double_clicked(index))
         menu.addSeparator()
         
-        # --- НОВОЕ: Меню смены статуса ---
         status_menu = menu.addMenu("🔄 Сменить статус")
         self._fill_status_menu(status_menu, krd_id)
-        # ---------------------------------
         
         menu.addSeparator()
         menu.addAction("Удалить КРД", self.delete_selected_krd)
@@ -479,7 +433,6 @@ class MainWindow(QMainWindow):
         while query.next():
             status_id = query.value(0)
             status_name = query.value(1)
-            
             action = QAction(status_name, self)
             action.triggered.connect(lambda checked=False, sid=status_id, name=status_name: self.update_krd_status(krd_id, sid, name))
             menu.addAction(action)
@@ -517,36 +470,19 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Ошибка", f"Ошибка при открытии редактора справочников:\n{str(e)}")
     
     def on_generate_all_reports(self):
+        """Открывает диалог конфигурации. Диалог сам выполнит экспорт и закроется."""
+        print("🔵 [DEBUG] on_generate_all_reports: Открываю диалог конфигурации...")
         try:
-            dialog = ReportConfigDialog(self.db, self)
-            dialog.report_configured.connect(lambda config: self._on_report_configured(config))
+            # ✅ Передаем audit_logger, чтобы диалог мог сам записать действие в журнал
+            dialog = ReportConfigDialog(self.db, self, audit_logger=self.audit_logger)
+            
+            # Просто запускаем диалог. Он сам разберется с QFileDialog, экспортом и закрытием.
             dialog.exec()
+            
         except Exception as e:
+            print(f"❌ [DEBUG] Ошибка в on_generate_all_reports: {e}")
             traceback.print_exc()
             QMessageBox.critical(self, "Ошибка", f"Ошибка при подготовке отчета:\n{str(e)}")
-    
-    def _on_report_configured(self, config):
-        krd_ids = config.get("krd_ids", [])
-        default_filename = f"КРД_ВСЕ_отчет_{QDate.currentDate().toString('yyyy-MM-dd')}.xlsx"
-        file_path, _ = QFileDialog.getSaveFileName(self, "Сохранить отчеты по всем КРД", default_filename, "Excel файлы (*.xlsx);;Все файлы (*)")
-        if not file_path: return
-        
-        try:
-            progress_msg = QProgressDialog("Генерация отчета...\nПожалуйста, подождите.", "Отмена", 0, 0, self)
-            progress_msg.setWindowTitle("Генерация отчета")
-            progress_msg.setWindowModality(Qt.WindowModality.WindowModal)
-            progress_msg.show()
-            QApplication.processEvents()
-            
-            exporter = KrdExcelExporter(self.db, report_config=config)
-            exporter.export_multiple_krd_to_excel(file_path, krd_ids)
-            progress_msg.close()
-            
-            QMessageBox.information(self, "Успешно", f"✅ Отчеты сохранены:\n📊 КРД: {len(krd_ids)}\n📁 {file_path}")
-            self.audit_logger.log_action('REPORT_EXPORT', 'krd', description=f'Экспорт {len(krd_ids)} КРД')
-        except Exception as e:
-            traceback.print_exc()
-            QMessageBox.critical(self, "Ошибка", f"❌ Ошибка генерации:\n{str(e)}")
     
     def on_manage_templates(self):
         try:
@@ -622,17 +558,15 @@ class MainWindow(QMainWindow):
         self.audit_logger.log_krd_view(int(krd_id))
     
     def show_about_dialog(self):
-        QMessageBox.about(self, "О программе", f""""
-АРМ сотрудника отдела дознания военной комендатуры\n
-Версия 1.0 | Магистерская диссертация\n
-
-Автор-разработчик: Карамашев Александр Владимирович\n
-Заказчик / предметный эксперт:  Кувандыков Ильдар Султанович \n
-
-Проект разработан на основании требований и прототипов интерфейса,\n
-предоставленных заказчиком, с последующей архитектурной проработкой\n
-и программной реализацией автором работы.\n
-""")
+        QMessageBox.about(self, "О программе", 
+            "АРМ сотрудника отдела дознания военной комендатуры\n\n"
+            "Версия 1.0 | Магистерская диссертация\n\n"
+            "Автор-разработчик: Карамашев Александр Владимирович\n"
+            "Заказчик / предметный эксперт: Кувандыков Ильдар Султанович\n\n"
+            "Проект разработан на основании требований и прототипов интерфейса,\n"
+            "предоставленных заказчиком, с последующей архитектурной проработкой\n"
+            "и программной реализацией автором работы."
+        )
     
     def closeEvent(self, event):
         self.audit_logger.log_user_logout()
@@ -654,11 +588,9 @@ class MainWindow(QMainWindow):
         self.activateWindow()
         self.setFocus()
         self.load_krd_data()
+        
     def cleanup_stale_locks_on_startup(self):
-        """
-        Автоматическая очистка зависших блокировок при запуске
-        Проверяет pg_locks и снимает блокировки, у которых нет активной сессии
-        """
+        """Автоматическая очистка зависших блокировок при запуске"""
         try:
             print(f"\n{'='*70}")
             print(f"🧹 [CLEANUP] Проверка зависших блокировок при запуске")
@@ -666,23 +598,12 @@ class MainWindow(QMainWindow):
             
             query = QSqlQuery(self.db)
             query.prepare("""
-                SELECT 
-                    pl.objid as krd_id,
-                    lk.usename,
-                    lk.state,
-                    lk.application_name,
-                    lk.query_start,
-                    age(now(), lk.query_start) as duration
+                SELECT pl.objid as krd_id, lk.usename, lk.state, lk.application_name,
+                       lk.query_start, age(now(), lk.query_start) as duration
                 FROM pg_locks pl
                 LEFT JOIN pg_stat_activity lk ON lk.pid = pl.pid
-                WHERE pl.locktype = 'advisory'
-                AND pl.granted = true
-                AND (
-                    lk.state IS NULL 
-                    OR lk.state != 'active' 
-                    OR lk.state = 'idle'
-                    OR age(now(), lk.query_start) > interval '5 minutes'
-                )
+                WHERE pl.locktype = 'advisory' AND pl.granted = true
+                AND (lk.state IS NULL OR lk.state != 'active' OR lk.state = 'idle' OR age(now(), lk.query_start) > interval '5 minutes')
             """)
             
             if query.exec():
@@ -699,10 +620,8 @@ class MainWindow(QMainWindow):
                 if stale_locks:
                     print(f"⚠️ [CLEANUP] Найдено {len(stale_locks)} потенциально зависших блокировок:")
                     for lock in stale_locks:
-                        print(f"   - КРД-{lock['krd_id']} | User: {lock['username']} | "
-                            f"State: {lock['state']} | Duration: {lock['duration']}")
+                        print(f"   - КРД-{lock['krd_id']} | User: {lock['username']} | State: {lock['state']} | Duration: {lock['duration']}")
                     
-                    # Автоматически снимаем ВСЕ блокировки текущей сессии
                     print(f"🔓 [CLEANUP] Снимаю все блокировки текущей сессии...")
                     cleanup = QSqlQuery(self.db)
                     if cleanup.exec("SELECT pg_advisory_unlock_all()"):
@@ -715,27 +634,7 @@ class MainWindow(QMainWindow):
                 print(f"⚠️ [CLEANUP] Ошибка проверки блокировок: {query.lastError().text()}")
                 
             print(f"{'='*70}\n")
-            
         except Exception as e:
             print(f"❌ [CLEANUP] Ошибка в cleanup_stale_locks_on_startup: {e}")
-            import traceback
             traceback.print_exc()
             print(f"{'='*70}\n")
-def main():
-    app = QApplication(sys.argv)
-    db = QSqlDatabase.addDatabase("QPSQL")
-    db.setHostName("localhost")
-    db.setDatabaseName("krd_system")
-    db.setUserName("arm_user")
-    db.setPassword("ArmUserSecurePass2026!")
-    if not db.open():
-        QMessageBox.critical(None, "Ошибка", f"Не удалось подключиться к БД:\n{db.lastError().text()}")
-        sys.exit(1)
-    
-    user_info = {'id': 1, 'username': 'admin', 'full_name': 'Администратор', 'role': 'admin'}
-    main_window = MainWindow(user_info, db)
-    main_window.show()
-    sys.exit(app.exec())
-
-if __name__ == "__main__":
-    main()

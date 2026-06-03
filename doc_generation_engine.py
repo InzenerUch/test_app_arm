@@ -66,24 +66,47 @@ class DocGenerationEngine:
         self._log(f"НАЧАЛО СБОРКИ КОНТЕКСТА (template_id={template_id}, krd_id={self.krd_id})", "INFO")
         self._log("=" * 80, "INFO")
         
+        # ✅ ДИАГНОСТИКА: Показать selections
+        self._log(f"Входящие selections: {selections}", "DATA")
+        
         context = {}
         query = QSqlQuery(self.db)
-        # ✅ ИСПОЛЬЗУЕМ ИМЕНОВАННЫЙ ПАРАМЕТР
         query.prepare("SELECT field_name, db_column, table_name, db_columns, is_composite FROM krd.field_mappings WHERE template_id = :tid")
         query.bindValue(":tid", template_id)
+        
         if not query.exec():
             self._log(f"Ошибка загрузки маппингов: {query.lastError().text()}", "ERROR")
             return context
-            
-        mappings_count = 0
+        
+        # ✅ ДИАГНОСТИКА: Считать количество загруженных сопоставлений
+        mapping_list = []
         while query.next():
-            field_name = query.value(0).strip('{} ')
-            db_column = query.value(1)
-            table_name = query.value(2)
-            db_columns_json = query.value(3)
-            is_composite = query.value(4) or False
+            mapping_list.append({
+                'field_name': query.value(0),
+                'db_column': query.value(1),
+                'table_name': query.value(2),
+                'db_columns': query.value(3),
+                'is_composite': query.value(4) or False
+            })
+        
+        self._log(f"Загружено сопоставлений из БД: {len(mapping_list)}", "SUCCESS")
+        
+        mappings_count = 0
+        for mapping in mapping_list:
+            field_name = mapping['field_name'].strip('{} ')
+            raw_db_column = mapping['db_column']
+            table_name = mapping['table_name']
+            db_columns_json = mapping['db_columns']
+            is_composite = mapping['is_composite']
             
             try:
+                # ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Извлекаем только имя колонки из формата "table|column"
+                if "|" in str(raw_db_column):
+                    _, db_column = str(raw_db_column).split("|", 1)
+                    self._log(f"Разбор '{raw_db_column}' → db_column='{db_column}', table='{table_name}'", "DEBUG")
+                else:
+                    db_column = str(raw_db_column)
+                
                 if is_composite and db_columns_json:
                     value = self._get_composite_value(table_name, db_columns_json, selections)
                     source = f"COMPOSITE({table_name})"
@@ -98,19 +121,21 @@ class DocGenerationEngine:
                     else:
                         value = self._get_value_from_social_data(db_column)
                         source = "social_data"
-                        
+                
                 if value is not None and value != "":
                     context[field_name] = value
-                    self._log(f"{{{field_name}}} = '{value}' (источник: {source})", "DATA")
+                    self._log(f"✅ {{{field_name}}} = '{value}' (источник: {source})", "SUCCESS")
                     mappings_count += 1
                 else:
                     context[field_name] = ""
-                    self._log(f"{{{field_name}}} = ПУСТО (источник: {source})", "WARN")
+                    self._log(f"⚠️ {{{field_name}}} = ПУСТО (источник: {source})", "WARN")
             except Exception as e:
-                self._log(f"Ошибка получения {{{field_name}}}: {e}", "ERROR")
-                
+                self._log(f"❌ Ошибка получения {{{field_name}}}: {e}", "ERROR")
+                import traceback
+                traceback.print_exc()
+        
         self._log("=" * 80, "INFO")
-        self._log(f"КОНТЕКСТ СОБРАН: {mappings_count} переменных", "SUCCESS")
+        self._log(f"КОНТЕКСТ СОБРАН: {mappings_count} переменных заполнено из {len(mapping_list)}", "SUCCESS")
         self._log("=" * 80, "INFO")
         return context
 
@@ -144,39 +169,69 @@ class DocGenerationEngine:
         return None
 
     def _get_value_from_social_data(self, col):
-        if not re.match(r'^\w+$', col): return ""
+        if not re.match(r'^\w+$', col): 
+            self._log(f"  ⚠️ Некорректное имя колонки: '{col}'", "WARN")
+            return ""
+        
         q = QSqlQuery(self.db)
-        # ✅ ИСПОЛЬЗУЕМ :krd_id ВМЕСТО ?
         if col in self.lookup_tables:
             ref_table, ref_col = self.lookup_tables[col]
             sql = f"""SELECT t.{ref_col} FROM krd.social_data s
-                      LEFT JOIN {ref_table} t ON s.{col} = t.id
-                      WHERE s.krd_id = :krd_id ORDER BY s.id DESC LIMIT 1"""
+    LEFT JOIN {ref_table} t ON s.{col} = t.id
+    WHERE s.krd_id = :krd_id ORDER BY s.id DESC LIMIT 1"""
             q.prepare(sql)
             q.bindValue(":krd_id", self.krd_id)
+            self._log(f"  🔍 SQL (справочник): {sql[:100]}... для krd_id={self.krd_id}", "DEBUG")
         else:
-            q.prepare(f"SELECT {col} FROM krd.social_data WHERE krd_id = :krd_id ORDER BY id DESC LIMIT 1")
+            sql = f"SELECT {col} FROM krd.social_data WHERE krd_id = :krd_id ORDER BY id DESC LIMIT 1"
+            q.prepare(sql)
             q.bindValue(":krd_id", self.krd_id)
-
-        if q.exec() and q.next(): return self._format_value(q.value(0))
+            self._log(f"  🔍 SQL (простое): {sql[:100]}... для krd_id={self.krd_id}", "DEBUG")
+        
+        if q.exec():
+            if q.next():
+                val = q.value(0)
+                self._log(f"  ✅ Найдено значение: '{val}'", "SUCCESS")
+                return self._format_value(val)
+            else:
+                self._log(f"  ⚠️ Запрос выполнен, но строк не найдено для krd_id={self.krd_id}", "WARN")
+        else:
+            self._log(f"  ❌ Ошибка SQL: {q.lastError().text()}", "ERROR")
+            self._log(f"  📝 Запрос: {q.lastQuery()}", "ERROR")
+        
         return ""
 
     def _get_value_from_record(self, table, col, rid):
-        if not re.match(r'^\w+$', table) or not re.match(r'^\w+$', col): return ""
+        if not re.match(r'^\w+$', table) or not re.match(r'^\w+$', col): 
+            self._log(f"  ⚠️ Некорректные table='{table}' или col='{col}'", "WARN")
+            return ""
+        
         q = QSqlQuery(self.db)
-        # ✅ ИСПОЛЬЗУЕМ :rid ВМЕСТО ?
         if col in self.lookup_tables:
             ref_table, ref_col = self.lookup_tables[col]
             sql = f"""SELECT t.{ref_col} FROM krd.{table} s
-                      LEFT JOIN {ref_table} t ON s.{col} = t.id
-                      WHERE s.id = :rid"""
+    LEFT JOIN {ref_table} t ON s.{col} = t.id
+    WHERE s.id = :rid"""
             q.prepare(sql)
             q.bindValue(":rid", rid)
         else:
-            q.prepare(f"SELECT {col} FROM krd.{table} WHERE id = :rid")
+            sql = f"SELECT {col} FROM krd.{table} WHERE id = :rid"
+            q.prepare(sql)
             q.bindValue(":rid", rid)
-            
-        if q.exec() and q.next(): return self._format_value(q.value(0))
+        
+        self._log(f"  🔍 SQL (record): {sql[:100]}... для id={rid}", "DEBUG")
+        
+        if q.exec():
+            if q.next():
+                val = q.value(0)
+                self._log(f"  ✅ Найдено значение: '{val}'", "SUCCESS")
+                return self._format_value(val)
+            else:
+                self._log(f"  ⚠️ Запись с id={rid} не найдена или колонка '{col}' пуста", "WARN")
+        else:
+            self._log(f"  ❌ Ошибка SQL: {q.lastError().text()}", "ERROR")
+            self._log(f"  📝 Запрос: {q.lastQuery()}", "ERROR")
+        
         return ""
 
     def _format_value(self, val):

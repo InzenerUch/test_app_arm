@@ -14,12 +14,31 @@ from social_data_input_widget import SocialDataInputWidget
 class AddKrdWindow(QDialog):
     """Окно быстрого создания КРД (только соц. данные)"""
     def __init__(self, db_connection, audit_logger=None):
-        super().__init__()
+        # ✅ ИСПРАВЛЕНО: Явно указываем родителя как None для независимого окна
+        super().__init__(None)
+        
         self.db = db_connection
         self.audit_logger = audit_logger
+
+        # === 1. ИСПРАВЛЕНО: Принудительная установка типа окна ===
+        # QDialog по умолчанию имеет флаг Qt.Dialog, который часто блокирует кнопку максимизации.
+        # Мы явно задаем тип Qt.Window (как в работающем KrdDetailsWindow),
+        # чтобы система разрешила изменение размера и развертывание.
+        self.setWindowFlags(
+            Qt.WindowType.Window |
+            Qt.WindowType.WindowMinimizeButtonHint |
+            Qt.WindowType.WindowMaximizeButtonHint |
+            Qt.WindowType.WindowSystemMenuHint |
+            Qt.WindowType.WindowCloseButtonHint
+        )
+        
+        # NonModal позволяет окну вести себя независимо
+        self.setWindowModality(Qt.WindowModality.NonModal)
+        
         self.setWindowTitle("➕ Добавление новой карточки розыска (КРД)")
-        self.setModal(True)
         self.resize(1000, 850)
+
+        # Инициализация интерфейса
         self.init_ui()
 
     def init_ui(self):
@@ -58,7 +77,6 @@ class AddKrdWindow(QDialog):
         self.setLayout(layout)
 
     def save_krd(self):
-        # ✅ ИСПРАВЛЕНО: Вызов нового метода валидации
         valid, msg = self.social_widget.validate_all_fields()
         if not valid:
             return QMessageBox.warning(self, "Ошибка валидации", msg)
@@ -73,14 +91,12 @@ class AddKrdWindow(QDialog):
             if not self.db.transaction():
                 raise Exception("Не удалось начать транзакцию")
                 
-            # 1. Создаём КРД
             q = QSqlQuery(self.db)
             q.prepare("INSERT INTO krd.krd DEFAULT VALUES RETURNING id")
             if not q.exec() or not q.next():
                 raise Exception("Ошибка создания КРД")
             krd_id = q.value(0)
             
-            # 2. Сохраняем соц. данные
             data = self.social_widget.get_data()
             data['krd_id'] = krd_id
             
