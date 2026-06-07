@@ -66,6 +66,7 @@ class DocumentGeneratorTab(QWidget):
         self.init_ui()
         self.load_document_templates()
         self.load_related_records()
+        self.load_signatories()
         
     def init_ui(self):
         layout = QVBoxLayout()
@@ -127,6 +128,21 @@ class DocumentGeneratorTab(QWidget):
         metadata_layout.addWidget(QLabel("Адресат *:"), 0, 0)
         metadata_layout.addWidget(self.recipient_widget, 0, 1)
         layout.addWidget(metadata_group)
+        
+        # Найдите место после добавления incoming_order_combo и добавьте:
+        records_layout.addWidget(QLabel("✍️ Подписант документа *:"), 3, 0)
+        signatory_layout = QHBoxLayout()
+        self.signatory_combo = QComboBox()
+        self.signatory_combo.setMinimumWidth(250)
+        self.signatory_combo.addItem("— Не выбрано —", None)
+        self.signatory_combo.currentIndexChanged.connect(self.on_signatory_selected)
+        signatory_layout.addWidget(self.signatory_combo, 1)
+
+        manage_signatory_btn = QPushButton("👥 Управление")
+        manage_signatory_btn.setProperty("role", "edit")
+        manage_signatory_btn.clicked.connect(self.open_signatory_manager)
+        signatory_layout.addWidget(manage_signatory_btn)
+        records_layout.addLayout(signatory_layout, 3, 1)
         
         btn = QPushButton("📄 Сформировать и сохранить в базу")
         btn.setMinimumHeight(60)
@@ -263,12 +279,15 @@ class DocumentGeneratorTab(QWidget):
             if table in used_tables and getattr(self, attr) is None:
                 return QMessageBox.warning(self, "Требуется выбор", f"Шаблон использует данные из таблицы «{table}», но список не выбран.")
                 
+        # В методе generate_and_save_document файла document_generator_tab.py
+
         selections = {
             "addresses": self.selected_address_id if 'addresses' in used_tables else None,
             "service_places": self.selected_service_place_id if 'service_places' in used_tables else None,
             "soch_episodes": self.selected_soch_episode_id if 'soch_episodes' in used_tables else None,
             "incoming_orders": self.selected_incoming_order_id if 'incoming_orders' in used_tables else None,
-            "recipients": rec_id if 'recipients' in used_tables else None
+            "recipients": rec_id if 'recipients' in used_tables else None,
+            "signatories": self.selected_signatory_id if 'signatories' in used_tables else None  # <-- ДОБАВЬТЕ ЭТУ СТРОКУ
         }
         
         try:
@@ -286,7 +305,8 @@ class DocumentGeneratorTab(QWidget):
             num = self.engine.generate_issue_number()
             with open(output_path, 'rb') as f: doc_bytes = f.read()
                 
-            request_id = self.engine.save_to_database(rt_id, rec_id, num, doc_bytes)
+            # Найдите строку:
+            request_id = self.engine.save_to_database(rt_id, rec_id, num, doc_bytes, self.selected_signatory_id)
             os.unlink(output_path)
             
             QMessageBox.information(self, "Успех", f"Документ успешно сгенерирован!\n📄 Шаблон: {tpl_name}\n🔢 Номер: {num}\n🔄 Заменено переменных: {replacements}")
@@ -298,3 +318,32 @@ class DocumentGeneratorTab(QWidget):
     def load_db_columns(self):
         # ✅ ТЕПЕРЬ ВОЗВРАЩАЕМ ЕДИНУЮ КАРТУ ВМЕСТО ХАРДКОДА
         return self.db_columns
+    def load_signatories(self):
+        """Загрузка списка подписантов в ComboBox"""
+        current_id = self.signatory_combo.currentData()
+        self.signatory_combo.clear()
+        self.signatory_combo.addItem("— Не выбрано —", None)
+        
+        q = QSqlQuery(self.db)
+        q.prepare("""
+            SELECT id, full_name || ' (' || COALESCE(rank, '') || ', ' || COALESCE(garrison, '') || ')' 
+            FROM krd.signatories 
+            WHERE is_deleted = FALSE 
+            ORDER BY full_name
+        """)
+        if q.exec():
+            while q.next():
+                self.signatory_combo.addItem(q.value(1), q.value(0))
+                
+        if current_id is not None:
+            idx = self.signatory_combo.findData(current_id)
+            if idx >= 0: self.signatory_combo.setCurrentIndex(idx)
+
+    def on_signatory_selected(self, index):
+        self.selected_signatory_id = self.signatory_combo.currentData()
+
+    def open_signatory_manager(self):
+        from signatory_manager_dialog import SignatoryManagerDialog
+        dlg = SignatoryManagerDialog(self.db, self)
+        if dlg.exec() == 1:
+            self.load_signatories() # Перезагружаем список после изменений

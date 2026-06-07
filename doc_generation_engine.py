@@ -28,7 +28,7 @@ class DocGenerationEngine:
         self.audit_logger = audit_logger
         
         # Таблицы, где важно выбрать конкретную запись по ID
-        self.tables_with_selection = {"addresses", "service_places", "soch_episodes", "recipients", "incoming_orders"}
+        self.tables_with_selection = {"addresses", "service_places", "soch_episodes", "recipients", "incoming_orders", "signatories"}
         
         self.db_columns_map = {}
         self.placeholder_pattern = re.compile(r'\{\{([^{}]+)\}\}')
@@ -78,7 +78,6 @@ class DocGenerationEngine:
             self._log(f"Ошибка загрузки маппингов: {query.lastError().text()}", "ERROR")
             return context
         
-        # ✅ ДИАГНОСТИКА: Считать количество загруженных сопоставлений
         mapping_list = []
         while query.next():
             mapping_list.append({
@@ -100,7 +99,7 @@ class DocGenerationEngine:
             is_composite = mapping['is_composite']
             
             try:
-                # ✅ КРИТИЧЕСКОЕ ИСПРАВЛЕНИЕ: Извлекаем только имя колонки из формата "table|column"
+                # ✅ Извлекаем только имя колонки из формата "table|column"
                 if "|" in str(raw_db_column):
                     _, db_column = str(raw_db_column).split("|", 1)
                     self._log(f"Разбор '{raw_db_column}' → db_column='{db_column}', table='{table_name}'", "DEBUG")
@@ -112,23 +111,33 @@ class DocGenerationEngine:
                     source = f"COMPOSITE({table_name})"
                 else:
                     selected_id = selections.get(table_name)
+                    
+                    # ✅ ЯВНАЯ ПОДДЕРЖКА ПОДПИСАНТА И ДРУГИХ ВЫБИРАЕМЫХ ТАБЛИЦ
                     if selected_id and table_name in self.tables_with_selection:
                         value = self._get_value_from_record(table_name, db_column, selected_id)
                         source = f"{table_name}.id={selected_id}"
+                        
+                    elif table_name == 'signatories' and selected_id is None:
+                        # Специальная обработка: если шаблон требует подписанта, но он не выбран
+                        value = ""
+                        source = "signatories (не выбрано)"
+                        
                     elif table_name in self.tables_with_selection and selected_id is None:
                         value = ""
                         source = f"{table_name} (не выбрано)"
                     else:
+                        # Фоллбэк на основные социально-демографические данные
                         value = self._get_value_from_social_data(db_column)
                         source = "social_data"
                 
-                if value is not None and value != "":
+                if value is not None and str(value).strip() != "":
                     context[field_name] = value
                     self._log(f"✅ {{{field_name}}} = '{value}' (источник: {source})", "SUCCESS")
                     mappings_count += 1
                 else:
                     context[field_name] = ""
                     self._log(f"⚠️ {{{field_name}}} = ПУСТО (источник: {source})", "WARN")
+                    
             except Exception as e:
                 self._log(f"❌ Ошибка получения {{{field_name}}}: {e}", "ERROR")
                 import traceback
@@ -138,7 +147,6 @@ class DocGenerationEngine:
         self._log(f"КОНТЕКСТ СОБРАН: {mappings_count} переменных заполнено из {len(mapping_list)}", "SUCCESS")
         self._log("=" * 80, "INFO")
         return context
-
     def _get_composite_value(self, table_hint, db_columns_json, selections):
         try:
             db_columns = json.loads(db_columns_json) if isinstance(db_columns_json, str) else db_columns_json
@@ -401,12 +409,12 @@ class DocGenerationEngine:
                 run.font.name = 'Times New Roman'
         return replacements
 
-    def save_to_database(self, request_type_id, recipient_id, issue_number, document_bytes):
+    def save_to_database(self, request_type_id, recipient_id, issue_number, document_bytes, signatory_id=None):
         q = QSqlQuery(self.db)
         q.prepare("""
             INSERT INTO krd.outgoing_requests
-            (krd_id, request_type_id, recipient_id, issue_date, issue_number, document_data)
-            VALUES (:krd_id, :request_type_id, :recipient_id, CURRENT_DATE, :issue_number, :document_data)
+            (krd_id, request_type_id, recipient_id, issue_date, issue_number, document_data, signatory_id)
+            VALUES (:krd_id, :request_type_id, :recipient_id, CURRENT_DATE, :issue_number, :document_data, :signatory_id)
             RETURNING id
         """)
         q.bindValue(":krd_id", self.krd_id)
@@ -414,14 +422,15 @@ class DocGenerationEngine:
         q.bindValue(":recipient_id", recipient_id)
         q.bindValue(":issue_number", issue_number)
         q.bindValue(":document_data", QByteArray(document_bytes))
+        q.bindValue(":signatory_id", signatory_id) # <-- Сохраняем ID подписанта
         
-        if not q.exec(): raise Exception(f"Ошибка БД: {q.lastError().text()}")
+        if not q.exec(): 
+            raise Exception(f"Ошибка БД: {q.lastError().text()}")
             
         req_id = q.value(0) if q.next() else None
         if self.audit_logger:
-            self.audit_logger.log_action('REQUEST_CREATE', 'outgoing_requests', req_id, self.krd_id, f'Создан запрос №{issue_number}')
+            self.audit_logger.log_action('REQUEST_CREATE', 'outgoing_requests', req_id, self.krd_id, f'Создан запрос №{issue_number}, подписант ID: {signatory_id}')
         return req_id
-
     def generate_issue_number(self):
         q = QSqlQuery(self.db)
         q.prepare("SELECT COUNT(*) FROM krd.outgoing_requests WHERE krd_id = :krd_id AND issue_date = CURRENT_DATE")

@@ -8,6 +8,7 @@
 
 # 📋 Русские названия таблиц
 TABLE_NAMES_RU = {
+    'signatories': 'Подписанты документов',
     'social_data': 'Социально-демографические данные',
     'addresses': 'Адреса проживания',
     'service_places': 'Места службы',
@@ -172,8 +173,13 @@ COLUMN_DESCRIPTIONS = {
     "krd_last_service_place_id": "🎖️ ID последнего места службы",
     "krd_is_locked": "🔒 Заблокировано для редактирования",
     "krd_locked_by": "👤 ID пользователя, заблокировавшего КРД",
-    "krd_locked_at": "📅 Дата и время блокировки"
-}
+    "krd_locked_at": "📅 Дата и время блокировки",
+    # === Справочник подписантов ===
+    "signatories_full_name": "👤 ФИО подписанта (например: И. Кувандыков)",
+    "signatories_position": "💼 Должность подписанта",
+    "signatories_rank": "⭐ Звание подписанта",
+    "signatories_garrison": "🏢 Гарнизон/Город",
+    }
 
 # 🗂️ Группировка по таблицам (для Mapping Editor и Doc Generator)
 DB_COLUMNS_MAP = {
@@ -224,7 +230,10 @@ DB_COLUMNS_MAP = {
     ],
     "krd": [
         "status_id", "last_service_place_id", "is_locked", "locked_by", "locked_at"
-    ]
+    ],
+    "signatories": [
+    "full_name", "position", "rank", "garrison"
+    ],
 }
 
 # 🔍 Карта справочников: поле ID -> (Таблица справочника, Колонка с названием)
