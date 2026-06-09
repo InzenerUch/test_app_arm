@@ -7,8 +7,9 @@ from PyQt6.QtCore import QDate
 from PyQt6.QtSql import QSqlQuery
 from PyQt6.QtGui import QFont
 from autocomplete_helper import AutocompleteHelper
+from ui_helpers import BaseDialog
 
-class AddressDialog(QDialog):
+class AddressDialog(BaseDialog):
     """Диалог для добавления/редактирования адреса"""
     
     def __init__(self, db_connection, krd_id, address_data=None, parent=None, read_only=False):

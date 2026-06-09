@@ -4,8 +4,9 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QColor
 from PyQt6.QtCore import Qt
+from ui_helpers import BaseDialog
 
-class ThemeSettingsDialog(QDialog):
+class ThemeSettingsDialog(BaseDialog):
     def __init__(self, theme_manager, parent=None):
         super().__init__(parent)
         self.tm = theme_manager

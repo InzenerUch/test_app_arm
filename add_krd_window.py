@@ -2,6 +2,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox,
     QLabel
 )
+from ui_helpers import BaseDialog 
 from PyQt6.QtCore import Qt, QDate, QByteArray
 from PyQt6.QtGui import QFont
 from PyQt6.QtSql import QSqlQuery
@@ -11,7 +12,7 @@ import traceback
 from social_data_input_widget import SocialDataInputWidget
 
 
-class AddKrdWindow(QDialog):
+class AddKrdWindow(BaseDialog):
     """Окно быстрого создания КРД (только соц. данные)"""
     def __init__(self, db_connection, audit_logger=None):
         # ✅ ИСПРАВЛЕНО: Явно указываем родителя как None для независимого окна
@@ -20,20 +21,6 @@ class AddKrdWindow(QDialog):
         self.db = db_connection
         self.audit_logger = audit_logger
 
-        # === 1. ИСПРАВЛЕНО: Принудительная установка типа окна ===
-        # QDialog по умолчанию имеет флаг Qt.Dialog, который часто блокирует кнопку максимизации.
-        # Мы явно задаем тип Qt.Window (как в работающем KrdDetailsWindow),
-        # чтобы система разрешила изменение размера и развертывание.
-        self.setWindowFlags(
-            Qt.WindowType.Window |
-            Qt.WindowType.WindowMinimizeButtonHint |
-            Qt.WindowType.WindowMaximizeButtonHint |
-            Qt.WindowType.WindowSystemMenuHint |
-            Qt.WindowType.WindowCloseButtonHint
-        )
-        
-        # NonModal позволяет окну вести себя независимо
-        self.setWindowModality(Qt.WindowModality.NonModal)
         
         self.setWindowTitle("➕ Добавление новой карточки розыска (КРД)")
         self.resize(1000, 850)

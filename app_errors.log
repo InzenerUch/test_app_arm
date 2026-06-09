@@ -1,0 +1,11 @@
+2026-06-09 12:55:04 | CRITICAL | logger.py:50 | НЕОБРАБОТАННОЕ ИСКЛЮЧЕНИЕ (CRASH)
+Traceback (most recent call last):
+  File "/home/iug/Documents/Учеба/2 курс магистратуры/Диплом магистратура/Приложение АРМ Сотрудника дознования/test_app_arm/main_window.py", line 531, in open_krd_add_window
+    if AddKrdWindow(self.db).exec() == QDialog.DialogCode.Accepted:
+       ^^^^^^^^^^^^^^^^^^^^^
+  File "/home/iug/Documents/Учеба/2 курс магистратуры/Диплом магистратура/Приложение АРМ Сотрудника дознования/test_app_arm/add_krd_window.py", line 19, in __init__
+    super().__init__(None)
+  File "/home/iug/Documents/Учеба/2 курс магистратуры/Диплом магистратура/Приложение АРМ Сотрудника дознования/test_app_arm/ui_helpers.py", line 44, in __init__
+    Qt.WindowType.WindowMinimizeHint |      # Кнопка свернуть
+    ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+AttributeError: type object 'WindowType' has no attribute 'WindowMinimizeHint'. Did you mean: 'WindowMinimizeButtonHint'?

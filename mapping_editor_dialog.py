@@ -14,6 +14,7 @@ from PyQt6.QtWidgets import (
     QTableWidget, QHeaderView, QAbstractItemView, QMessageBox,
     QComboBox, QDialogButtonBox, QGroupBox, QTableWidgetItem, QCompleter
 )
+from ui_helpers import BaseDialog
 from PyQt6.QtCore import Qt, QByteArray
 from PyQt6.QtSql import QSqlQuery
 from PyQt6.QtGui import QFont
@@ -31,7 +32,7 @@ except ImportError:
     DB_COLUMNS_MAP = {}
     def get_field_description(t, c): return c  # Фоллбэк если файл не найден
 
-class MappingEditorDialog(QDialog):
+class MappingEditorDialog(BaseDialog):
     """Отдельное окно для редактирования сопоставлений"""
     def __init__(self, parent=None, krd_id=None, db_connection=None, template_id=None, audit_logger=None):
         super().__init__(parent)

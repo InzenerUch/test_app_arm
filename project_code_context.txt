@@ -8,6 +8,7 @@ from PyQt6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QPushButton, QMessageBox,
     QLabel
 )
+from ui_helpers import BaseDialog 
 from PyQt6.QtCore import Qt, QDate, QByteArray
 from PyQt6.QtGui import QFont
 from PyQt6.QtSql import QSqlQuery
@@ -17,7 +18,7 @@ import traceback
 from social_data_input_widget import SocialDataInputWidget
 
 
-class AddKrdWindow(QDialog):
+class AddKrdWindow(BaseDialog):
     """Окно быстрого создания КРД (только соц. данные)"""
     def __init__(self, db_connection, audit_logger=None):
         # ✅ ИСПРАВЛЕНО: Явно указываем родителя как None для независимого окна
@@ -26,20 +27,6 @@ class AddKrdWindow(QDialog):
         self.db = db_connection
         self.audit_logger = audit_logger
 
-        # === 1. ИСПРАВЛЕНО: Принудительная установка типа окна ===
-        # QDialog по умолчанию имеет флаг Qt.Dialog, который часто блокирует кнопку максимизации.
-        # Мы явно задаем тип Qt.Window (как в работающем KrdDetailsWindow),
-        # чтобы система разрешила изменение размера и развертывание.
-        self.setWindowFlags(
-            Qt.WindowType.Window |
-            Qt.WindowType.WindowMinimizeButtonHint |
-            Qt.WindowType.WindowMaximizeButtonHint |
-            Qt.WindowType.WindowSystemMenuHint |
-            Qt.WindowType.WindowCloseButtonHint
-        )
-        
-        # NonModal позволяет окну вести себя независимо
-        self.setWindowModality(Qt.WindowModality.NonModal)
         
         self.setWindowTitle("➕ Добавление новой карточки розыска (КРД)")
         self.resize(1000, 850)
@@ -6838,67 +6825,58 @@ class KrdVersionPreviewWindow(QDialog):
 ========================================
 
 # logger.py
+import sys
 import logging
 import logging.handlers
-import sys
-import os
 from PyQt6.QtCore import qInstallMessageHandler, QtMsgType, QMessageLogContext
 
 # Имя логгера
 LOGGER_NAME = "KRD_Application"
 
 def setup_logger(log_file_path: str = "app_errors.log"):
-    """
-    Настраивает глобальный логгер с записью в файл и консоль.
-    Использует RotatingFileHandler, чтобы файл не превышал 5 МБ (хранит 3 архива).
-    """
+    """Настраивает логгер с записью в файл и консоль"""
     logger = logging.getLogger(LOGGER_NAME)
-    logger.setLevel(logging.DEBUG)  # Перехватываем все уровни
+    logger.setLevel(logging.DEBUG)  # Перехватываем всё
 
-    # Формат сообщения: Дата-Время | Уровень | Файл:Строка | Сообщение
+    # Формат: Дата-Время | Уровень | Файл:Строка | Сообщение
     formatter = logging.Formatter(
-        '%(asctime)s | %(levelname)-8s | %(module)s:%(lineno)d | %(message)s',
+        '%(asctime)s | %(levelname)-8s | %(filename)s:%(lineno)d | %(message)s',
         datefmt='%Y-%m-%d %H:%M:%S'
     )
 
-    # 1. Обработчик для записи в файл (с ротацией)
-    # maxBytes=5MB, backupCount=3 (будет app_errors.log, .1, .2, .3)
+    # 1. Файловый обработчик с ротацией (макс 5 МБ, хранит 3 архивных файла)
     file_handler = logging.handlers.RotatingFileHandler(
         log_file_path, maxBytes=5 * 1024 * 1024, backupCount=3, encoding='utf-8'
     )
     file_handler.setLevel(logging.ERROR)  # В файл пишем только ОШИБКИ и КРИТИЧЕСКИЕ сбои
     file_handler.setFormatter(formatter)
 
-    # 2. Обработчик для вывода в консоль (для разработки)
+    # 2. Консольный обработчик (для разработки)
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(logging.INFO)
     console_handler.setFormatter(formatter)
 
-    # Добавляем обработчики, если их еще нет
     if not logger.handlers:
         logger.addHandler(file_handler)
         logger.addHandler(console_handler)
 
     return logger
 
-
 def global_exception_handler(exc_type, exc_value, exc_traceback):
     """
-    Перехватывает любые необработанные исключения Python, 
-    которые иначе привели бы к "молчаливому" падению или стандартному выводу в консоль.
+    ГЛОБАЛЬНЫЙ ПЕРЕХВАТЧИК: Ловит ЛЮБЫЕ необработанные исключения Python.
+    Вам больше не нужен try...except в каждом методе для перехвата крашей!
     """
     if issubclass(exc_type, KeyboardInterrupt):
         sys.__excepthook__(exc_type, exc_value, exc_traceback)
         return
     
     logger = logging.getLogger(LOGGER_NAME)
-    logger.critical("Необработанное исключение (Crash)", exc_info=(exc_type, exc_value, exc_traceback))
-
+    # exc_info=True автоматически добавит полный стек-трейс (traceback) в лог
+    logger.critical("НЕОБРАБОТАННОЕ ИСКЛЮЧЕНИЕ (CRASH)", exc_info=(exc_type, exc_value, exc_traceback))
 
 def qt_message_handler(mode: QtMsgType, context: QMessageLogContext, message: str):
-    """
-    Перехватывает системные сообщения и ошибки самого фреймворка PyQt6.
-    """
+    """Перехватывает системные предупреждения и ошибки самого фреймворка PyQt6"""
     logger = logging.getLogger(LOGGER_NAME)
     file_info = f"({context.file}:{context.line})" if context.file else ""
     
@@ -6913,21 +6891,19 @@ def qt_message_handler(mode: QtMsgType, context: QMessageLogContext, message: st
     else:
         logger.info(f"Qt Info: {message} {file_info}")
 
-
 def init_global_logging():
-    """Инициализирует все глобальные перехватчики ошибок."""
-    # 1. Настраиваем логгер
+    """Инициализирует все глобальные перехватчики. Вызывать ОДИН РАЗ в main()"""
     logger = setup_logger("app_errors.log")
     
-    # 2. Подменяем стандартный обработчик исключений Python
+    # Подменяем стандартный обработчик исключений Python
     sys.excepthook = global_exception_handler
     
-    # 3. Подменяем обработчик сообщений Qt
+    # Подменяем обработчик сообщений Qt
     qInstallMessageHandler(qt_message_handler)
     
-    logger.info("="*50)
-    logger.info("Глобальная система логирования инициализирована")
-    logger.info("="*50)
+    logger.info("=" * 60)
+    logger.info("Глобальная система логирования и перехвата ошибок инициализирована")
+    logger.info("=" * 60)
 
 ========================================
 📄 FILE: ./login_window.py
@@ -10091,163 +10067,74 @@ class RequestFilterProxyModel(QSortFilterProxyModel):
 📄 FILE: ./run_app.py
 ========================================
 
+# run_app.py
 import sys
 import os
-import logging
-import traceback
 from PyQt6.QtWidgets import QApplication, QMessageBox
 from config_manager import ConfigManager
-from db_connector import DatabaseConnector 
+from db_connector import DatabaseConnector
 from login_window import LoginWindow
 from main_window import MainWindow
 from setup_dialog import SetupDialog
 
-# ==============================================================================
-# 1. ГЛОБАЛЬНАЯ НАСТРОЙКА ЛОГИРОВАНИЯ
-# ==============================================================================
-def setup_global_logger():
-    """Настраивает запись логов в файл app.log и вывод в консоль"""
-    log_file = "app.log"
-    
-    # Формат: Дата Время | Уровень | Файл:Строка | Сообщение
-    log_format = logging.Formatter(
-        '%(asctime)s | %(levelname)-8s | %(filename)s:%(lineno)d | %(message)s',
-        datefmt='%Y-%m-%d %H:%M:%S'
-    )
-    
-    logger = logging.getLogger("KRD_Application")
-    logger.setLevel(logging.DEBUG) # Записываем всё, от отладки до критических ошибок
-    
-    # 1. Обработчик для записи в файл (сохраняет всё, включая DEBUG)
-    file_handler = logging.FileHandler(log_file, encoding='utf-8')
-    file_handler.setLevel(logging.DEBUG)
-    file_handler.setFormatter(log_format)
-    
-    # 2. Обработчик для вывода в консоль (только INFO и выше, чтобы не засорять терминал)
-    console_handler = logging.StreamHandler(sys.stdout)
-    console_handler.setLevel(logging.INFO)
-    console_handler.setFormatter(log_format)
-    
-    if not logger.handlers:
-        logger.addHandler(file_handler)
-        logger.addHandler(console_handler)
-        
-    return logger
-
-def global_exception_handler(exc_type, exc_value, exc_traceback):
-    """
-    Перехватывает ЛЮБЫЕ необработанные исключения во всем приложении.
-    Если программа "упадет", эта функция запишет полную ошибку в лог перед закрытием.
-    """
-    if issubclass(exc_type, KeyboardInterrupt):
-        # Игнорируем прерывание с клавиатуры (Ctrl+C), чтобы не спамить лог
-        sys.__excepthook__(exc_type, exc_value, exc_traceback)
-        return
-    
-    logger = logging.getLogger("KRD_Application")
-    logger.critical("НЕОБРАБОТАННОЕ ИСКЛЮЧЕНИЕ (CRASH)", exc_info=(exc_type, exc_value, exc_traceback))
-
-# Устанавливаем наш перехватчик вместо стандартного
-sys.excepthook = global_exception_handler
-# ==============================================================================
-
+# ✅ ИМПОРТИРУЕМ НАШ ГЛОБАЛЬНЫЙ ПЕРЕХВАТЧИК
+from logger import init_global_logging
 
 def main():
-    # Получаем экземпляр логгера
-    logger = logging.getLogger("KRD_Application")
-    logger.info("=" * 60)
-    logger.info("ЗАПУСК ПРИЛОЖЕНИЯ АРМ Сотрудника дознания")
-    logger.info("=" * 60)
-    
+    # ✅ 1. ИНИЦИАЛИЗИРУЕМ ПЕРЕХВАТ ВСЕХ ОШИБОК ПЕРВЫМ ДЕЛОМ
+    init_global_logging()
+
     try:
         app = QApplication(sys.argv)
         app.setApplicationName("АРМ Сотрудника дознания")
         
         config_manager = ConfigManager()
-        logger.info("Загрузка конфигурации подключения...")
         db_config = config_manager.load_config()
 
-        # 2. Если настроек нет — показываем окно настройки
         if not db_config:
-            logger.info("Конфигурация не найдена. Открытие диалога первичной настройки.")
             dialog = SetupDialog()
             if dialog.exec():
                 config_manager.save_config(
-                    dialog.host_input.text(),
-                    dialog.port_input.text(),
-                    dialog.db_input.text(),
-                    dialog.user_input.text(),
-                    dialog.pass_input.text()
+                    dialog.host_input.text(), dialog.port_input.text(),
+                    dialog.db_input.text(), dialog.user_input.text(), dialog.pass_input.text()
                 )
-                logger.info("Новая конфигурация успешно сохранена.")
                 db_config = config_manager.load_config()
             else:
-                logger.info("Пользователь отменил настройку. Завершение работы.")
                 sys.exit(0)
 
-        logger.info(f"Попытка подключения к БД: {db_config.get('user')}@{db_config.get('host')}:{db_config.get('port')}/{db_config.get('dbname')}")
-        
-        # 3. Пытаемся подключиться
         connector = DatabaseConnector(
-            host=db_config['host'],
-            port=db_config['port'],
-            dbname=db_config['dbname'],
-            user=db_config['user'],
-            password=db_config['password'],
-            ssl_mode="require"
+            host=db_config['host'], port=db_config['port'], dbname=db_config['dbname'],
+            user=db_config['user'], password=db_config['password'], ssl_mode="require"
         )
 
         success, msg = connector.connect()
 
-        # 4. ЕСЛИ ПОДКЛЮЧЕНИЕ НЕ УДАЛОСЬ
         if not success:
-            logger.warning(f"Ошибка подключения к БД: {msg}")
             reply = QMessageBox.question(
-                None,
-                "Ошибка подключения",
-                f"Не удалось подключиться к базе данных.\n\n{msg}\n\n"
-                "Возможно, изменился пароль или настройки сервера.\n"
-                "Хотите ввести новые данные прямо сейчас?",
+                None, "Ошибка подключения",
+                f"Не удалось подключиться к базе данных.\n\n{msg}\n\nХотите ввести новые данные?",
                 QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No
             )
-
             if reply == QMessageBox.StandardButton.Yes:
                 dialog = SetupDialog()
-                # Предзаполняем старыми данными для удобства пользователя
-                dialog.host_input.setText(db_config.get('host', 'localhost'))
-                dialog.port_input.setText(str(db_config.get('port', 5432)))
-                dialog.db_input.setText(db_config.get('dbname', 'krd_system'))
-                dialog.user_input.setText(db_config.get('user', 'arm_user'))
-                
                 if dialog.exec():
                     config_manager.save_config(
-                        dialog.host_input.text(),
-                        dialog.port_input.text(),
-                        dialog.db_input.text(),
-                        dialog.user_input.text(),
-                        dialog.pass_input.text()
+                        dialog.host_input.text(), dialog.port_input.text(),
+                        dialog.db_input.text(), dialog.user_input.text(), dialog.pass_input.text()
                     )
-                    logger.info("Настройки БД обновлены пользователем. Требуется перезапуск.")
                     QMessageBox.information(None, "Успех", "Настройки обновлены. Перезапустите программу.")
-                    sys.exit(0)
-                else:
-                    logger.info("Пользователь отказался от обновления настроек. Завершение работы.")
-                    sys.exit(1)
+                sys.exit(0)
             else:
-                logger.info("Пользователь отменил подключение. Завершение работы.")
                 sys.exit(1)
 
         # 5. Если подключение успешно — запускаем приложение
-        logger.info("Подключение к БД успешно. Инициализация интерфейса...")
         db = connector.get_connection()
-        
         login_window = LoginWindow(db)
         main_window = None
 
         def open_main_window(user_info):
             nonlocal main_window
             try:
-                logger.info(f"Успешная авторизация пользователя: '{user_info.get('username')}' (ID: {user_info.get('id')})")
                 from theme_manager import ThemeManager
                 user_id = user_info.get('id')
                 tm = ThemeManager(db, user_id)
@@ -10257,26 +10144,21 @@ def main():
                 main_window.theme_manager = tm
                 main_window.show()
                 login_window.close()
-                logger.info("Главное окно успешно отображено.")
             except Exception as e:
-                # Ловим ошибки именно на этапе открытия главного окна
-                logger.critical(f"Критическая ошибка при открытии главного окна: {e}", exc_info=True)
-                QMessageBox.critical(None, "Критическая ошибка", f"Не удалось открыть главное окно:\n{e}\n\nПодробности в файле app.log")
+                # Эта ошибка всё равно попадёт в global_exception_handler, 
+                # но мы можем показать пользователю понятное сообщение
+                QMessageBox.critical(None, "Критическая ошибка", f"Не удалось открыть главное окно:\n{e}\n\nПодробности в файле app_errors.log")
                 sys.exit(1)
 
         login_window.login_successful.connect(open_main_window)
         login_window.show()
         
-        logger.info("Цикл событий приложения запущен (app.exec). Ожидание действий пользователя...")
-        exit_code = app.exec()
+        sys.exit(app.exec())
         
-        logger.info(f"Приложение корректно завершено с кодом: {exit_code}")
-        sys.exit(exit_code)
-
     except Exception as e:
-        # Этот блок поймает ошибки на самом раннем этапе (до запуска app.exec)
-        logger.critical("ФАТАЛЬНАЯ ОШИБКА на этапе запуска приложения", exc_info=True)
-        QMessageBox.critical(None, "Фатальная ошибка", f"Приложение не может быть запущено:\n\n{e}\n\nПодробности записаны в файл app.log")
+        # Перехват фатальных ошибок на самом раннем этапе запуска
+        logging.getLogger("KRD_Application").critical("ФАТАЛЬНАЯ ОШИБКА на этапе запуска приложения", exc_info=True)
+        QMessageBox.critical(None, "Фатальная ошибка", f"Приложение не может быть запущено:\n\n{e}\n\nПодробности записаны в файл app_errors.log")
         sys.exit(1)
 
 if __name__ == "__main__":
@@ -13796,7 +13678,118 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtCore import Qt
 
+# ui_helpers.py
+"""
+Вспомогательные утилиты для управления доступом, состоянием интерфейса и базовые классы окон.
+Используется для реализации прав роли 'Читатель' и настройки поведения диалоговых окон.
+"""
+from typing import Dict
+from PyQt6.QtWidgets import (
+    QWidget, QPushButton, QLineEdit, QTextEdit, QPlainTextEdit,
+    QComboBox, QAbstractSpinBox, QCheckBox, QRadioButton,
+    QTableView, QTableWidget, QListView, QListWidget, QTreeWidget, QAbstractItemView,
+    QDialog  # ✅ Добавлено для класса BaseDialog
+)
+from PyQt6.QtCore import Qt
 
+
+# ==============================================================================
+# 1. БАЗОВЫЙ КЛАСС ДЛЯ ДИАЛОГОВЫХ ОКОН
+# ==============================================================================
+class BaseDialog(QDialog):
+    """
+    Базовый класс для всех диалоговых окон приложения.
+    Гарантирует наличие кнопок «Свернуть» и «Развернуть» (актуально для Linux/Ubuntu).
+    """
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        
+        # 1. Устанавливаем флаги окна, добавляя кнопки Minimize и Maximize
+        self.setWindowFlags(
+            Qt.WindowType.Window |                  # Базовое окно
+            Qt.WindowType.WindowCloseButtonHint |   # Кнопка закрытия
+            Qt.WindowType.WindowMinimizeHint |      # Кнопка свернуть
+            Qt.WindowType.WindowMaximizeHint |      # Кнопка развернуть
+            Qt.WindowType.WindowSystemMenuHint      # Системное меню (правый клик по заголовку)
+        )
+        
+        # 2. Используем WindowModal. 
+        # Он позволяет разворачивать окно на весь экран, в отличие от ApplicationModal.
+        self.setWindowModality(Qt.WindowModality.WindowModal)
+        
+        # 3. Автоматическое удаление из памяти при закрытии (защита от утечек памяти)
+        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+
+
+# ==============================================================================
+# 2. УТИЛИТЫ ДЛЯ УПРАВЛЕНИЯ ДОСТУПОМ (РОЛЬ ЧИТАТЕЛЯ)
+# ==============================================================================
+def is_reader(user_info: Dict) -> bool:
+    """
+    Быстрая проверка роли пользователя.
+    Args:
+        user_info: Словарь с данными текущего пользователя (из authorization.py)
+    Returns:
+        True, если роль == 'reader'
+    """
+    return user_info.get('role', '').lower() == 'reader'
+
+
+def apply_readonly_mode(parent_widget: QWidget, is_read_only: bool) -> None:
+    """
+    Автоматически переводит все дочерние интерактивные виджеты в режим 'Только просмотр'.
+    
+    🔹 Поля ввода становятся доступны для выделения и копирования (Ctrl+C), но не для правки.
+    🔹 Кнопки, списки и чекбоксы полностью блокируются.
+    🔹 Контекстные меню отключаются.
+
+    Args:
+        parent_widget: Родительский виджет (окно, вкладка, QGroupBox и т.д.)
+        is_read_only: Флаг режима (True - включить режим читателя)
+    """
+    if not is_read_only:
+        return
+
+    # 1. Кнопки (полная блокировка)
+    for btn in parent_widget.findChildren(QPushButton):
+        btn.setEnabled(False)
+
+    # 2. Текстовые поля (только чтение, сохраняем возможность копирования)
+    for le in parent_widget.findChildren(QLineEdit):
+        le.setReadOnly(True)
+    for te in parent_widget.findChildren(QTextEdit):
+        te.setReadOnly(True)
+    for pte in parent_widget.findChildren(QPlainTextEdit):
+        pte.setReadOnly(True)
+
+    # 3. Выпадающие списки и поля дат/чисел (блокировка)
+    for cb in parent_widget.findChildren(QComboBox):
+        cb.setEnabled(False)
+    # QAbstractSpinBox охватывает QSpinBox, QDoubleSpinBox, QDateEdit, QTimeEdit, QDateTimeEdit
+    for sb in parent_widget.findChildren(QAbstractSpinBox):
+        sb.setEnabled(False)
+
+    # 4. Чекбоксы и радиокнопки
+    for cb in parent_widget.findChildren(QCheckBox):
+        cb.setEnabled(False)
+    for rb in parent_widget.findChildren(QRadioButton):
+        rb.setEnabled(False)
+
+    # 5. Таблицы и списки (отключение редактирования ячеек)
+    for tv in parent_widget.findChildren(QTableView):
+        tv.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+    for tw in parent_widget.findChildren(QTableWidget):
+        tw.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+    for lv in parent_widget.findChildren(QListView):
+        lv.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+    for lw in parent_widget.findChildren(QListWidget):
+        lw.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+    for trw in parent_widget.findChildren(QTreeWidget):
+        trw.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+
+    # 6. Отключаем контекстные меню (ПКМ) для всех дочерних виджетов
+    for widget in parent_widget.findChildren(QWidget):
+        widget.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
 def is_reader(user_info: Dict) -> bool:
     """
     Быстрая проверка роли пользователя.

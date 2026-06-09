@@ -18,9 +18,10 @@ import traceback
 
 from field_selection_dialog import FieldSelectionDialog
 from export_helper import KrdExcelExporter  # ✅ Импортируем экспортер
+from ui_helpers import BaseDialog
 
 
-class ReportConfigDialog(QDialog):
+class ReportConfigDialog(BaseDialog):
     """Диалог настройки конфигурации отчета с БД (только массовый-export)"""
     
     def __init__(self, db_connection, parent=None, template_id=None, audit_logger=None):
