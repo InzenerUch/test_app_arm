@@ -1,8 +1,9 @@
 # setup_dialog.py
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QLineEdit, QPushButton, QMessageBox, QLabel
 from PyQt6.QtSql import QSqlDatabase
+from ui_helpers import BaseDialog
 
-class SetupDialog(QDialog):
+class SetupDialog(BaseDialog):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Настройка подключения к базе данных")
