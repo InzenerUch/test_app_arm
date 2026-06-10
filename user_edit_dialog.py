@@ -5,6 +5,7 @@
 ✅ Мягкое удаление через is_deleted = TRUE
 ✅ Полная валидация и диагностика
 ✅ ДОБАВЛЕНО: Прокрутка для удобного отображения всех полей
+✅ ДОБАВЛЕНО: Защита изменения роли через чекбокс (аналогично смене пароля)
 """
 import bcrypt
 import re
@@ -32,9 +33,12 @@ class UserEditDialog(QDialog):
         self.current_user_role: Optional[str] = None
         self.editing_user_role: Optional[str] = None
         
+        # ✅ НОВОЕ: Хранилище исходной роли (чтобы не потерять её при снятой галочке)
+        self.original_role_id = None
+        
         self.setWindowTitle("✏️ Редактирование пользователя")
-        self.setMinimumSize(550, 600)  # ✅ Уменьшили минимальную высоту
-        self.resize(600, 650)  # ✅ Установили разумный размер по умолчанию
+        self.setMinimumSize(550, 600)
+        self.resize(600, 650)
         self.setModal(True)
         
         self.original_username = ""
@@ -138,14 +142,27 @@ class UserEditDialog(QDialog):
         content_layout.addWidget(info_group)
         
         # === Права доступа ===
-        role_group = QGroupBox("🔐 Права доступа")
+        role_group = QGroupBox("🔐 Права доступа (поставьте галочку для изменения роли)")
+        role_group.setStyleSheet("""
+            QGroupBox { font-weight: bold; border: 2px solid #2196F3; border-radius: 6px; margin-top: 12px; padding-top: 10px; }
+            QGroupBox::title { subcontrol-origin: margin; left: 15px; color: #1565C0; }
+        """)
         role_layout = QFormLayout(role_group)
         role_layout.setSpacing(12)
         role_layout.setContentsMargins(15, 15, 15, 15)
         
+        # ✅ НОВОЕ: Чекбокс для разрешения изменения роли
+        self.change_role_checkbox = QCheckBox("✅ Разрешить изменение роли")
+        self.change_role_checkbox.setToolTip("Без галочки поле будет заблокировано в целях безопасности")
+        self.change_role_checkbox.setStyleSheet("font-size: 13px; font-weight: bold; color: #1565C0;")
+        self.change_role_checkbox.stateChanged.connect(self.on_role_change_toggled)
+        role_layout.addRow(self.change_role_checkbox)
+        
         self.role_combo = QComboBox()
         self.role_combo.setMinimumWidth(280)
         self.role_combo.setMinimumHeight(32)
+        # ✅ НОВОЕ: По умолчанию ComboBox заблокирован
+        self.role_combo.setEnabled(False)
         self.load_roles()
         role_layout.addRow("Роль *:", self.role_combo)
         
@@ -196,7 +213,7 @@ class UserEditDialog(QDialog):
         scroll_area.setWidget(scroll_content)
         
         # ✅ ДОБАВЛЯЕМ SCROLL AREA В ОСНОВНОЙ LAYOUT
-        main_layout.addWidget(scroll_area, 1)  # 1 = растягивается
+        main_layout.addWidget(scroll_area, 1)
         
         # === Кнопки диалога (всегда видны внизу) ===
         button_box = QDialogButtonBox(
@@ -249,6 +266,13 @@ class UserEditDialog(QDialog):
         if not is_checked:
             self.password_input.clear()
             self.password_confirm_input.clear()
+    
+    # ✅ НОВЫЙ МЕТОД: Обработчик переключения чекбокса смены роли
+    def on_role_change_toggled(self, state: int) -> None:
+        """Обработчик переключения чекбокса смены роли"""
+        is_checked = state == Qt.CheckState.Checked.value
+        self.role_combo.setEnabled(is_checked)
+        self._log(f"on_role_change_toggled(): role_combo.setEnabled({is_checked})", "DEBUG")
     
     def load_roles(self) -> None:
         """Загрузка списка ролей в ComboBox"""
@@ -316,9 +340,11 @@ class UserEditDialog(QDialog):
         self.email_input.setText(query.value(3) or "")
 
         role_id = query.value(4)
+        # ✅ НОВОЕ: Сохраняем исходную роль пользователя
+        self.original_role_id = role_id
         role_name = query.value(9) or ""
         self.editing_user_role = role_name.lower() if role_name else None
-        self._log(f"load_user_data(): role_id={role_id}, role_name='{role_name}'", "DEBUG")
+        self._log(f"load_user_data(): role_id={role_id}, role_name='{role_name}', original_role_id={self.original_role_id}", "DEBUG")
 
         if role_id:
             index = self.role_combo.findData(role_id)
@@ -486,7 +512,18 @@ class UserEditDialog(QDialog):
         username = self.username_input.text().strip()
         full_name = self.full_name_input.text().strip()
         email = self.email_input.text().strip()
-        role_id = self.role_combo.currentData()
+        
+        # ✅ НОВОЕ: Проверяем, разрешил ли пользователь менять роль
+        change_role = self.change_role_checkbox.isChecked()
+        
+        # ✅ НОВОЕ: Если галочка стоит — берём новое значение, иначе — исходную роль
+        if change_role:
+            final_role_id = self.role_combo.currentData()
+        else:
+            final_role_id = self.original_role_id
+        
+        self._log(f"on_accept(): change_role={change_role}, final_role_id={final_role_id}, original_role_id={self.original_role_id}", "DEBUG")
+        
         is_active = self.is_user_active
         change_password = self.change_password_checkbox.isChecked()
         password = self.password_input.text()
@@ -508,7 +545,8 @@ class UserEditDialog(QDialog):
         if not valid:
             errors.append(msg)
         
-        if role_id is None:
+        # ✅ НОВОЕ: Проверка роли только если её меняют
+        if change_role and final_role_id is None:
             errors.append("Выберите роль")
         
         if change_password:
@@ -555,7 +593,8 @@ class UserEditDialog(QDialog):
                 query.bindValue(":password_hash", hashed.decode('utf-8'))
                 query.bindValue(":full_name", full_name)
                 query.bindValue(":email", email)
-                query.bindValue(":role_id", role_id)
+                # ✅ НОВОЕ: Используем final_role_id вместо role_combo.currentData()
+                query.bindValue(":role_id", final_role_id)
                 query.bindValue(":is_active", is_active)
                 query.bindValue(":id", self.user_id)
                 
@@ -572,7 +611,8 @@ class UserEditDialog(QDialog):
                 query.bindValue(":username", username)
                 query.bindValue(":full_name", full_name)
                 query.bindValue(":email", email)
-                query.bindValue(":role_id", role_id)
+                # ✅ НОВОЕ: Используем final_role_id вместо role_combo.currentData()
+                query.bindValue(":role_id", final_role_id)
                 query.bindValue(":is_active", is_active)
                 query.bindValue(":id", self.user_id)
             

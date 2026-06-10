@@ -1,0 +1,1240 @@
+pg_restore: connecting to database for restore
+pg_restore: dropping FK CONSTRAINT users users_role_id_fkey
+pg_restore: while PROCESSING TOC:
+pg_restore: from TOC entry 3594; 2606 36014 FK CONSTRAINT users users_role_id_fkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.users DROP CONSTRAINT users_role_id_fkey;
+pg_restore: dropping FK CONSTRAINT user_settings user_settings_user_id_fkey
+pg_restore: from TOC entry 3597; 2606 68942 FK CONSTRAINT user_settings user_settings_user_id_fkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.user_settings DROP CONSTRAINT user_settings_user_id_fkey;
+pg_restore: dropping FK CONSTRAINT social_data social_data_rank_id_fkey
+pg_restore: from TOC entry 3578; 2606 35733 FK CONSTRAINT social_data social_data_rank_id_fkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.social_data DROP CONSTRAINT social_data_rank_id_fkey;
+pg_restore: dropping FK CONSTRAINT social_data social_data_krd_id_fkey
+pg_restore: from TOC entry 3577; 2606 35723 FK CONSTRAINT social_data social_data_krd_id_fkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.social_data DROP CONSTRAINT social_data_krd_id_fkey;
+pg_restore: dropping FK CONSTRAINT social_data social_data_category_id_fkey
+pg_restore: from TOC entry 3576; 2606 35728 FK CONSTRAINT social_data social_data_category_id_fkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.social_data DROP CONSTRAINT social_data_category_id_fkey;
+pg_restore: dropping FK CONSTRAINT soch_episodes soch_episodes_krd_id_fkey
+pg_restore: from TOC entry 3593; 2606 35843 FK CONSTRAINT soch_episodes soch_episodes_krd_id_fkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.soch_episodes DROP CONSTRAINT soch_episodes_krd_id_fkey;
+pg_restore: dropping FK CONSTRAINT soch_episodes soch_episodes_deleted_by_fkey
+pg_restore: from TOC entry 3592; 2606 68949 FK CONSTRAINT soch_episodes soch_episodes_deleted_by_fkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.soch_episodes DROP CONSTRAINT soch_episodes_deleted_by_fkey;
+pg_restore: dropping FK CONSTRAINT service_places service_places_position_id_fkey
+pg_restore: from TOC entry 3583; 2606 35776 FK CONSTRAINT service_places service_places_position_id_fkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.service_places DROP CONSTRAINT service_places_position_id_fkey;
+pg_restore: dropping FK CONSTRAINT service_places service_places_military_unit_id_fkey
+pg_restore: from TOC entry 3582; 2606 35766 FK CONSTRAINT service_places service_places_military_unit_id_fkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.service_places DROP CONSTRAINT service_places_military_unit_id_fkey;
+pg_restore: dropping FK CONSTRAINT service_places service_places_krd_id_fkey
+pg_restore: from TOC entry 3581; 2606 35761 FK CONSTRAINT service_places service_places_krd_id_fkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.service_places DROP CONSTRAINT service_places_krd_id_fkey;
+pg_restore: dropping FK CONSTRAINT service_places service_places_garrison_id_fkey
+pg_restore: from TOC entry 3580; 2606 35771 FK CONSTRAINT service_places service_places_garrison_id_fkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.service_places DROP CONSTRAINT service_places_garrison_id_fkey;
+pg_restore: dropping FK CONSTRAINT recipients recipients_request_type_id_fkey
+pg_restore: from TOC entry 3596; 2606 77494 FK CONSTRAINT recipients recipients_request_type_id_fkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.recipients DROP CONSTRAINT recipients_request_type_id_fkey;
+pg_restore: dropping FK CONSTRAINT outgoing_requests outgoing_requests_request_type_id_fkey
+pg_restore: from TOC entry 3591; 2606 35824 FK CONSTRAINT outgoing_requests outgoing_requests_request_type_id_fkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.outgoing_requests DROP CONSTRAINT outgoing_requests_request_type_id_fkey;
+pg_restore: dropping FK CONSTRAINT outgoing_requests outgoing_requests_recipient_id_fkey
+pg_restore: from TOC entry 3590; 2606 52536 FK CONSTRAINT outgoing_requests outgoing_requests_recipient_id_fkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.outgoing_requests DROP CONSTRAINT outgoing_requests_recipient_id_fkey;
+pg_restore: dropping FK CONSTRAINT outgoing_requests outgoing_requests_military_unit_id_fkey
+pg_restore: from TOC entry 3589; 2606 35829 FK CONSTRAINT outgoing_requests outgoing_requests_military_unit_id_fkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.outgoing_requests DROP CONSTRAINT outgoing_requests_military_unit_id_fkey;
+pg_restore: dropping FK CONSTRAINT outgoing_requests outgoing_requests_krd_id_fkey
+pg_restore: from TOC entry 3588; 2606 35819 FK CONSTRAINT outgoing_requests outgoing_requests_krd_id_fkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.outgoing_requests DROP CONSTRAINT outgoing_requests_krd_id_fkey;
+pg_restore: dropping FK CONSTRAINT krd_versions krd_versions_krd_id_fkey
+pg_restore: from TOC entry 3599; 2606 85845 FK CONSTRAINT krd_versions krd_versions_krd_id_fkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.krd_versions DROP CONSTRAINT krd_versions_krd_id_fkey;
+pg_restore: dropping FK CONSTRAINT krd_versions krd_versions_created_by_fkey
+pg_restore: from TOC entry 3598; 2606 85885 FK CONSTRAINT krd_versions krd_versions_created_by_fkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.krd_versions DROP CONSTRAINT krd_versions_created_by_fkey;
+pg_restore: dropping FK CONSTRAINT krd krd_status_id_fkey
+pg_restore: from TOC entry 3575; 2606 35709 FK CONSTRAINT krd krd_status_id_fkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.krd DROP CONSTRAINT krd_status_id_fkey;
+pg_restore: dropping FK CONSTRAINT krd krd_locked_by_fkey
+pg_restore: from TOC entry 3574; 2606 69019 FK CONSTRAINT krd krd_locked_by_fkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.krd DROP CONSTRAINT krd_locked_by_fkey;
+pg_restore: dropping FK CONSTRAINT incoming_orders incoming_orders_military_unit_id_fkey
+pg_restore: from TOC entry 3586; 2606 35805 FK CONSTRAINT incoming_orders incoming_orders_military_unit_id_fkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.incoming_orders DROP CONSTRAINT incoming_orders_military_unit_id_fkey;
+pg_restore: dropping FK CONSTRAINT incoming_orders incoming_orders_krd_id_fkey
+pg_restore: from TOC entry 3585; 2606 35795 FK CONSTRAINT incoming_orders incoming_orders_krd_id_fkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.incoming_orders DROP CONSTRAINT incoming_orders_krd_id_fkey;
+pg_restore: dropping FK CONSTRAINT incoming_orders incoming_orders_initiator_type_id_fkey
+pg_restore: from TOC entry 3584; 2606 35800 FK CONSTRAINT incoming_orders incoming_orders_initiator_type_id_fkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.incoming_orders DROP CONSTRAINT incoming_orders_initiator_type_id_fkey;
+pg_restore: dropping FK CONSTRAINT report_templates fk_report_templates_deleted_by
+pg_restore: from TOC entry 3595; 2606 68976 FK CONSTRAINT report_templates fk_report_templates_deleted_by postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.report_templates DROP CONSTRAINT fk_report_templates_deleted_by;
+pg_restore: dropping FK CONSTRAINT outgoing_requests fk_outgoing_requests_signatory
+pg_restore: from TOC entry 3587; 2606 102434 FK CONSTRAINT outgoing_requests fk_outgoing_requests_signatory postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.outgoing_requests DROP CONSTRAINT fk_outgoing_requests_signatory;
+pg_restore: dropping FK CONSTRAINT krd fk_last_service_place
+pg_restore: from TOC entry 3573; 2606 35781 FK CONSTRAINT krd fk_last_service_place postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.krd DROP CONSTRAINT fk_last_service_place;
+pg_restore: dropping FK CONSTRAINT addresses addresses_krd_id_fkey
+pg_restore: from TOC entry 3579; 2606 35747 FK CONSTRAINT addresses addresses_krd_id_fkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.addresses DROP CONSTRAINT addresses_krd_id_fkey;
+pg_restore: dropping INDEX idx_users_username
+pg_restore: from TOC entry 3535; 1259 36019 INDEX idx_users_username postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_users_username;
+pg_restore: dropping INDEX idx_users_role_id
+pg_restore: from TOC entry 3534; 1259 36020 INDEX idx_users_role_id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_users_role_id;
+pg_restore: dropping INDEX idx_user_settings_user_id
+pg_restore: from TOC entry 3560; 1259 68947 INDEX idx_user_settings_user_id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_user_settings_user_id;
+pg_restore: dropping INDEX idx_social_data_surname
+pg_restore: from TOC entry 3507; 1259 35856 INDEX idx_social_data_surname postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_social_data_surname;
+pg_restore: dropping INDEX idx_social_data_photos
+pg_restore: from TOC entry 3506; 1259 44247 INDEX idx_social_data_photos postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_social_data_photos;
+pg_restore: dropping INDEX idx_social_data_personal_number
+pg_restore: from TOC entry 3505; 1259 35857 INDEX idx_social_data_personal_number postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_social_data_personal_number;
+pg_restore: dropping INDEX idx_social_data_krd_id
+pg_restore: from TOC entry 3504; 1259 35850 INDEX idx_social_data_krd_id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_social_data_krd_id;
+pg_restore: dropping INDEX idx_soch_episodes_soch_date
+pg_restore: from TOC entry 3527; 1259 35859 INDEX idx_soch_episodes_soch_date postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_soch_episodes_soch_date;
+pg_restore: dropping INDEX idx_soch_episodes_krd_id
+pg_restore: from TOC entry 3526; 1259 35855 INDEX idx_soch_episodes_krd_id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_soch_episodes_krd_id;
+pg_restore: dropping INDEX idx_service_places_krd_id
+pg_restore: from TOC entry 3515; 1259 35852 INDEX idx_service_places_krd_id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_service_places_krd_id;
+pg_restore: dropping INDEX idx_report_templates_type
+pg_restore: from TOC entry 3554; 1259 52513 INDEX idx_report_templates_type postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_report_templates_type;
+pg_restore: dropping INDEX idx_report_templates_deleted
+pg_restore: from TOC entry 3553; 1259 52514 INDEX idx_report_templates_deleted postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_report_templates_deleted;
+pg_restore: dropping INDEX idx_recipients_request_type
+pg_restore: from TOC entry 3557; 1259 77499 INDEX idx_recipients_request_type postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_recipients_request_type;
+pg_restore: dropping INDEX idx_outgoing_requests_krd_id
+pg_restore: from TOC entry 3523; 1259 35854 INDEX idx_outgoing_requests_krd_id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_outgoing_requests_krd_id;
+pg_restore: dropping INDEX idx_outgoing_requests_is_deleted
+pg_restore: from TOC entry 3522; 1259 44246 INDEX idx_outgoing_requests_is_deleted postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_outgoing_requests_is_deleted;
+pg_restore: dropping INDEX idx_krd_versions_krd_id
+pg_restore: from TOC entry 3566; 1259 85855 INDEX idx_krd_versions_krd_id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_krd_versions_krd_id;
+pg_restore: dropping INDEX idx_krd_versions_created
+pg_restore: from TOC entry 3565; 1259 85884 INDEX idx_krd_versions_created postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_krd_versions_created;
+pg_restore: dropping INDEX idx_krd_status_id
+pg_restore: from TOC entry 3501; 1259 35860 INDEX idx_krd_status_id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_krd_status_id;
+pg_restore: dropping INDEX idx_krd_is_deleted
+pg_restore: from TOC entry 3500; 1259 36109 INDEX idx_krd_is_deleted postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_krd_is_deleted;
+pg_restore: dropping INDEX idx_incoming_orders_receipt_number
+pg_restore: from TOC entry 3519; 1259 35858 INDEX idx_incoming_orders_receipt_number postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_incoming_orders_receipt_number;
+pg_restore: dropping INDEX idx_incoming_orders_krd_id
+pg_restore: from TOC entry 3518; 1259 35853 INDEX idx_incoming_orders_krd_id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_incoming_orders_krd_id;
+pg_restore: dropping INDEX idx_field_mappings_composite
+pg_restore: from TOC entry 3545; 1259 44278 INDEX idx_field_mappings_composite postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_field_mappings_composite;
+pg_restore: dropping INDEX idx_document_templates_is_deleted
+pg_restore: from TOC entry 3542; 1259 36131 INDEX idx_document_templates_is_deleted postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_document_templates_is_deleted;
+pg_restore: dropping INDEX idx_audit_log_user_id
+pg_restore: from TOC entry 3552; 1259 36125 INDEX idx_audit_log_user_id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_audit_log_user_id;
+pg_restore: dropping INDEX idx_audit_log_table_name
+pg_restore: from TOC entry 3551; 1259 36129 INDEX idx_audit_log_table_name postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_audit_log_table_name;
+pg_restore: dropping INDEX idx_audit_log_krd_id
+pg_restore: from TOC entry 3550; 1259 36126 INDEX idx_audit_log_krd_id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_audit_log_krd_id;
+pg_restore: dropping INDEX idx_audit_log_created_at
+pg_restore: from TOC entry 3549; 1259 36128 INDEX idx_audit_log_created_at postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_audit_log_created_at;
+pg_restore: dropping INDEX idx_audit_log_action_type
+pg_restore: from TOC entry 3548; 1259 36127 INDEX idx_audit_log_action_type postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_audit_log_action_type;
+pg_restore: dropping INDEX idx_addresses_krd_id
+pg_restore: from TOC entry 3514; 1259 35851 INDEX idx_addresses_krd_id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP INDEX krd.idx_addresses_krd_id;
+pg_restore: dropping CONSTRAINT users users_username_key
+pg_restore: from TOC entry 3539; 2606 36013 CONSTRAINT users users_username_key postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.users DROP CONSTRAINT users_username_key;
+pg_restore: dropping CONSTRAINT users users_pkey
+pg_restore: from TOC entry 3537; 2606 36011 CONSTRAINT users users_pkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.users DROP CONSTRAINT users_pkey;
+pg_restore: dropping CONSTRAINT user_settings user_settings_user_id_key
+pg_restore: from TOC entry 3564; 2606 68941 CONSTRAINT user_settings user_settings_user_id_key postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.user_settings DROP CONSTRAINT user_settings_user_id_key;
+pg_restore: dropping CONSTRAINT user_settings user_settings_pkey
+pg_restore: from TOC entry 3562; 2606 68939 CONSTRAINT user_settings user_settings_pkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.user_settings DROP CONSTRAINT user_settings_pkey;
+pg_restore: dropping CONSTRAINT user_roles user_roles_role_name_key
+pg_restore: from TOC entry 3533; 2606 35968 CONSTRAINT user_roles user_roles_role_name_key postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.user_roles DROP CONSTRAINT user_roles_role_name_key;
+pg_restore: dropping CONSTRAINT user_roles user_roles_pkey
+pg_restore: from TOC entry 3531; 2606 35966 CONSTRAINT user_roles user_roles_pkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.user_roles DROP CONSTRAINT user_roles_pkey;
+pg_restore: dropping CONSTRAINT social_data uq_social_data_krd_id
+pg_restore: from TOC entry 3511; 2606 77485 CONSTRAINT social_data uq_social_data_krd_id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.social_data DROP CONSTRAINT uq_social_data_krd_id;
+pg_restore: dropping CONSTRAINT statuses statuses_pkey
+pg_restore: from TOC entry 3485; 2606 35652 CONSTRAINT statuses statuses_pkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.statuses DROP CONSTRAINT statuses_pkey;
+pg_restore: dropping CONSTRAINT social_data social_data_pkey
+pg_restore: from TOC entry 3509; 2606 35722 CONSTRAINT social_data social_data_pkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.social_data DROP CONSTRAINT social_data_pkey;
+pg_restore: dropping CONSTRAINT soch_episodes soch_episodes_pkey
+pg_restore: from TOC entry 3529; 2606 35842 CONSTRAINT soch_episodes soch_episodes_pkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.soch_episodes DROP CONSTRAINT soch_episodes_pkey;
+pg_restore: dropping CONSTRAINT signatories signatories_pkey
+pg_restore: from TOC entry 3572; 2606 102433 CONSTRAINT signatories signatories_pkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.signatories DROP CONSTRAINT signatories_pkey;
+pg_restore: dropping CONSTRAINT service_places service_places_pkey
+pg_restore: from TOC entry 3517; 2606 35760 CONSTRAINT service_places service_places_pkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.service_places DROP CONSTRAINT service_places_pkey;
+pg_restore: dropping CONSTRAINT request_types request_types_pkey
+pg_restore: from TOC entry 3493; 2606 35680 CONSTRAINT request_types request_types_pkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.request_types DROP CONSTRAINT request_types_pkey;
+pg_restore: dropping CONSTRAINT report_templates report_templates_pkey
+pg_restore: from TOC entry 3556; 2606 52496 CONSTRAINT report_templates report_templates_pkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.report_templates DROP CONSTRAINT report_templates_pkey;
+pg_restore: dropping CONSTRAINT recipients recipients_pkey
+pg_restore: from TOC entry 3559; 2606 52533 CONSTRAINT recipients recipients_pkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.recipients DROP CONSTRAINT recipients_pkey;
+pg_restore: dropping CONSTRAINT ranks ranks_pkey
+pg_restore: from TOC entry 3487; 2606 35659 CONSTRAINT ranks ranks_pkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.ranks DROP CONSTRAINT ranks_pkey;
+pg_restore: dropping CONSTRAINT positions positions_pkey
+pg_restore: from TOC entry 3499; 2606 35701 CONSTRAINT positions positions_pkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.positions DROP CONSTRAINT positions_pkey;
+pg_restore: dropping CONSTRAINT outgoing_requests outgoing_requests_pkey
+pg_restore: from TOC entry 3525; 2606 35818 CONSTRAINT outgoing_requests outgoing_requests_pkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.outgoing_requests DROP CONSTRAINT outgoing_requests_pkey;
+pg_restore: dropping CONSTRAINT military_units military_units_pkey
+pg_restore: from TOC entry 3495; 2606 35687 CONSTRAINT military_units military_units_pkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.military_units DROP CONSTRAINT military_units_pkey;
+pg_restore: dropping CONSTRAINT krd_versions krd_versions_pkey
+pg_restore: from TOC entry 3570; 2606 85842 CONSTRAINT krd_versions krd_versions_pkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.krd_versions DROP CONSTRAINT krd_versions_pkey;
+pg_restore: dropping CONSTRAINT krd_versions krd_versions_krd_id_version_number_key
+pg_restore: from TOC entry 3568; 2606 85844 CONSTRAINT krd_versions krd_versions_krd_id_version_number_key postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.krd_versions DROP CONSTRAINT krd_versions_krd_id_version_number_key;
+pg_restore: dropping CONSTRAINT krd krd_pkey
+pg_restore: from TOC entry 3503; 2606 35708 CONSTRAINT krd krd_pkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.krd DROP CONSTRAINT krd_pkey;
+pg_restore: dropping CONSTRAINT initiator_types initiator_types_pkey
+pg_restore: from TOC entry 3491; 2606 35673 CONSTRAINT initiator_types initiator_types_pkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.initiator_types DROP CONSTRAINT initiator_types_pkey;
+pg_restore: dropping CONSTRAINT incoming_orders incoming_orders_pkey
+pg_restore: from TOC entry 3521; 2606 35794 CONSTRAINT incoming_orders incoming_orders_pkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.incoming_orders DROP CONSTRAINT incoming_orders_pkey;
+pg_restore: dropping CONSTRAINT garrisons garrisons_pkey
+pg_restore: from TOC entry 3497; 2606 35694 CONSTRAINT garrisons garrisons_pkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.garrisons DROP CONSTRAINT garrisons_pkey;
+pg_restore: dropping CONSTRAINT field_mappings field_mappings_pkey
+pg_restore: from TOC entry 3544; 2606 36090 CONSTRAINT field_mappings field_mappings_pkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.field_mappings DROP CONSTRAINT field_mappings_pkey;
+pg_restore: dropping CONSTRAINT document_templates document_templates_pkey
+pg_restore: from TOC entry 3541; 2606 36080 CONSTRAINT document_templates document_templates_pkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.document_templates DROP CONSTRAINT document_templates_pkey;
+pg_restore: dropping CONSTRAINT categories categories_pkey
+pg_restore: from TOC entry 3489; 2606 35666 CONSTRAINT categories categories_pkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.categories DROP CONSTRAINT categories_pkey;
+pg_restore: dropping CONSTRAINT audit_log audit_log_pkey
+pg_restore: from TOC entry 3547; 2606 36124 CONSTRAINT audit_log audit_log_pkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.audit_log DROP CONSTRAINT audit_log_pkey;
+pg_restore: dropping CONSTRAINT addresses addresses_pkey
+pg_restore: from TOC entry 3513; 2606 35746 CONSTRAINT addresses addresses_pkey postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE ONLY krd.addresses DROP CONSTRAINT addresses_pkey;
+pg_restore: dropping DEFAULT users id
+pg_restore: from TOC entry 3441; 2604 36005 DEFAULT users id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE krd.users ALTER COLUMN id DROP DEFAULT;
+pg_restore: dropping DEFAULT user_settings id
+pg_restore: from TOC entry 3464; 2604 68931 DEFAULT user_settings id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE krd.user_settings ALTER COLUMN id DROP DEFAULT;
+pg_restore: dropping DEFAULT user_roles id
+pg_restore: from TOC entry 3439; 2604 35961 DEFAULT user_roles id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE krd.user_roles ALTER COLUMN id DROP DEFAULT;
+pg_restore: dropping DEFAULT statuses id
+pg_restore: from TOC entry 3412; 2604 35650 DEFAULT statuses id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE krd.statuses ALTER COLUMN id DROP DEFAULT;
+pg_restore: dropping DEFAULT social_data id
+pg_restore: from TOC entry 3423; 2604 35718 DEFAULT social_data id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE krd.social_data ALTER COLUMN id DROP DEFAULT;
+pg_restore: dropping DEFAULT soch_episodes id
+pg_restore: from TOC entry 3437; 2604 35838 DEFAULT soch_episodes id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE krd.soch_episodes ALTER COLUMN id DROP DEFAULT;
+pg_restore: dropping DEFAULT signatories id
+pg_restore: from TOC entry 3471; 2604 102431 DEFAULT signatories id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE krd.signatories ALTER COLUMN id DROP DEFAULT;
+pg_restore: dropping DEFAULT service_places id
+pg_restore: from TOC entry 3428; 2604 35756 DEFAULT service_places id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE krd.service_places ALTER COLUMN id DROP DEFAULT;
+pg_restore: dropping DEFAULT request_types id
+pg_restore: from TOC entry 3416; 2604 35678 DEFAULT request_types id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE krd.request_types ALTER COLUMN id DROP DEFAULT;
+pg_restore: dropping DEFAULT report_templates id
+pg_restore: from TOC entry 3454; 2604 52486 DEFAULT report_templates id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE krd.report_templates ALTER COLUMN id DROP DEFAULT;
+pg_restore: dropping DEFAULT recipients id
+pg_restore: from TOC entry 3461; 2604 52535 DEFAULT recipients id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE krd.recipients ALTER COLUMN id DROP DEFAULT;
+pg_restore: dropping DEFAULT ranks id
+pg_restore: from TOC entry 3413; 2604 35657 DEFAULT ranks id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE krd.ranks ALTER COLUMN id DROP DEFAULT;
+pg_restore: dropping DEFAULT positions id
+pg_restore: from TOC entry 3419; 2604 35699 DEFAULT positions id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE krd.positions ALTER COLUMN id DROP DEFAULT;
+pg_restore: dropping DEFAULT outgoing_requests id
+pg_restore: from TOC entry 3434; 2604 35814 DEFAULT outgoing_requests id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE krd.outgoing_requests ALTER COLUMN id DROP DEFAULT;
+pg_restore: dropping DEFAULT military_units id
+pg_restore: from TOC entry 3417; 2604 35685 DEFAULT military_units id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE krd.military_units ALTER COLUMN id DROP DEFAULT;
+pg_restore: dropping DEFAULT krd_versions id
+pg_restore: from TOC entry 3469; 2604 85837 DEFAULT krd_versions id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE krd.krd_versions ALTER COLUMN id DROP DEFAULT;
+pg_restore: dropping DEFAULT krd id
+pg_restore: from TOC entry 3420; 2604 35706 DEFAULT krd id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE krd.krd ALTER COLUMN id DROP DEFAULT;
+pg_restore: dropping DEFAULT initiator_types id
+pg_restore: from TOC entry 3415; 2604 35671 DEFAULT initiator_types id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE krd.initiator_types ALTER COLUMN id DROP DEFAULT;
+pg_restore: dropping DEFAULT incoming_orders id
+pg_restore: from TOC entry 3431; 2604 35790 DEFAULT incoming_orders id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE krd.incoming_orders ALTER COLUMN id DROP DEFAULT;
+pg_restore: dropping DEFAULT garrisons id
+pg_restore: from TOC entry 3418; 2604 35692 DEFAULT garrisons id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE krd.garrisons ALTER COLUMN id DROP DEFAULT;
+pg_restore: dropping DEFAULT field_mappings id
+pg_restore: from TOC entry 3449; 2604 36085 DEFAULT field_mappings id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE krd.field_mappings ALTER COLUMN id DROP DEFAULT;
+pg_restore: dropping DEFAULT document_templates id
+pg_restore: from TOC entry 3445; 2604 36074 DEFAULT document_templates id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE krd.document_templates ALTER COLUMN id DROP DEFAULT;
+pg_restore: dropping DEFAULT categories id
+pg_restore: from TOC entry 3414; 2604 35664 DEFAULT categories id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE krd.categories ALTER COLUMN id DROP DEFAULT;
+pg_restore: dropping DEFAULT audit_log id
+pg_restore: from TOC entry 3452; 2604 36119 DEFAULT audit_log id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE krd.audit_log ALTER COLUMN id DROP DEFAULT;
+pg_restore: dropping DEFAULT addresses id
+pg_restore: from TOC entry 3425; 2604 35742 DEFAULT addresses id postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: ALTER TABLE krd.addresses ALTER COLUMN id DROP DEFAULT;
+pg_restore: dropping SEQUENCE users_id_seq
+pg_restore: from TOC entry 250; 1259 36001 SEQUENCE users_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SEQUENCE krd.users_id_seq;
+pg_restore: dropping TABLE users
+pg_restore: from TOC entry 251; 1259 36002 TABLE users postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP TABLE krd.users;
+pg_restore: dropping SEQUENCE user_settings_id_seq
+pg_restore: from TOC entry 262; 1259 68927 SEQUENCE user_settings_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SEQUENCE krd.user_settings_id_seq;
+pg_restore: dropping TABLE user_settings
+pg_restore: from TOC entry 263; 1259 68928 TABLE user_settings postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP TABLE krd.user_settings;
+pg_restore: dropping SEQUENCE user_roles_id_seq
+pg_restore: from TOC entry 248; 1259 35957 SEQUENCE user_roles_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SEQUENCE krd.user_roles_id_seq;
+pg_restore: dropping TABLE user_roles
+pg_restore: from TOC entry 249; 1259 35958 TABLE user_roles postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP TABLE krd.user_roles;
+pg_restore: dropping SEQUENCE statuses_id_seq
+pg_restore: from TOC entry 218; 1259 35646 SEQUENCE statuses_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SEQUENCE krd.statuses_id_seq;
+pg_restore: dropping TABLE statuses
+pg_restore: from TOC entry 219; 1259 35647 TABLE statuses postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP TABLE krd.statuses;
+pg_restore: dropping SEQUENCE social_data_id_seq
+pg_restore: from TOC entry 236; 1259 35714 SEQUENCE social_data_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SEQUENCE krd.social_data_id_seq;
+pg_restore: dropping TABLE social_data
+pg_restore: from TOC entry 237; 1259 35715 TABLE social_data postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP TABLE krd.social_data;
+pg_restore: dropping SEQUENCE soch_episodes_id_seq
+pg_restore: from TOC entry 246; 1259 35834 SEQUENCE soch_episodes_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SEQUENCE krd.soch_episodes_id_seq;
+pg_restore: dropping TABLE soch_episodes
+pg_restore: from TOC entry 247; 1259 35835 TABLE soch_episodes postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP TABLE krd.soch_episodes;
+pg_restore: dropping SEQUENCE signatories_id_seq
+pg_restore: from TOC entry 267; 1259 102430 SEQUENCE signatories_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SEQUENCE krd.signatories_id_seq;
+pg_restore: dropping TABLE signatories
+pg_restore: from TOC entry 266; 1259 102423 TABLE signatories postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP TABLE krd.signatories;
+pg_restore: dropping SEQUENCE service_places_id_seq
+pg_restore: from TOC entry 240; 1259 35752 SEQUENCE service_places_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SEQUENCE krd.service_places_id_seq;
+pg_restore: dropping TABLE service_places
+pg_restore: from TOC entry 241; 1259 35753 TABLE service_places postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP TABLE krd.service_places;
+pg_restore: dropping SEQUENCE request_types_id_seq
+pg_restore: from TOC entry 226; 1259 35674 SEQUENCE request_types_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SEQUENCE krd.request_types_id_seq;
+pg_restore: dropping TABLE request_types
+pg_restore: from TOC entry 227; 1259 35675 TABLE request_types postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP TABLE krd.request_types;
+pg_restore: dropping SEQUENCE report_templates_id_seq
+pg_restore: from TOC entry 258; 1259 52482 SEQUENCE report_templates_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SEQUENCE krd.report_templates_id_seq;
+pg_restore: dropping TABLE report_templates
+pg_restore: from TOC entry 259; 1259 52483 TABLE report_templates postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP TABLE krd.report_templates;
+pg_restore: dropping SEQUENCE recipients_id_seq
+pg_restore: from TOC entry 261; 1259 52534 SEQUENCE recipients_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SEQUENCE krd.recipients_id_seq;
+pg_restore: dropping TABLE recipients
+pg_restore: from TOC entry 260; 1259 52525 TABLE recipients postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP TABLE krd.recipients;
+pg_restore: dropping SEQUENCE ranks_id_seq
+pg_restore: from TOC entry 220; 1259 35653 SEQUENCE ranks_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SEQUENCE krd.ranks_id_seq;
+pg_restore: dropping TABLE ranks
+pg_restore: from TOC entry 221; 1259 35654 TABLE ranks postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP TABLE krd.ranks;
+pg_restore: dropping SEQUENCE positions_id_seq
+pg_restore: from TOC entry 232; 1259 35695 SEQUENCE positions_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SEQUENCE krd.positions_id_seq;
+pg_restore: dropping TABLE positions
+pg_restore: from TOC entry 233; 1259 35696 TABLE positions postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP TABLE krd.positions;
+pg_restore: dropping SEQUENCE outgoing_requests_id_seq
+pg_restore: from TOC entry 244; 1259 35810 SEQUENCE outgoing_requests_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SEQUENCE krd.outgoing_requests_id_seq;
+pg_restore: dropping TABLE outgoing_requests
+pg_restore: from TOC entry 245; 1259 35811 TABLE outgoing_requests postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP TABLE krd.outgoing_requests;
+pg_restore: dropping SEQUENCE military_units_id_seq
+pg_restore: from TOC entry 228; 1259 35681 SEQUENCE military_units_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SEQUENCE krd.military_units_id_seq;
+pg_restore: dropping TABLE military_units
+pg_restore: from TOC entry 229; 1259 35682 TABLE military_units postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP TABLE krd.military_units;
+pg_restore: dropping SEQUENCE krd_versions_id_seq
+pg_restore: from TOC entry 264; 1259 85833 SEQUENCE krd_versions_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SEQUENCE krd.krd_versions_id_seq;
+pg_restore: dropping TABLE krd_versions
+pg_restore: from TOC entry 265; 1259 85834 TABLE krd_versions postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP TABLE krd.krd_versions;
+pg_restore: dropping SEQUENCE krd_id_seq
+pg_restore: from TOC entry 234; 1259 35702 SEQUENCE krd_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SEQUENCE krd.krd_id_seq;
+pg_restore: dropping TABLE krd
+pg_restore: from TOC entry 235; 1259 35703 TABLE krd postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP TABLE krd.krd;
+pg_restore: dropping SEQUENCE initiator_types_id_seq
+pg_restore: from TOC entry 224; 1259 35667 SEQUENCE initiator_types_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SEQUENCE krd.initiator_types_id_seq;
+pg_restore: dropping TABLE initiator_types
+pg_restore: from TOC entry 225; 1259 35668 TABLE initiator_types postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP TABLE krd.initiator_types;
+pg_restore: dropping SEQUENCE incoming_orders_id_seq
+pg_restore: from TOC entry 242; 1259 35786 SEQUENCE incoming_orders_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SEQUENCE krd.incoming_orders_id_seq;
+pg_restore: dropping TABLE incoming_orders
+pg_restore: from TOC entry 243; 1259 35787 TABLE incoming_orders postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP TABLE krd.incoming_orders;
+pg_restore: dropping SEQUENCE garrisons_id_seq
+pg_restore: from TOC entry 230; 1259 35688 SEQUENCE garrisons_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SEQUENCE krd.garrisons_id_seq;
+pg_restore: dropping TABLE garrisons
+pg_restore: from TOC entry 231; 1259 35689 TABLE garrisons postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP TABLE krd.garrisons;
+pg_restore: dropping SEQUENCE field_mappings_id_seq
+pg_restore: from TOC entry 254; 1259 36081 SEQUENCE field_mappings_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SEQUENCE krd.field_mappings_id_seq;
+pg_restore: dropping TABLE field_mappings
+pg_restore: from TOC entry 255; 1259 36082 TABLE field_mappings postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP TABLE krd.field_mappings;
+pg_restore: dropping SEQUENCE document_templates_id_seq
+pg_restore: from TOC entry 252; 1259 36070 SEQUENCE document_templates_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SEQUENCE krd.document_templates_id_seq;
+pg_restore: dropping TABLE document_templates
+pg_restore: from TOC entry 253; 1259 36071 TABLE document_templates postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP TABLE krd.document_templates;
+pg_restore: dropping SEQUENCE categories_id_seq
+pg_restore: from TOC entry 222; 1259 35660 SEQUENCE categories_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SEQUENCE krd.categories_id_seq;
+pg_restore: dropping TABLE categories
+pg_restore: from TOC entry 223; 1259 35661 TABLE categories postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP TABLE krd.categories;
+pg_restore: dropping SEQUENCE audit_log_id_seq
+pg_restore: from TOC entry 256; 1259 36115 SEQUENCE audit_log_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SEQUENCE krd.audit_log_id_seq;
+pg_restore: dropping TABLE audit_log
+pg_restore: from TOC entry 257; 1259 36116 TABLE audit_log postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP TABLE krd.audit_log;
+pg_restore: dropping SEQUENCE addresses_id_seq
+pg_restore: from TOC entry 238; 1259 35738 SEQUENCE addresses_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SEQUENCE krd.addresses_id_seq;
+pg_restore: dropping TABLE addresses
+pg_restore: from TOC entry 239; 1259 35739 TABLE addresses postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP TABLE krd.addresses;
+pg_restore: dropping SCHEMA krd
+pg_restore: from TOC entry 6; 2615 35645 SCHEMA krd postgres
+pg_restore: error: could not execute query: ERROR:  schema "krd" does not exist
+Command was: DROP SCHEMA krd;
+pg_restore: creating SCHEMA "krd"
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SCHEMA krd OWNER TO postgres;
+
+pg_restore: creating TABLE "krd.addresses"
+pg_restore: from TOC entry 239; 1259 35739 TABLE addresses postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER TABLE krd.addresses OWNER TO postgres;
+
+pg_restore: creating COMMENT "krd.TABLE addresses"
+pg_restore: creating COMMENT "krd.COLUMN addresses.id"
+pg_restore: creating COMMENT "krd.COLUMN addresses.krd_id"
+pg_restore: creating SEQUENCE "krd.addresses_id_seq"
+pg_restore: from TOC entry 238; 1259 35738 SEQUENCE addresses_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SEQUENCE krd.addresses_id_seq OWNER TO postgres;
+
+pg_restore: creating SEQUENCE OWNED BY "krd.addresses_id_seq"
+pg_restore: creating TABLE "krd.audit_log"
+pg_restore: from TOC entry 257; 1259 36116 TABLE audit_log postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER TABLE krd.audit_log OWNER TO postgres;
+
+pg_restore: creating COMMENT "krd.TABLE audit_log"
+pg_restore: creating COMMENT "krd.COLUMN audit_log.id"
+pg_restore: creating COMMENT "krd.COLUMN audit_log.user_id"
+pg_restore: creating COMMENT "krd.COLUMN audit_log.username"
+pg_restore: creating COMMENT "krd.COLUMN audit_log.action_type"
+pg_restore: creating COMMENT "krd.COLUMN audit_log.table_name"
+pg_restore: creating COMMENT "krd.COLUMN audit_log.record_id"
+pg_restore: creating COMMENT "krd.COLUMN audit_log.krd_id"
+pg_restore: creating COMMENT "krd.COLUMN audit_log.created_at"
+pg_restore: creating SEQUENCE "krd.audit_log_id_seq"
+pg_restore: from TOC entry 256; 1259 36115 SEQUENCE audit_log_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SEQUENCE krd.audit_log_id_seq OWNER TO postgres;
+
+pg_restore: creating SEQUENCE OWNED BY "krd.audit_log_id_seq"
+pg_restore: creating TABLE "krd.categories"
+pg_restore: from TOC entry 223; 1259 35661 TABLE categories postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER TABLE krd.categories OWNER TO postgres;
+
+pg_restore: creating COMMENT "krd.TABLE categories"
+pg_restore: creating COMMENT "krd.COLUMN categories.id"
+pg_restore: creating COMMENT "krd.COLUMN categories.name"
+pg_restore: creating SEQUENCE "krd.categories_id_seq"
+pg_restore: from TOC entry 222; 1259 35660 SEQUENCE categories_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SEQUENCE krd.categories_id_seq OWNER TO postgres;
+
+pg_restore: creating SEQUENCE OWNED BY "krd.categories_id_seq"
+pg_restore: creating TABLE "krd.document_templates"
+pg_restore: from TOC entry 253; 1259 36071 TABLE document_templates postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER TABLE krd.document_templates OWNER TO postgres;
+
+pg_restore: creating SEQUENCE "krd.document_templates_id_seq"
+pg_restore: from TOC entry 252; 1259 36070 SEQUENCE document_templates_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SEQUENCE krd.document_templates_id_seq OWNER TO postgres;
+
+pg_restore: creating SEQUENCE OWNED BY "krd.document_templates_id_seq"
+pg_restore: creating TABLE "krd.field_mappings"
+pg_restore: from TOC entry 255; 1259 36082 TABLE field_mappings postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER TABLE krd.field_mappings OWNER TO postgres;
+
+pg_restore: creating COMMENT "krd.COLUMN field_mappings.db_columns"
+pg_restore: creating COMMENT "krd.COLUMN field_mappings.is_composite"
+pg_restore: creating SEQUENCE "krd.field_mappings_id_seq"
+pg_restore: from TOC entry 254; 1259 36081 SEQUENCE field_mappings_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SEQUENCE krd.field_mappings_id_seq OWNER TO postgres;
+
+pg_restore: creating SEQUENCE OWNED BY "krd.field_mappings_id_seq"
+pg_restore: creating TABLE "krd.garrisons"
+pg_restore: from TOC entry 231; 1259 35689 TABLE garrisons postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER TABLE krd.garrisons OWNER TO postgres;
+
+pg_restore: creating COMMENT "krd.TABLE garrisons"
+pg_restore: creating COMMENT "krd.COLUMN garrisons.id"
+pg_restore: creating COMMENT "krd.COLUMN garrisons.name"
+pg_restore: creating SEQUENCE "krd.garrisons_id_seq"
+pg_restore: from TOC entry 230; 1259 35688 SEQUENCE garrisons_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SEQUENCE krd.garrisons_id_seq OWNER TO postgres;
+
+pg_restore: creating SEQUENCE OWNED BY "krd.garrisons_id_seq"
+pg_restore: creating TABLE "krd.incoming_orders"
+pg_restore: from TOC entry 243; 1259 35787 TABLE incoming_orders postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER TABLE krd.incoming_orders OWNER TO postgres;
+
+pg_restore: creating COMMENT "krd.TABLE incoming_orders"
+pg_restore: creating COMMENT "krd.COLUMN incoming_orders.id"
+pg_restore: creating COMMENT "krd.COLUMN incoming_orders.krd_id"
+pg_restore: creating COMMENT "krd.COLUMN incoming_orders.initiator_type_id"
+pg_restore: creating COMMENT "krd.COLUMN incoming_orders.initiator_full_name"
+pg_restore: creating COMMENT "krd.COLUMN incoming_orders.military_unit_id"
+pg_restore: creating COMMENT "krd.COLUMN incoming_orders.order_date"
+pg_restore: creating COMMENT "krd.COLUMN incoming_orders.order_number"
+pg_restore: creating COMMENT "krd.COLUMN incoming_orders.receipt_date"
+pg_restore: creating COMMENT "krd.COLUMN incoming_orders.receipt_number"
+pg_restore: creating SEQUENCE "krd.incoming_orders_id_seq"
+pg_restore: from TOC entry 242; 1259 35786 SEQUENCE incoming_orders_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SEQUENCE krd.incoming_orders_id_seq OWNER TO postgres;
+
+pg_restore: creating SEQUENCE OWNED BY "krd.incoming_orders_id_seq"
+pg_restore: creating TABLE "krd.initiator_types"
+pg_restore: from TOC entry 225; 1259 35668 TABLE initiator_types postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER TABLE krd.initiator_types OWNER TO postgres;
+
+pg_restore: creating COMMENT "krd.TABLE initiator_types"
+pg_restore: creating COMMENT "krd.COLUMN initiator_types.id"
+pg_restore: creating COMMENT "krd.COLUMN initiator_types.name"
+pg_restore: creating SEQUENCE "krd.initiator_types_id_seq"
+pg_restore: from TOC entry 224; 1259 35667 SEQUENCE initiator_types_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SEQUENCE krd.initiator_types_id_seq OWNER TO postgres;
+
+pg_restore: creating SEQUENCE OWNED BY "krd.initiator_types_id_seq"
+pg_restore: creating TABLE "krd.krd"
+pg_restore: from TOC entry 235; 1259 35703 TABLE krd postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER TABLE krd.krd OWNER TO postgres;
+
+pg_restore: creating COMMENT "krd.TABLE krd"
+pg_restore: creating COMMENT "krd.COLUMN krd.id"
+pg_restore: creating COMMENT "krd.COLUMN krd.status_id"
+pg_restore: creating COMMENT "krd.COLUMN krd.last_service_place_id"
+pg_restore: creating SEQUENCE "krd.krd_id_seq"
+pg_restore: from TOC entry 234; 1259 35702 SEQUENCE krd_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SEQUENCE krd.krd_id_seq OWNER TO postgres;
+
+pg_restore: creating SEQUENCE OWNED BY "krd.krd_id_seq"
+pg_restore: creating TABLE "krd.krd_versions"
+pg_restore: from TOC entry 265; 1259 85834 TABLE krd_versions postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER TABLE krd.krd_versions OWNER TO postgres;
+
+pg_restore: creating COMMENT "krd.TABLE krd_versions"
+pg_restore: creating COMMENT "krd.COLUMN krd_versions.description"
+pg_restore: creating COMMENT "krd.COLUMN krd_versions.snapshot_data"
+pg_restore: creating SEQUENCE "krd.krd_versions_id_seq"
+pg_restore: from TOC entry 264; 1259 85833 SEQUENCE krd_versions_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SEQUENCE krd.krd_versions_id_seq OWNER TO postgres;
+
+pg_restore: creating SEQUENCE OWNED BY "krd.krd_versions_id_seq"
+pg_restore: creating TABLE "krd.military_units"
+pg_restore: from TOC entry 229; 1259 35682 TABLE military_units postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER TABLE krd.military_units OWNER TO postgres;
+
+pg_restore: creating COMMENT "krd.TABLE military_units"
+pg_restore: creating COMMENT "krd.COLUMN military_units.id"
+pg_restore: creating COMMENT "krd.COLUMN military_units.name"
+pg_restore: creating SEQUENCE "krd.military_units_id_seq"
+pg_restore: from TOC entry 228; 1259 35681 SEQUENCE military_units_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SEQUENCE krd.military_units_id_seq OWNER TO postgres;
+
+pg_restore: creating SEQUENCE OWNED BY "krd.military_units_id_seq"
+pg_restore: creating TABLE "krd.outgoing_requests"
+pg_restore: from TOC entry 245; 1259 35811 TABLE outgoing_requests postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER TABLE krd.outgoing_requests OWNER TO postgres;
+
+pg_restore: creating COMMENT "krd.TABLE outgoing_requests"
+pg_restore: creating COMMENT "krd.COLUMN outgoing_requests.id"
+pg_restore: creating COMMENT "krd.COLUMN outgoing_requests.krd_id"
+pg_restore: creating COMMENT "krd.COLUMN outgoing_requests.request_type_id"
+pg_restore: creating COMMENT "krd.COLUMN outgoing_requests.issue_date"
+pg_restore: creating COMMENT "krd.COLUMN outgoing_requests.issue_number"
+pg_restore: creating COMMENT "krd.COLUMN outgoing_requests.document_data"
+pg_restore: creating COMMENT "krd.COLUMN outgoing_requests.is_deleted"
+pg_restore: creating COMMENT "krd.COLUMN outgoing_requests.deleted_at"
+pg_restore: creating COMMENT "krd.COLUMN outgoing_requests.deleted_by"
+pg_restore: creating SEQUENCE "krd.outgoing_requests_id_seq"
+pg_restore: from TOC entry 244; 1259 35810 SEQUENCE outgoing_requests_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SEQUENCE krd.outgoing_requests_id_seq OWNER TO postgres;
+
+pg_restore: creating SEQUENCE OWNED BY "krd.outgoing_requests_id_seq"
+pg_restore: creating TABLE "krd.positions"
+pg_restore: from TOC entry 233; 1259 35696 TABLE positions postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER TABLE krd.positions OWNER TO postgres;
+
+pg_restore: creating COMMENT "krd.TABLE positions"
+pg_restore: creating COMMENT "krd.COLUMN positions.id"
+pg_restore: creating COMMENT "krd.COLUMN positions.name"
+pg_restore: creating SEQUENCE "krd.positions_id_seq"
+pg_restore: from TOC entry 232; 1259 35695 SEQUENCE positions_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SEQUENCE krd.positions_id_seq OWNER TO postgres;
+
+pg_restore: creating SEQUENCE OWNED BY "krd.positions_id_seq"
+pg_restore: creating TABLE "krd.ranks"
+pg_restore: from TOC entry 221; 1259 35654 TABLE ranks postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER TABLE krd.ranks OWNER TO postgres;
+
+pg_restore: creating COMMENT "krd.TABLE ranks"
+pg_restore: creating COMMENT "krd.COLUMN ranks.id"
+pg_restore: creating COMMENT "krd.COLUMN ranks.name"
+pg_restore: creating SEQUENCE "krd.ranks_id_seq"
+pg_restore: from TOC entry 220; 1259 35653 SEQUENCE ranks_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SEQUENCE krd.ranks_id_seq OWNER TO postgres;
+
+pg_restore: creating SEQUENCE OWNED BY "krd.ranks_id_seq"
+pg_restore: creating TABLE "krd.recipients"
+pg_restore: from TOC entry 260; 1259 52525 TABLE recipients postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER TABLE krd.recipients OWNER TO postgres;
+
+pg_restore: creating SEQUENCE "krd.recipients_id_seq"
+pg_restore: from TOC entry 261; 1259 52534 SEQUENCE recipients_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SEQUENCE krd.recipients_id_seq OWNER TO postgres;
+
+pg_restore: creating SEQUENCE OWNED BY "krd.recipients_id_seq"
+pg_restore: creating TABLE "krd.report_templates"
+pg_restore: from TOC entry 259; 1259 52483 TABLE report_templates postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER TABLE krd.report_templates OWNER TO postgres;
+
+pg_restore: creating SEQUENCE "krd.report_templates_id_seq"
+pg_restore: from TOC entry 258; 1259 52482 SEQUENCE report_templates_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SEQUENCE krd.report_templates_id_seq OWNER TO postgres;
+
+pg_restore: creating SEQUENCE OWNED BY "krd.report_templates_id_seq"
+pg_restore: creating TABLE "krd.request_types"
+pg_restore: from TOC entry 227; 1259 35675 TABLE request_types postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER TABLE krd.request_types OWNER TO postgres;
+
+pg_restore: creating COMMENT "krd.TABLE request_types"
+pg_restore: creating COMMENT "krd.COLUMN request_types.id"
+pg_restore: creating COMMENT "krd.COLUMN request_types.name"
+pg_restore: creating SEQUENCE "krd.request_types_id_seq"
+pg_restore: from TOC entry 226; 1259 35674 SEQUENCE request_types_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SEQUENCE krd.request_types_id_seq OWNER TO postgres;
+
+pg_restore: creating SEQUENCE OWNED BY "krd.request_types_id_seq"
+pg_restore: creating TABLE "krd.service_places"
+pg_restore: from TOC entry 241; 1259 35753 TABLE service_places postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER TABLE krd.service_places OWNER TO postgres;
+
+pg_restore: creating COMMENT "krd.TABLE service_places"
+pg_restore: creating COMMENT "krd.COLUMN service_places.id"
+pg_restore: creating COMMENT "krd.COLUMN service_places.krd_id"
+pg_restore: creating COMMENT "krd.COLUMN service_places.place_name"
+pg_restore: creating COMMENT "krd.COLUMN service_places.military_unit_number"
+pg_restore: creating SEQUENCE "krd.service_places_id_seq"
+pg_restore: from TOC entry 240; 1259 35752 SEQUENCE service_places_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SEQUENCE krd.service_places_id_seq OWNER TO postgres;
+
+pg_restore: creating SEQUENCE OWNED BY "krd.service_places_id_seq"
+pg_restore: creating TABLE "krd.signatories"
+pg_restore: from TOC entry 266; 1259 102423 TABLE signatories postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER TABLE krd.signatories OWNER TO postgres;
+
+pg_restore: creating COMMENT "krd.TABLE signatories"
+pg_restore: creating SEQUENCE "krd.signatories_id_seq"
+pg_restore: from TOC entry 267; 1259 102430 SEQUENCE signatories_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SEQUENCE krd.signatories_id_seq OWNER TO postgres;
+
+pg_restore: creating SEQUENCE OWNED BY "krd.signatories_id_seq"
+pg_restore: creating TABLE "krd.soch_episodes"
+pg_restore: from TOC entry 247; 1259 35835 TABLE soch_episodes postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER TABLE krd.soch_episodes OWNER TO postgres;
+
+pg_restore: creating COMMENT "krd.TABLE soch_episodes"
+pg_restore: creating COMMENT "krd.COLUMN soch_episodes.id"
+pg_restore: creating COMMENT "krd.COLUMN soch_episodes.krd_id"
+pg_restore: creating SEQUENCE "krd.soch_episodes_id_seq"
+pg_restore: from TOC entry 246; 1259 35834 SEQUENCE soch_episodes_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SEQUENCE krd.soch_episodes_id_seq OWNER TO postgres;
+
+pg_restore: creating SEQUENCE OWNED BY "krd.soch_episodes_id_seq"
+pg_restore: creating TABLE "krd.social_data"
+pg_restore: from TOC entry 237; 1259 35715 TABLE social_data postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER TABLE krd.social_data OWNER TO postgres;
+
+pg_restore: creating COMMENT "krd.TABLE social_data"
+pg_restore: creating COMMENT "krd.COLUMN social_data.id"
+pg_restore: creating COMMENT "krd.COLUMN social_data.krd_id"
+pg_restore: creating COMMENT "krd.COLUMN social_data.surname"
+pg_restore: creating COMMENT "krd.COLUMN social_data.name"
+pg_restore: creating COMMENT "krd.COLUMN social_data.patronymic"
+pg_restore: creating COMMENT "krd.COLUMN social_data.photo_civilian"
+pg_restore: creating COMMENT "krd.COLUMN social_data.photo_military_headgear"
+pg_restore: creating COMMENT "krd.COLUMN social_data.photo_military_no_headgear"
+pg_restore: creating COMMENT "krd.COLUMN social_data.photo_distinctive_marks"
+pg_restore: creating SEQUENCE "krd.social_data_id_seq"
+pg_restore: from TOC entry 236; 1259 35714 SEQUENCE social_data_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SEQUENCE krd.social_data_id_seq OWNER TO postgres;
+
+pg_restore: creating SEQUENCE OWNED BY "krd.social_data_id_seq"
+pg_restore: creating TABLE "krd.statuses"
+pg_restore: from TOC entry 219; 1259 35647 TABLE statuses postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER TABLE krd.statuses OWNER TO postgres;
+
+pg_restore: creating COMMENT "krd.TABLE statuses"
+pg_restore: creating COMMENT "krd.COLUMN statuses.id"
+pg_restore: creating COMMENT "krd.COLUMN statuses.name"
+pg_restore: creating SEQUENCE "krd.statuses_id_seq"
+pg_restore: from TOC entry 218; 1259 35646 SEQUENCE statuses_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SEQUENCE krd.statuses_id_seq OWNER TO postgres;
+
+pg_restore: creating SEQUENCE OWNED BY "krd.statuses_id_seq"
+pg_restore: creating TABLE "krd.user_roles"
+pg_restore: from TOC entry 249; 1259 35958 TABLE user_roles postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER TABLE krd.user_roles OWNER TO postgres;
+
+pg_restore: creating SEQUENCE "krd.user_roles_id_seq"
+pg_restore: from TOC entry 248; 1259 35957 SEQUENCE user_roles_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SEQUENCE krd.user_roles_id_seq OWNER TO postgres;
+
+pg_restore: creating SEQUENCE OWNED BY "krd.user_roles_id_seq"
+pg_restore: creating TABLE "krd.user_settings"
+pg_restore: from TOC entry 263; 1259 68928 TABLE user_settings postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER TABLE krd.user_settings OWNER TO postgres;
+
+pg_restore: creating COMMENT "krd.TABLE user_settings"
+pg_restore: creating COMMENT "krd.COLUMN user_settings.config_json"
+pg_restore: creating SEQUENCE "krd.user_settings_id_seq"
+pg_restore: from TOC entry 262; 1259 68927 SEQUENCE user_settings_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SEQUENCE krd.user_settings_id_seq OWNER TO postgres;
+
+pg_restore: creating SEQUENCE OWNED BY "krd.user_settings_id_seq"
+pg_restore: creating TABLE "krd.users"
+pg_restore: from TOC entry 251; 1259 36002 TABLE users postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER TABLE krd.users OWNER TO postgres;
+
+pg_restore: creating SEQUENCE "krd.users_id_seq"
+pg_restore: from TOC entry 250; 1259 36001 SEQUENCE users_id_seq postgres
+pg_restore: error: could not execute query: ERROR:  must be able to SET ROLE "postgres"
+Command was: ALTER SEQUENCE krd.users_id_seq OWNER TO postgres;
+
+pg_restore: creating SEQUENCE OWNED BY "krd.users_id_seq"
+pg_restore: creating DEFAULT "krd.addresses id"
+pg_restore: creating DEFAULT "krd.audit_log id"
+pg_restore: creating DEFAULT "krd.categories id"
+pg_restore: creating DEFAULT "krd.document_templates id"
+pg_restore: creating DEFAULT "krd.field_mappings id"
+pg_restore: creating DEFAULT "krd.garrisons id"
+pg_restore: creating DEFAULT "krd.incoming_orders id"
+pg_restore: creating DEFAULT "krd.initiator_types id"
+pg_restore: creating DEFAULT "krd.krd id"
+pg_restore: creating DEFAULT "krd.krd_versions id"
+pg_restore: creating DEFAULT "krd.military_units id"
+pg_restore: creating DEFAULT "krd.outgoing_requests id"
+pg_restore: creating DEFAULT "krd.positions id"
+pg_restore: creating DEFAULT "krd.ranks id"
+pg_restore: creating DEFAULT "krd.recipients id"
+pg_restore: creating DEFAULT "krd.report_templates id"
+pg_restore: creating DEFAULT "krd.request_types id"
+pg_restore: creating DEFAULT "krd.service_places id"
+pg_restore: creating DEFAULT "krd.signatories id"
+pg_restore: creating DEFAULT "krd.soch_episodes id"
+pg_restore: creating DEFAULT "krd.social_data id"
+pg_restore: creating DEFAULT "krd.statuses id"
+pg_restore: creating DEFAULT "krd.user_roles id"
+pg_restore: creating DEFAULT "krd.user_settings id"
+pg_restore: creating DEFAULT "krd.users id"
+pg_restore: processing data for table "krd.addresses"
+pg_restore: processing data for table "krd.audit_log"
+pg_restore: processing data for table "krd.categories"
+pg_restore: processing data for table "krd.document_templates"
+pg_restore: processing data for table "krd.field_mappings"
+pg_restore: processing data for table "krd.garrisons"
+pg_restore: processing data for table "krd.incoming_orders"
+pg_restore: processing data for table "krd.initiator_types"
+pg_restore: processing data for table "krd.krd"
+pg_restore: processing data for table "krd.krd_versions"
+pg_restore: processing data for table "krd.military_units"
+pg_restore: processing data for table "krd.outgoing_requests"
+pg_restore: processing data for table "krd.positions"
+pg_restore: processing data for table "krd.ranks"
+pg_restore: processing data for table "krd.recipients"
+pg_restore: processing data for table "krd.report_templates"
+pg_restore: processing data for table "krd.request_types"
+pg_restore: processing data for table "krd.service_places"
+pg_restore: processing data for table "krd.signatories"
+pg_restore: processing data for table "krd.soch_episodes"
+pg_restore: processing data for table "krd.social_data"
+pg_restore: processing data for table "krd.statuses"
+pg_restore: processing data for table "krd.user_roles"
+pg_restore: processing data for table "krd.user_settings"
+pg_restore: processing data for table "krd.users"
+pg_restore: executing SEQUENCE SET addresses_id_seq
+pg_restore: executing SEQUENCE SET audit_log_id_seq
+pg_restore: executing SEQUENCE SET categories_id_seq
+pg_restore: executing SEQUENCE SET document_templates_id_seq
+pg_restore: executing SEQUENCE SET field_mappings_id_seq
+pg_restore: executing SEQUENCE SET garrisons_id_seq
+pg_restore: executing SEQUENCE SET incoming_orders_id_seq
+pg_restore: executing SEQUENCE SET initiator_types_id_seq
+pg_restore: executing SEQUENCE SET krd_id_seq
+pg_restore: executing SEQUENCE SET krd_versions_id_seq
+pg_restore: executing SEQUENCE SET military_units_id_seq
+pg_restore: executing SEQUENCE SET outgoing_requests_id_seq
+pg_restore: executing SEQUENCE SET positions_id_seq
+pg_restore: executing SEQUENCE SET ranks_id_seq
+pg_restore: executing SEQUENCE SET recipients_id_seq
+pg_restore: executing SEQUENCE SET report_templates_id_seq
+pg_restore: executing SEQUENCE SET request_types_id_seq
+pg_restore: executing SEQUENCE SET service_places_id_seq
+pg_restore: executing SEQUENCE SET signatories_id_seq
+pg_restore: executing SEQUENCE SET soch_episodes_id_seq
+pg_restore: executing SEQUENCE SET social_data_id_seq
+pg_restore: executing SEQUENCE SET statuses_id_seq
+pg_restore: executing SEQUENCE SET user_roles_id_seq
+pg_restore: executing SEQUENCE SET user_settings_id_seq
+pg_restore: executing SEQUENCE SET users_id_seq
+pg_restore: creating CONSTRAINT "krd.addresses addresses_pkey"
+pg_restore: creating CONSTRAINT "krd.audit_log audit_log_pkey"
+pg_restore: creating CONSTRAINT "krd.categories categories_pkey"
+pg_restore: creating CONSTRAINT "krd.document_templates document_templates_pkey"
+pg_restore: creating CONSTRAINT "krd.field_mappings field_mappings_pkey"
+pg_restore: creating CONSTRAINT "krd.garrisons garrisons_pkey"
+pg_restore: creating CONSTRAINT "krd.incoming_orders incoming_orders_pkey"
+pg_restore: creating CONSTRAINT "krd.initiator_types initiator_types_pkey"
+pg_restore: creating CONSTRAINT "krd.krd krd_pkey"
+pg_restore: creating CONSTRAINT "krd.krd_versions krd_versions_krd_id_version_number_key"
+pg_restore: creating CONSTRAINT "krd.krd_versions krd_versions_pkey"
+pg_restore: creating CONSTRAINT "krd.military_units military_units_pkey"
+pg_restore: creating CONSTRAINT "krd.outgoing_requests outgoing_requests_pkey"
+pg_restore: creating CONSTRAINT "krd.positions positions_pkey"
+pg_restore: creating CONSTRAINT "krd.ranks ranks_pkey"
+pg_restore: creating CONSTRAINT "krd.recipients recipients_pkey"
+pg_restore: creating CONSTRAINT "krd.report_templates report_templates_pkey"
+pg_restore: creating CONSTRAINT "krd.request_types request_types_pkey"
+pg_restore: creating CONSTRAINT "krd.service_places service_places_pkey"
+pg_restore: creating CONSTRAINT "krd.signatories signatories_pkey"
+pg_restore: creating CONSTRAINT "krd.soch_episodes soch_episodes_pkey"
+pg_restore: creating CONSTRAINT "krd.social_data social_data_pkey"
+pg_restore: creating CONSTRAINT "krd.statuses statuses_pkey"
+pg_restore: creating CONSTRAINT "krd.social_data uq_social_data_krd_id"
+pg_restore: creating CONSTRAINT "krd.user_roles user_roles_pkey"
+pg_restore: creating CONSTRAINT "krd.user_roles user_roles_role_name_key"
+pg_restore: creating CONSTRAINT "krd.user_settings user_settings_pkey"
+pg_restore: creating CONSTRAINT "krd.user_settings user_settings_user_id_key"
+pg_restore: creating CONSTRAINT "krd.users users_pkey"
+pg_restore: creating CONSTRAINT "krd.users users_username_key"
+pg_restore: creating INDEX "krd.idx_addresses_krd_id"
+pg_restore: creating INDEX "krd.idx_audit_log_action_type"
+pg_restore: creating INDEX "krd.idx_audit_log_created_at"
+pg_restore: creating INDEX "krd.idx_audit_log_krd_id"
+pg_restore: creating INDEX "krd.idx_audit_log_table_name"
+pg_restore: creating INDEX "krd.idx_audit_log_user_id"
+pg_restore: creating INDEX "krd.idx_document_templates_is_deleted"
+pg_restore: creating INDEX "krd.idx_field_mappings_composite"
+pg_restore: creating INDEX "krd.idx_incoming_orders_krd_id"
+pg_restore: creating INDEX "krd.idx_incoming_orders_receipt_number"
+pg_restore: creating INDEX "krd.idx_krd_is_deleted"
+pg_restore: creating INDEX "krd.idx_krd_status_id"
+pg_restore: creating INDEX "krd.idx_krd_versions_created"
+pg_restore: creating INDEX "krd.idx_krd_versions_krd_id"
+pg_restore: creating INDEX "krd.idx_outgoing_requests_is_deleted"
+pg_restore: creating INDEX "krd.idx_outgoing_requests_krd_id"
+pg_restore: creating INDEX "krd.idx_recipients_request_type"
+pg_restore: creating INDEX "krd.idx_report_templates_deleted"
+pg_restore: creating INDEX "krd.idx_report_templates_type"
+pg_restore: creating INDEX "krd.idx_service_places_krd_id"
+pg_restore: creating INDEX "krd.idx_soch_episodes_krd_id"
+pg_restore: creating INDEX "krd.idx_soch_episodes_soch_date"
+pg_restore: creating INDEX "krd.idx_social_data_krd_id"
+pg_restore: creating INDEX "krd.idx_social_data_personal_number"
+pg_restore: creating INDEX "krd.idx_social_data_photos"
+pg_restore: creating INDEX "krd.idx_social_data_surname"
+pg_restore: creating INDEX "krd.idx_user_settings_user_id"
+pg_restore: creating INDEX "krd.idx_users_role_id"
+pg_restore: creating INDEX "krd.idx_users_username"
+pg_restore: creating FK CONSTRAINT "krd.addresses addresses_krd_id_fkey"
+pg_restore: creating FK CONSTRAINT "krd.krd fk_last_service_place"
+pg_restore: creating FK CONSTRAINT "krd.outgoing_requests fk_outgoing_requests_signatory"
+pg_restore: creating FK CONSTRAINT "krd.report_templates fk_report_templates_deleted_by"
+pg_restore: creating FK CONSTRAINT "krd.incoming_orders incoming_orders_initiator_type_id_fkey"
+pg_restore: creating FK CONSTRAINT "krd.incoming_orders incoming_orders_krd_id_fkey"
+pg_restore: creating FK CONSTRAINT "krd.incoming_orders incoming_orders_military_unit_id_fkey"
+pg_restore: creating FK CONSTRAINT "krd.krd krd_locked_by_fkey"
+pg_restore: creating FK CONSTRAINT "krd.krd krd_status_id_fkey"
+pg_restore: creating FK CONSTRAINT "krd.krd_versions krd_versions_created_by_fkey"
+pg_restore: creating FK CONSTRAINT "krd.krd_versions krd_versions_krd_id_fkey"
+pg_restore: creating FK CONSTRAINT "krd.outgoing_requests outgoing_requests_krd_id_fkey"
+pg_restore: creating FK CONSTRAINT "krd.outgoing_requests outgoing_requests_military_unit_id_fkey"
+pg_restore: creating FK CONSTRAINT "krd.outgoing_requests outgoing_requests_recipient_id_fkey"
+pg_restore: creating FK CONSTRAINT "krd.outgoing_requests outgoing_requests_request_type_id_fkey"
+pg_restore: creating FK CONSTRAINT "krd.recipients recipients_request_type_id_fkey"
+pg_restore: creating FK CONSTRAINT "krd.service_places service_places_garrison_id_fkey"
+pg_restore: creating FK CONSTRAINT "krd.service_places service_places_krd_id_fkey"
+pg_restore: creating FK CONSTRAINT "krd.service_places service_places_military_unit_id_fkey"
+pg_restore: creating FK CONSTRAINT "krd.service_places service_places_position_id_fkey"
+pg_restore: creating FK CONSTRAINT "krd.soch_episodes soch_episodes_deleted_by_fkey"
+pg_restore: creating FK CONSTRAINT "krd.soch_episodes soch_episodes_krd_id_fkey"
+pg_restore: creating FK CONSTRAINT "krd.social_data social_data_category_id_fkey"
+pg_restore: creating FK CONSTRAINT "krd.social_data social_data_krd_id_fkey"
+pg_restore: creating FK CONSTRAINT "krd.social_data social_data_rank_id_fkey"
+pg_restore: creating FK CONSTRAINT "krd.user_settings user_settings_user_id_fkey"
+pg_restore: creating FK CONSTRAINT "krd.users users_role_id_fkey"
+pg_restore: creating ACL "SCHEMA krd"
+pg_restore: creating ACL "krd.TABLE addresses"
+pg_restore: creating ACL "krd.SEQUENCE addresses_id_seq"
+pg_restore: creating ACL "krd.TABLE audit_log"
+pg_restore: creating ACL "krd.SEQUENCE audit_log_id_seq"
+pg_restore: creating ACL "krd.TABLE categories"
+pg_restore: creating ACL "krd.SEQUENCE categories_id_seq"
+pg_restore: creating ACL "krd.TABLE document_templates"
+pg_restore: creating ACL "krd.SEQUENCE document_templates_id_seq"
+pg_restore: creating ACL "krd.TABLE field_mappings"
+pg_restore: creating ACL "krd.SEQUENCE field_mappings_id_seq"
+pg_restore: creating ACL "krd.TABLE garrisons"
+pg_restore: creating ACL "krd.SEQUENCE garrisons_id_seq"
+pg_restore: creating ACL "krd.TABLE incoming_orders"
+pg_restore: creating ACL "krd.SEQUENCE incoming_orders_id_seq"
+pg_restore: creating ACL "krd.TABLE initiator_types"
+pg_restore: creating ACL "krd.SEQUENCE initiator_types_id_seq"
+pg_restore: creating ACL "krd.TABLE krd"
+pg_restore: creating ACL "krd.SEQUENCE krd_id_seq"
+pg_restore: creating ACL "krd.TABLE krd_versions"
+pg_restore: creating ACL "krd.SEQUENCE krd_versions_id_seq"
+pg_restore: creating ACL "krd.TABLE military_units"
+pg_restore: creating ACL "krd.SEQUENCE military_units_id_seq"
+pg_restore: creating ACL "krd.TABLE outgoing_requests"
+pg_restore: creating ACL "krd.SEQUENCE outgoing_requests_id_seq"
+pg_restore: creating ACL "krd.TABLE positions"
+pg_restore: creating ACL "krd.SEQUENCE positions_id_seq"
+pg_restore: creating ACL "krd.TABLE ranks"
+pg_restore: creating ACL "krd.SEQUENCE ranks_id_seq"
+pg_restore: creating ACL "krd.TABLE recipients"
+pg_restore: creating ACL "krd.SEQUENCE recipients_id_seq"
+pg_restore: creating ACL "krd.TABLE report_templates"
+pg_restore: creating ACL "krd.SEQUENCE report_templates_id_seq"
+pg_restore: creating ACL "krd.TABLE request_types"
+pg_restore: creating ACL "krd.SEQUENCE request_types_id_seq"
+pg_restore: creating ACL "krd.TABLE service_places"
+pg_restore: creating ACL "krd.SEQUENCE service_places_id_seq"
+pg_restore: creating ACL "krd.TABLE signatories"
+pg_restore: creating ACL "krd.SEQUENCE signatories_id_seq"
+pg_restore: creating ACL "krd.TABLE soch_episodes"
+pg_restore: creating ACL "krd.SEQUENCE soch_episodes_id_seq"
+pg_restore: creating ACL "krd.TABLE social_data"
+pg_restore: creating ACL "krd.SEQUENCE social_data_id_seq"
+pg_restore: creating ACL "krd.TABLE statuses"
+pg_restore: creating ACL "krd.SEQUENCE statuses_id_seq"
+pg_restore: creating ACL "krd.TABLE user_roles"
+pg_restore: creating ACL "krd.SEQUENCE user_roles_id_seq"
+pg_restore: creating ACL "krd.TABLE user_settings"
+pg_restore: creating ACL "krd.SEQUENCE user_settings_id_seq"
+pg_restore: creating ACL "krd.TABLE users"
+pg_restore: creating ACL "krd.SEQUENCE users_id_seq"
+pg_restore: creating DEFAULT ACL "krd.DEFAULT PRIVILEGES FOR SEQUENCES"
+pg_restore: from TOC entry 2162; 826 35862 DEFAULT ACL DEFAULT PRIVILEGES FOR SEQUENCES postgres
+pg_restore: error: could not execute query: ERROR:  permission denied to change default privileges
+Command was: ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA krd GRANT SELECT,USAGE ON SEQUENCES TO arm_user;
+
+
+pg_restore: creating DEFAULT ACL "krd.DEFAULT PRIVILEGES FOR TABLES"
+pg_restore: from TOC entry 2161; 826 35861 DEFAULT ACL DEFAULT PRIVILEGES FOR TABLES postgres
+pg_restore: error: could not execute query: ERROR:  permission denied to change default privileges
+Command was: ALTER DEFAULT PRIVILEGES FOR ROLE postgres IN SCHEMA krd GRANT SELECT,INSERT,DELETE,UPDATE ON TABLES TO arm_user;
+
+
+pg_restore: warning: errors ignored on restore: 215

@@ -152,8 +152,9 @@ from PyQt6.QtCore import QDate
 from PyQt6.QtSql import QSqlQuery
 from PyQt6.QtGui import QFont
 from autocomplete_helper import AutocompleteHelper
+from ui_helpers import BaseDialog
 
-class AddressDialog(QDialog):
+class AddressDialog(BaseDialog):
     """Диалог для добавления/редактирования адреса"""
     
     def __init__(self, db_connection, krd_id, address_data=None, parent=None, read_only=False):
@@ -7576,7 +7577,7 @@ class MainWindow(QMainWindow):
     def show_about_dialog(self):
         QMessageBox.about(self, "О программе", 
             "АРМ сотрудника отдела дознания военной комендатуры\n\n"
-            "Версия 1.0 | Магистерская диссертация\n\n"
+            "Версия 1.0.2 | Магистерская диссертация\n\n"
             "Автор-разработчик: Карамашев Александр Владимирович\n"
             "Заказчик / предметный эксперт: Кувандыков Ильдар Султанович\n\n"
             "Проект разработан на основании требований и прототипов интерфейса,\n"
@@ -7675,6 +7676,7 @@ from PyQt6.QtWidgets import (
     QTableWidget, QHeaderView, QAbstractItemView, QMessageBox,
     QComboBox, QDialogButtonBox, QGroupBox, QTableWidgetItem, QCompleter
 )
+from ui_helpers import BaseDialog
 from PyQt6.QtCore import Qt, QByteArray
 from PyQt6.QtSql import QSqlQuery
 from PyQt6.QtGui import QFont
@@ -7692,7 +7694,7 @@ except ImportError:
     DB_COLUMNS_MAP = {}
     def get_field_description(t, c): return c  # Фоллбэк если файл не найден
 
-class MappingEditorDialog(QDialog):
+class MappingEditorDialog(BaseDialog):
     """Отдельное окно для редактирования сопоставлений"""
     def __init__(self, parent=None, krd_id=None, db_connection=None, template_id=None, audit_logger=None):
         super().__init__(parent)
@@ -9462,9 +9464,10 @@ import traceback
 
 from field_selection_dialog import FieldSelectionDialog
 from export_helper import KrdExcelExporter  # ✅ Импортируем экспортер
+from ui_helpers import BaseDialog
 
 
-class ReportConfigDialog(QDialog):
+class ReportConfigDialog(BaseDialog):
     """Диалог настройки конфигурации отчета с БД (только массовый-export)"""
     
     def __init__(self, db_connection, parent=None, template_id=None, audit_logger=None):
@@ -10893,8 +10896,9 @@ class ServicePlacesTab(QWidget):
 # setup_dialog.py
 from PyQt6.QtWidgets import QDialog, QVBoxLayout, QFormLayout, QLineEdit, QPushButton, QMessageBox, QLabel
 from PyQt6.QtSql import QSqlDatabase
+from ui_helpers import BaseDialog
 
-class SetupDialog(QDialog):
+class SetupDialog(BaseDialog):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Настройка подключения к базе данных")
@@ -13379,8 +13383,9 @@ from PyQt6.QtWidgets import (
 )
 from PyQt6.QtGui import QColor
 from PyQt6.QtCore import Qt
+from ui_helpers import BaseDialog
 
-class ThemeSettingsDialog(QDialog):
+class ThemeSettingsDialog(BaseDialog):
     def __init__(self, theme_manager, parent=None):
         super().__init__(parent)
         self.tm = theme_manager
@@ -13704,22 +13709,20 @@ class BaseDialog(QDialog):
     def __init__(self, parent=None):
         super().__init__(parent)
         
-        # 1. Устанавливаем флаги окна, добавляя кнопки Minimize и Maximize
+        # ✅ ИСПРАВЛЕНО: Правильные названия флагов для PyQt6
         self.setWindowFlags(
-            Qt.WindowType.Window |                  # Базовое окно
-            Qt.WindowType.WindowCloseButtonHint |   # Кнопка закрытия
-            Qt.WindowType.WindowMinimizeHint |      # Кнопка свернуть
-            Qt.WindowType.WindowMaximizeHint |      # Кнопка развернуть
-            Qt.WindowType.WindowSystemMenuHint      # Системное меню (правый клик по заголовку)
+            Qt.WindowType.Window |                      # Базовое окно
+            Qt.WindowType.WindowCloseButtonHint |       # Кнопка закрытия
+            Qt.WindowType.WindowMinimizeButtonHint |    # ✅ Кнопка свернуть (исправлено)
+            Qt.WindowType.WindowMaximizeButtonHint |    # ✅ Кнопка развернуть (исправлено)
+            Qt.WindowType.WindowSystemMenuHint          # Системное меню
         )
         
-        # 2. Используем WindowModal. 
-        # Он позволяет разворачивать окно на весь экран, в отличие от ApplicationModal.
+        # Используем WindowModal. Он позволяет разворачивать окно, в отличие от ApplicationModal.
         self.setWindowModality(Qt.WindowModality.WindowModal)
         
-        # 3. Автоматическое удаление из памяти при закрытии (защита от утечек памяти)
+        # Автоматическое удаление из памяти при закрытии
         self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-
 
 # ==============================================================================
 # 2. УТИЛИТЫ ДЛЯ УПРАВЛЕНИЯ ДОСТУПОМ (РОЛЬ ЧИТАТЕЛЯ)
