@@ -1841,6 +1841,18 @@ class ConfigManager:
             return None
 
 ========================================
+📄 FILE: ./convert_icon.py
+========================================
+
+# convert_icon.py
+from PIL import Image
+
+img = Image.open("assets/icon.png")
+img.save("assets/app_icon.ico", format="ICO", 
+         sizes=[(16,16), (32,32), (48,48), (64,64), (128,128), (256,256)])
+print("✅ Иконка готова!")
+
+========================================
 📄 FILE: ./database_handler.py
 ========================================
 
@@ -5086,6 +5098,167 @@ class FieldSelectionDialog(QDialog):
         if hasattr(self, 'template_name_input'):
             return self.template_name_input.text().strip()
         return self.template_name
+
+========================================
+📄 FILE: ./generation_1000_records.py
+========================================
+
+import psycopg2
+import random
+from datetime import datetime, timedelta
+
+# Параметры подключения (взяты из вашего project_code_context.txt)
+DB_PARAMS = {
+    "host": "localhost",
+    "port": 5432,
+    "dbname": "krd_system",
+    "user": "arm_user",
+    "password": "ArmUserSecurePass2026!"
+}
+
+# Массивы для генерации реалистичных данных
+SURNAMES = ['Иванов', 'Петров', 'Сидоров', 'Смирнов', 'Кузнецов', 'Попов', 'Васильев', 'Соколов', 'Михайлов', 'Новиков']
+NAMES = ['Александр', 'Дмитрий', 'Максим', 'Сергей', 'Андрей', 'Алексей', 'Артём', 'Илья', 'Кирилл', 'Михаил']
+PATRONYMICS = ['Александрович', 'Дмитриевич', 'Максимович', 'Сергеевич', 'Андреевич', 'Алексеевич', 'Иванович', 'Петрович']
+REGIONS = ['Московская область', 'Свердловская область', 'Новосибирская область', 'Краснодарский край', 'Ростовская область']
+TOWNS = ['Москва', 'Екатеринбург', 'Новосибирск', 'Краснодар', 'Ростов-на-Дону']
+STREETS = ['ул. Ленина', 'пр. Мира', 'ул. Советская', 'ул. Гагарина', 'пер. Тихий', 'б-р Победы']
+
+def seed_reference_data(cur):
+    """Добавляет базовые записи в справочники, если они пустые, чтобы избежать ошибок FK"""
+    tables_to_seed = {
+        "krd.statuses": [("В розыске",), ("Разыскан",), ("Приостановлен",)],
+        "krd.categories": [("Солдаты срочной службы",), ("Контрактники",), ("Офицеры",), ("Курсанты",)],
+        "krd.ranks": [("Рядовой",), ("Ефрейтор",), ("Сержант",), ("Лейтенант",), ("Капитан",)],
+        "krd.military_units": [("ЦВО",), ("ЮВО",), ("ЗВО",), ("ВДВ",)],
+        "krd.garrisons": [("г. Москва",), ("г. Екатеринбург",), ("г. Краснодар",)],
+        "krd.positions": [("Стрелок",), ("Водитель",), ("Командир отделения",), ("Начальник штаба",)]
+    }
+    
+    for table, values in tables_to_seed.items():
+        cur.execute(f"SELECT COUNT(*) FROM {table}")
+        if cur.fetchone()[0] == 0:
+            # Используем ON CONFLICT DO NOTHING на случай, если имя уже есть (для таблиц с UNIQUE)
+            # Но для простоты здесь используем обычный INSERT, так как мы проверили COUNT(*) == 0
+            cols = ", ".join(["name"] * len(values[0])) # Обычно это просто 'name'
+            placeholders = ", ".join(["%s"] * len(values[0]))
+            query = f"INSERT INTO {table} (name) VALUES ({placeholders})"
+            for val in values:
+                cur.execute(query, val)
+    print("✅ Справочные данные проверены и при необходимости заполнены.")
+
+def get_valid_ids(cur):
+    """Получает списки реальных ID из справочников, чтобы не нарушать FK"""
+    ids = {}
+    for table in ['statuses', 'categories', 'ranks', 'military_units', 'garrisons', 'positions']:
+        cur.execute(f"SELECT id FROM krd.{table}")
+        ids[table] = [row[0] for row in cur.fetchall()]
+        
+        # Если вдруг таблица всё равно пуста, добавим заглушку, чтобы random.choice не упал
+        if not ids[table]:
+            cur.execute(f"INSERT INTO krd.{table} (name) VALUES ('Не указано') RETURNING id")
+            ids[table] = [cur.fetchone()[0]]
+            
+    return ids
+
+def generate_krd_records(num_records=1000):
+    print("🔌 Подключение к базе данных...")
+    conn = psycopg2.connect(**DB_PARAMS)
+    cur = conn.cursor()
+    
+    try:
+        print("⚙️ Подготовка справочников...")
+        seed_reference_data(cur)
+        valid_ids = get_valid_ids(cur)
+        conn.commit()
+        
+        print(f"🚀 Начало генерации {num_records} записей КРД...")
+        
+        for i in range(1, num_records + 1):
+            # 1. Создаем основную запись КРД
+            cur.execute("""
+                INSERT INTO krd.krd (status_id, is_deleted, is_locked) 
+                VALUES (%s, %s, %s) RETURNING id
+            """, (random.choice(valid_ids['statuses']), False, random.random() > 0.9))
+            krd_id = cur.fetchone()[0]
+            
+            # 2. Социально-демографические данные (ИСПОЛЬЗУЕМ РЕАЛЬНЫЕ ID!)
+            birth_date = datetime.now() - timedelta(days=random.randint(5000, 15000))
+            cur.execute("""
+                INSERT INTO krd.social_data (
+                    krd_id, surname, name, patronymic, birth_date, 
+                    birth_place_town, birth_place_region, personal_number, rank_id, category_id
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                krd_id,
+                random.choice(SURNAMES),
+                random.choice(NAMES),
+                random.choice(PATRONYMICS),
+                birth_date,
+                random.choice(TOWNS),
+                random.choice(REGIONS),
+                f"П{random.randint(100000, 999999)}",
+                random.choice(valid_ids['ranks']),       # <-- Реальный ID
+                random.choice(valid_ids['categories'])   # <-- Реальный ID
+            ))
+            
+            # 3. Адрес проживания
+            cur.execute("""
+                INSERT INTO krd.addresses (
+                    krd_id, region, district, town, street, house, apartment, postal_index, is_deleted
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)
+            """, (
+                krd_id,
+                random.choice(REGIONS),
+                'Центральный район',
+                random.choice(TOWNS),
+                random.choice(STREETS),
+                str(random.randint(1, 150)),
+                str(random.randint(1, 200)),
+                f"{random.randint(100000, 999999)}",
+                False
+            ))
+            
+            # 4. Место службы
+            unit_num = f"в/ч {random.randint(10000, 99999)}"
+            cur.execute("""
+                INSERT INTO krd.service_places (
+                    krd_id, place_name, military_unit_id, garrison_id, position_id, military_unit_number, is_deleted
+                ) VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id
+            """, (
+                krd_id,
+                unit_num,
+                random.choice(valid_ids['military_units']), # <-- Реальный ID
+                random.choice(valid_ids['garrisons']),      # <-- Реальный ID
+                random.choice(valid_ids['positions']),      # <-- Реальный ID
+                unit_num,
+                False
+            ))
+            service_place_id = cur.fetchone()[0]
+            
+            # 5. Обновляем КРД ссылкой на место службы
+            cur.execute("""
+                UPDATE krd.krd SET last_service_place_id = %s WHERE id = %s
+            """, (service_place_id, krd_id))
+            
+            # Коммитим каждые 100 записей для экономии памяти и отображения прогресса
+            if i % 100 == 0:
+                conn.commit()
+                print(f"   ✅ Создано {i} из {num_records} записей...")
+                
+        # Финальный коммит
+        conn.commit()
+        print(f"\n🎉 УСПЕХ! Успешно создано {num_records} полных записей КРД со всеми связанными данными.")
+        
+    except Exception as e:
+        conn.rollback()
+        print(f"\n❌ ОШИБКА: {e}")
+    finally:
+        cur.close()
+        conn.close()
+
+if __name__ == "__main__":
+    generate_krd_records(1000)
 
 ========================================
 📄 FILE: ./generation_code_text.py
@@ -10074,6 +10247,7 @@ class RequestFilterProxyModel(QSortFilterProxyModel):
 import sys
 import os
 from PyQt6.QtWidgets import QApplication, QMessageBox
+from PyQt6.QtGui import QIcon
 from config_manager import ConfigManager
 from db_connector import DatabaseConnector
 from login_window import LoginWindow
@@ -10083,6 +10257,16 @@ from setup_dialog import SetupDialog
 # ✅ ИМПОРТИРУЕМ НАШ ГЛОБАЛЬНЫЙ ПЕРЕХВАТЧИК
 from logger import init_global_logging
 
+def get_resource_path(relative_path):
+    """Возвращает корректный путь к файлу: работает и при запуске .py, и в собранном .exe"""
+    if getattr(sys, 'frozen', False):
+        # PyInstaller распаковывает файлы во временную папку
+        base_path = sys._MEIPASS
+    else:
+        # Обычный запуск из Python
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
 def main():
     # ✅ 1. ИНИЦИАЛИЗИРУЕМ ПЕРЕХВАТ ВСЕХ ОШИБОК ПЕРВЫМ ДЕЛОМ
     init_global_logging()
@@ -10090,6 +10274,14 @@ def main():
     try:
         app = QApplication(sys.argv)
         app.setApplicationName("АРМ Сотрудника дознания")
+        
+        # 🎨 УСТАНОВКА ИКОНКИ ПРИЛОЖЕНИЯ
+        icon_path = get_resource_path("assets/app_icon.ico")
+        if os.path.exists(icon_path):
+            app.setWindowIcon(QIcon(icon_path))
+            print(f"✅ Иконка приложения установлена: {icon_path}")
+        else:
+            print(f"⚠️ Иконка не найдена по пути: {icon_path}")
         
         config_manager = ConfigManager()
         db_config = config_manager.load_config()
@@ -10133,6 +10325,11 @@ def main():
         # 5. Если подключение успешно — запускаем приложение
         db = connector.get_connection()
         login_window = LoginWindow(db)
+        
+        # 🎨 УСТАНОВКА ИКОНКИ ДЛЯ ОКНА АВТОРИЗАЦИИ
+        if os.path.exists(icon_path):
+            login_window.setWindowIcon(QIcon(icon_path))
+        
         main_window = None
 
         def open_main_window(user_info):
@@ -10145,6 +10342,11 @@ def main():
                 
                 main_window = MainWindow(user_info, db)
                 main_window.theme_manager = tm
+                
+                # 🎨 УСТАНОВКА ИКОНКИ ДЛЯ ГЛАВНОГО ОКНА
+                if os.path.exists(icon_path):
+                    main_window.setWindowIcon(QIcon(icon_path))
+                
                 main_window.show()
                 login_window.close()
             except Exception as e:
@@ -10160,6 +10362,7 @@ def main():
         
     except Exception as e:
         # Перехват фатальных ошибок на самом раннем этапе запуска
+        import logging
         logging.getLogger("KRD_Application").critical("ФАТАЛЬНАЯ ОШИБКА на этапе запуска приложения", exc_info=True)
         QMessageBox.critical(None, "Фатальная ошибка", f"Приложение не может быть запущено:\n\n{e}\n\nПодробности записаны в файл app_errors.log")
         sys.exit(1)
@@ -15097,92 +15300,3 @@ hashed = bcrypt.hashpw(my_password.encode('utf-8'), bcrypt.gensalt())
 
 # Выведите результат
 print(hashed.decode('utf-8'))
-
-========================================
-📄 FILE: ./Пояснительная записка к диплому/Пояснительная записка к диплому/generation.py
-========================================
-
-import re
-from docx import Document
-from docx.shared import Pt
-from docx.enum.text import WD_COLOR_INDEX
-
-def fix_citations_in_report(input_path: str, output_path: str):
-    doc = Document(input_path)
-
-    # 🔍 Карта внедрения: (уникальная фраза из текста, правильная ссылка)
-    # Фразы подобраны так, чтобы совпадать только с нужными абзацами
-    CITATION_MAP = [
-        ("Федерального закона № 152-ФЗ «О персональных данных»", "[2]"),
-        ("Федеральным законом «О военной полиции и органах военной юстиции в ВС РФ»", "[1]"),
-        ("приказам ФСТЭК", "[4], [5]"),
-        ("требования информационной безопасности устанавливают", "[5], [25]"),
-        ("ГОСТ 34.602-89", "[9]"),
-        ("гибкого управления проектами", "[10], [11]"),
-        ("обработки конфиденциальных данных", "[12], [13]"),
-        ("криптографическое хеширование паролей", "[24]"),
-        ("надёжность алгоритмов", "[15], [31]"),
-        ("аномалий обновления", "[17], [18]"),
-        ("сквозного аудита", "[19]"),
-        ("производительность запросов", "[20], [31]"),
-        ("парадигмы и MVC", "[21]"),
-        ("прерывания экспорта", "[32]"),
-        ("соблюдением паттерна MVC", "[23]"),
-        ("импортозамещения", "[28], [29]"),
-        ("3 нормальной форме", "[17]"),
-        ("устойчивость к инъекционным атакам", "[26]"),
-        ("Процесс верификации реализован", "[27]")
-    ]
-
-    # Регулярка для удаления старых черновых ссылок вида [1], [4, 5] и т.д.
-    OLD_REF_RE = re.compile(r'\s*\[\d+(?:,\s*\d+)*\]\s*')
-
-    processed_count = 0
-
-    for para in doc.paragraphs:
-        if not para.text.strip():
-            continue
-
-        text = para.text
-
-        # 1️⃣ Удаляем старые ссылки, чтобы избежать дублирования
-        text = OLD_REF_RE.sub(' ', text)
-        text = re.sub(r'\s+', ' ', text)  # нормализуем пробелы
-
-        # 2️⃣ Вставляем маркеры новых ссылок после целевых фраз
-        for phrase, ref in CITATION_MAP:
-            if phrase in text:
-                # Заменяем только первое вхождение фразы в абзаце
-                text = text.replace(phrase, phrase + f" __CIT_{ref}__", 1)
-                processed_count += 1
-
-        # 3️⃣ Пересобираем параграф, сохраняя стиль и выравнивание
-        style_name = para.style.name
-        alignment = para.alignment
-        para.clear()
-        para.style = style_name
-        if alignment:
-            para.alignment = alignment
-
-        # 4️⃣ Разбиваем текст по маркерам и создаём Run-объекты
-        parts = re.split(r'(__CIT_.*?__)', text)
-        for part in parts:
-            if part.startswith("__CIT_") and part.endswith("__"):
-                # Извлекаем чистую ссылку [X]
-                clean_ref = f"[{part[6:-2]}]"
-                run = para.add_run(clean_ref)
-                run.font.highlight_color = WD_COLOR_INDEX.YELLOW
-                run.bold = True
-                run.font.size = Pt(10)  # немного уменьшаем для аккуратности
-            else:
-                para.add_run(part)
-
-    doc.save(output_path)
-    print(f"✅ Обработано параграфов: {len(doc.paragraphs)}")
-    print(f"📌 Вставлено ссылок: {processed_count}")
-    print(f"💾 Результат сохранён: {output_path}")
-
-if __name__ == "__main__":
-    INPUT_FILE = "Отчет о преддипломной практике.docx"
-    OUTPUT_FILE = "Отчет_практика_исправленный.docx"
-    fix_citations_in_report(INPUT_FILE, OUTPUT_FILE)

@@ -10,7 +10,7 @@ jobs:
     runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-      
+
       - name: Setup Python 3.11
         uses: actions/setup-python@v5
         with:
@@ -21,22 +21,29 @@ jobs:
         run: |
           python -m pip install --upgrade pip
           pip install -r requirements.txt
-          pip install pyinstaller
+          pip install pyinstaller Pillow
 
-      - name: Download PostgreSQL libpq.dll (required for QPSQL)
+      - name: Download PostgreSQL libpq.dll
         run: |
-          # Скачиваем минимальный набор DLL для Qt SQL драйвера
-          curl -L -o libpq.dll "https://ftp.postgresql.org/pub/binary/v16.13/win32/libpq-16.13-1.zip"
-          powershell -Command "Expand-Archive -Path libpq.dll -DestinationPath . -Force"
-          Remove-Item libpq.dll
+          curl -L -o libpq.zip "https://ftp.postgresql.org/pub/binary/v16.13/win32/libpq-16.13-1.zip"
+          powershell -Command "Expand-Archive -Path libpq.zip -DestinationPath . -Force"
+          Remove-Item libpq.zip
+
+      - name: Verify icon exists
+        run: |
+          if (Test-Path "assets/app_icon.ico") {
+            Write-Host "✅ Иконка найдена: assets/app_icon.ico"
+          } else {
+            Write-Host "❌ Иконка НЕ найдена! Сборка продолжится без иконки."
+          }
 
       - name: Build EXE with PyInstaller
         run: |
           pyinstaller --onefile --windowed --name "ARM_Doznanie" `
                       --icon=assets/app_icon.ico `
+                      --add-data "assets/app_icon.ico;assets" `
                       --collect-all PyQt6 `
                       --add-data "config;config" `
-                      --add-data "assets/app_icon.ico;assets" `
                       --add-binary "libpq.dll;." `
                       --hidden-import bcrypt `
                       --hidden-import cryptography.fernet `

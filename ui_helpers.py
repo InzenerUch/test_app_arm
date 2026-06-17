@@ -50,7 +50,7 @@ class BaseDialog(QDialog):
         self.setWindowModality(Qt.WindowModality.WindowModal)
         
         # Автоматическое удаление из памяти при закрытии
-        self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        # self.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
 
 # ==============================================================================
 # 2. УТИЛИТЫ ДЛЯ УПРАВЛЕНИЯ ДОСТУПОМ (РОЛЬ ЧИТАТЕЛЯ)
