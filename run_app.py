@@ -2,6 +2,7 @@
 import sys
 import os
 from PyQt6.QtWidgets import QApplication, QMessageBox
+from PyQt6.QtGui import QIcon
 from config_manager import ConfigManager
 from db_connector import DatabaseConnector
 from login_window import LoginWindow
@@ -11,6 +12,16 @@ from setup_dialog import SetupDialog
 # ✅ ИМПОРТИРУЕМ НАШ ГЛОБАЛЬНЫЙ ПЕРЕХВАТЧИК
 from logger import init_global_logging
 
+def get_resource_path(relative_path):
+    """Возвращает корректный путь к файлу: работает и при запуске .py, и в собранном .exe"""
+    if getattr(sys, 'frozen', False):
+        # PyInstaller распаковывает файлы во временную папку
+        base_path = sys._MEIPASS
+    else:
+        # Обычный запуск из Python
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
 def main():
     # ✅ 1. ИНИЦИАЛИЗИРУЕМ ПЕРЕХВАТ ВСЕХ ОШИБОК ПЕРВЫМ ДЕЛОМ
     init_global_logging()
@@ -18,6 +29,14 @@ def main():
     try:
         app = QApplication(sys.argv)
         app.setApplicationName("АРМ Сотрудника дознания")
+        
+        # 🎨 УСТАНОВКА ИКОНКИ ПРИЛОЖЕНИЯ
+        icon_path = get_resource_path("assets/app_icon.ico")
+        if os.path.exists(icon_path):
+            app.setWindowIcon(QIcon(icon_path))
+            print(f"✅ Иконка приложения установлена: {icon_path}")
+        else:
+            print(f"⚠️ Иконка не найдена по пути: {icon_path}")
         
         config_manager = ConfigManager()
         db_config = config_manager.load_config()
@@ -61,6 +80,11 @@ def main():
         # 5. Если подключение успешно — запускаем приложение
         db = connector.get_connection()
         login_window = LoginWindow(db)
+        
+        # 🎨 УСТАНОВКА ИКОНКИ ДЛЯ ОКНА АВТОРИЗАЦИИ
+        if os.path.exists(icon_path):
+            login_window.setWindowIcon(QIcon(icon_path))
+        
         main_window = None
 
         def open_main_window(user_info):
@@ -73,6 +97,11 @@ def main():
                 
                 main_window = MainWindow(user_info, db)
                 main_window.theme_manager = tm
+                
+                # 🎨 УСТАНОВКА ИКОНКИ ДЛЯ ГЛАВНОГО ОКНА
+                if os.path.exists(icon_path):
+                    main_window.setWindowIcon(QIcon(icon_path))
+                
                 main_window.show()
                 login_window.close()
             except Exception as e:
@@ -88,6 +117,7 @@ def main():
         
     except Exception as e:
         # Перехват фатальных ошибок на самом раннем этапе запуска
+        import logging
         logging.getLogger("KRD_Application").critical("ФАТАЛЬНАЯ ОШИБКА на этапе запуска приложения", exc_info=True)
         QMessageBox.critical(None, "Фатальная ошибка", f"Приложение не может быть запущено:\n\n{e}\n\nПодробности записаны в файл app_errors.log")
         sys.exit(1)

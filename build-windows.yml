@@ -33,8 +33,10 @@ jobs:
       - name: Build EXE with PyInstaller
         run: |
           pyinstaller --onefile --windowed --name "ARM_Doznanie" `
+                      --icon=assets/app_icon.ico `
                       --collect-all PyQt6 `
                       --add-data "config;config" `
+                      --add-data "assets/app_icon.ico;assets" `
                       --add-binary "libpq.dll;." `
                       --hidden-import bcrypt `
                       --hidden-import cryptography.fernet `

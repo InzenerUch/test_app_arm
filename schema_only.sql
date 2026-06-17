@@ -2,7 +2,7 @@
 -- PostgreSQL database dump
 --
 
-\restrict OzeazLUpjJjo4CU9mvebXjvMYc8sIaATU73uYD1h78PLzr97zVjKAxDOJ34KamF
+\restrict CkwXeMfjoT6gKSqzvIzNLmUK29rD6dPpQBfvfurLMaE0GkVGwaZgxFbvMdMuYQ7
 
 -- Dumped from database version 16.14 (Ubuntu 16.14-0ubuntu0.24.04.1)
 -- Dumped by pg_dump version 16.14 (Ubuntu 16.14-0ubuntu0.24.04.1)
@@ -750,7 +750,8 @@ CREATE TABLE krd.outgoing_requests (
     response_date date,
     response_number character varying(100),
     response_data bytea,
-    response_status character varying(50) DEFAULT 'Ожидание'::character varying
+    response_status character varying(50) DEFAULT 'Ожидание'::character varying,
+    signatory_id integer
 );
 
 
@@ -1163,6 +1164,48 @@ CREATE SEQUENCE krd.service_places_id_seq
 --
 
 ALTER SEQUENCE krd.service_places_id_seq OWNED BY krd.service_places.id;
+
+
+--
+-- Name: signatories; Type: TABLE; Schema: krd; Owner: -
+--
+
+CREATE TABLE krd.signatories (
+    id integer NOT NULL,
+    full_name character varying(255) NOT NULL,
+    "position" character varying(255) NOT NULL,
+    rank character varying(100),
+    garrison character varying(100),
+    is_deleted boolean DEFAULT false,
+    created_at timestamp without time zone DEFAULT CURRENT_TIMESTAMP
+);
+
+
+--
+-- Name: TABLE signatories; Type: COMMENT; Schema: krd; Owner: -
+--
+
+COMMENT ON TABLE krd.signatories IS 'Справочник должностных лиц, подписывающих документы';
+
+
+--
+-- Name: signatories_id_seq; Type: SEQUENCE; Schema: krd; Owner: -
+--
+
+CREATE SEQUENCE krd.signatories_id_seq
+    AS integer
+    START WITH 1
+    INCREMENT BY 1
+    NO MINVALUE
+    NO MAXVALUE
+    CACHE 1;
+
+
+--
+-- Name: signatories_id_seq; Type: SEQUENCE OWNED BY; Schema: krd; Owner: -
+--
+
+ALTER SEQUENCE krd.signatories_id_seq OWNED BY krd.signatories.id;
 
 
 --
@@ -1684,6 +1727,13 @@ ALTER TABLE ONLY krd.service_places ALTER COLUMN id SET DEFAULT nextval('krd.ser
 
 
 --
+-- Name: signatories id; Type: DEFAULT; Schema: krd; Owner: -
+--
+
+ALTER TABLE ONLY krd.signatories ALTER COLUMN id SET DEFAULT nextval('krd.signatories_id_seq'::regclass);
+
+
+--
 -- Name: soch_episodes id; Type: DEFAULT; Schema: krd; Owner: -
 --
 
@@ -1875,6 +1925,14 @@ ALTER TABLE ONLY krd.request_types
 
 ALTER TABLE ONLY krd.service_places
     ADD CONSTRAINT service_places_pkey PRIMARY KEY (id);
+
+
+--
+-- Name: signatories signatories_pkey; Type: CONSTRAINT; Schema: krd; Owner: -
+--
+
+ALTER TABLE ONLY krd.signatories
+    ADD CONSTRAINT signatories_pkey PRIMARY KEY (id);
 
 
 --
@@ -2177,6 +2235,14 @@ ALTER TABLE ONLY krd.krd
 
 
 --
+-- Name: outgoing_requests fk_outgoing_requests_signatory; Type: FK CONSTRAINT; Schema: krd; Owner: -
+--
+
+ALTER TABLE ONLY krd.outgoing_requests
+    ADD CONSTRAINT fk_outgoing_requests_signatory FOREIGN KEY (signatory_id) REFERENCES krd.signatories(id) ON DELETE SET NULL;
+
+
+--
 -- Name: report_templates fk_report_templates_deleted_by; Type: FK CONSTRAINT; Schema: krd; Owner: -
 --
 
@@ -2372,5 +2438,5 @@ ALTER TABLE ONLY krd.users
 -- PostgreSQL database dump complete
 --
 
-\unrestrict OzeazLUpjJjo4CU9mvebXjvMYc8sIaATU73uYD1h78PLzr97zVjKAxDOJ34KamF
+\unrestrict CkwXeMfjoT6gKSqzvIzNLmUK29rD6dPpQBfvfurLMaE0GkVGwaZgxFbvMdMuYQ7
 
